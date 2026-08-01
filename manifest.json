@@ -4,7 +4,7 @@
   "version": "1.0",
   "default_locale": "zh_CN",
   "description": "__MSG_extDesc__",
-  "permissions": ["scripting", "sidePanel", "storage", "activeTab"],
+  "permissions": ["scripting", "sidePanel", "storage", "activeTab", "windows"],
   "host_permissions": ["https://www.mgtv.com/*", "https://*.mgtv.com/*"],
   "optional_host_permissions": ["<all_urls>"],
   "content_scripts": [{

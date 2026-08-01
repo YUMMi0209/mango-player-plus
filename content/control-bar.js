@@ -345,6 +345,7 @@
   function startLoop() {
     function tick() {
       if (!video) return requestAnimationFrame(tick);
+      enforceSpeed();
       const cf = Math.floor(video.currentTime * FPS);
       if (cf !== lastTCFrame) { lastTCFrame = cf; updateTC(); }
       requestAnimationFrame(tick);
@@ -682,6 +683,9 @@
   function speedUp() { if (!video) return; setSpeed(Math.min(16, curSpeed * 2)); if (video.paused) video.play().catch(()=>{}); }
   function speedDown() { if (!video) return; setSpeed(Math.max(0.25, curSpeed / 2)); if (video.paused) video.play().catch(()=>{}); }
   function resetSpeed() { curSpeed = 1; if (video) video.playbackRate = 1; }
+  // 网络波动/播放器重建可能把 playbackRate 重置为 1，但状态仍应保持设定倍速：
+  // 每帧校验实际倍速，偏离时按 curSpeed 重新应用，避免"标签显示 8X 实际却 1X"
+  function enforceSpeed() { if (!video) return; if (curSpeed !== 1 && Math.abs(video.playbackRate - curSpeed) > 0.01) video.playbackRate = curSpeed; }
   function jumpIn() { if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = state.inPoint; video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
   function jumpOut() { if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = state.outPoint; video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
@@ -691,9 +695,9 @@
     if (!video) return;
 
     // JKL navigation
-    if (!e.shiftKey && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); if (video.paused) { video.play().catch(()=>{}); resetSpeed(); } speedDown(); return; }
+    if (!e.shiftKey && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); if (video.paused) video.play().catch(()=>{}); speedDown(); return; }
     if (!e.shiftKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); video.paused ? video.play().catch(()=>{}) : video.pause(); resetSpeed(); return; }
-    if (!e.shiftKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); if (video.paused) { video.play().catch(()=>{}); resetSpeed(); } else { speedUp(); } return; }
+    if (!e.shiftKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); if (video.paused) video.play().catch(()=>{}); speedUp(); return; }
     if (!e.shiftKey && e.key === ' ') { e.preventDefault(); resetSpeed(); return; }
 
     // Shift combos

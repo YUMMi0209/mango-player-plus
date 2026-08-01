@@ -1,8 +1,6 @@
 /* 芒着拉片 · 分屏侧边栏（上下堆叠 + 自动刷新） */
 'use strict';
 
-const $ = s => document.querySelector(s);
-
 (async function setup() {
   MPP.init({
     mkList: '#mk-list',
@@ -17,6 +15,8 @@ const $ = s => document.querySelector(s);
     btnRefresh: '#btn-refresh',
     btnSettings: '#btn-settings',
     settingsMenu: '#settings-menu',
+    btnMode: '#btn-mode',
+    modeMenu: '#mode-menu',
     togEnabled: '#tog-enabled',
     togAll: '#tog-all',
     togTheme: '#tog-theme',
@@ -25,12 +25,6 @@ const $ = s => document.querySelector(s);
     err: '#err',
     wrap: '#wrap',
     footer: 'footer'
-  });
-
-  $('#btn-back').addEventListener('click', async () => {
-    await chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
-    try { await chrome.action.openPopup(); } catch (e) { }
-    window.close();
   });
 
   MPP.load(true);

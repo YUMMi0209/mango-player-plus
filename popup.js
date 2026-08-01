@@ -17,6 +17,8 @@ MPP.init({
   btnRefresh: '#btn-refresh',
   btnSettings: '#btn-settings',
   settingsMenu: '#settings-menu',
+  btnMode: '#btn-mode',
+  modeMenu: '#mode-menu',
   togEnabled: '#tog-enabled',
   togAll: '#tog-all',
   togTheme: '#tog-theme',
@@ -37,16 +39,6 @@ function setTab(t) {
 $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('.tab');
   if (b) setTab(b.dataset.tab);
-});
-
-// ─── 切换分屏模式（打开浏览器侧边栏）──────────
-$('#btn-side').addEventListener('click', async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    await chrome.action.setPopup({ popup: '' }).catch(() => { });
-    if (tab && tab.id != null) await chrome.sidePanel.open({ tabId: tab.id });
-  } catch (e) { }
-  window.close();
 });
 
 // ─── 启动 ───────────────────────────────────

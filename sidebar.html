@@ -15,9 +15,14 @@
       <button id="btn-refresh" title="刷新">
         <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>
       </button>
-      <button id="btn-back" title="切回弹窗模式">
-        <svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><line x1="2.5" y1="6" x2="13.5" y2="6"/></svg>
+      <button id="btn-mode" title="切换显示模式">
+        <svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
       </button>
+    </div>
+    <div id="mode-menu" hidden>
+      <button type="button" class="mode-item" data-mode="popup">弹窗模式</button>
+      <button type="button" class="mode-item" data-mode="sidebar">分屏模式</button>
+      <button type="button" class="mode-item" data-mode="window">独立窗口模式<span class="set-tag">实验</span></button>
     </div>
     <div id="settings-menu" hidden>
       <div class="set-row">

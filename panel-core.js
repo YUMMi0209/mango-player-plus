@@ -3,8 +3,19 @@
 
 const MPP = (() => {
   // ─── 注入页面 MAIN world 执行（自包含）──────
+  // 弹窗/分屏：当前窗口即视频所在窗口；独立窗口：当前窗口是扩展窗口，
+  // 需回退到最近活跃的 http(s) 标签页（优先芒果TV）拿到视频页
   function findTab() {
-    return chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => tabs && tabs[0]);
+    return chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
+      const t = tabs && tabs[0];
+      if (t && t.id != null && t.url && /^https?:/.test(t.url)) return t;
+      return chrome.tabs.query({}).then(all => {
+        const cands = all.filter(t => t.id != null && t.url && /^https?:/.test(t.url));
+        cands.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+        const mgtv = cands.find(t => /mgtv\.com/.test(t.url));
+        return (mgtv || cands[0]) || null;
+      });
+    });
   }
 
   function execInPage(func, args) {
@@ -221,6 +232,8 @@ const MPP = (() => {
     els.btnRefresh = $(cfg.btnRefresh);
     els.btnSettings = $(cfg.btnSettings);
     els.settingsMenu = $(cfg.settingsMenu);
+    els.btnMode = $(cfg.btnMode);
+    els.modeMenu = $(cfg.modeMenu);
     els.togEnabled = $(cfg.togEnabled);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
@@ -229,6 +242,7 @@ const MPP = (() => {
     els.err = $(cfg.err);
     els.wrap = $(cfg.wrap);
     els.footer = $(cfg.footer);
+    if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
     bindList(els.mkList);
     if (els.ioList !== els.mkList) bindList(els.ioList);
     els.btnAll.addEventListener('click', toggleAll);
@@ -237,6 +251,7 @@ const MPP = (() => {
     els.btnRefresh.addEventListener('click', refresh);
     if (els.btnClearAll) els.btnClearAll.addEventListener('click', clearAll);
     bindSettings();
+    bindModeMenu();
     bindCollapse();
     bindSelectAll();
   }
@@ -539,6 +554,56 @@ const MPP = (() => {
     return 'MPP_logs_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + '.xlsx';
   }
 
+  // ─── 显示模式切换（弹窗 / 分屏 / 独立窗口）────
+  function isWindowMode() {
+    try { return new URLSearchParams(location.search).get('win') === '1'; } catch (e) { return false; }
+  }
+  function openSidebarMode() {
+    chrome.action.setPopup({ popup: '' }).catch(() => { });
+    return findTab().then(t => {
+      if (t && t.id != null) return chrome.sidePanel.open({ tabId: t.id }).catch(() => { });
+    });
+  }
+  function openWindowMode() {
+    // 独立窗口：复用侧边栏布局，以紧凑 popup 窗口打开（无地址栏/标签栏，近似 QQ 登录小窗）
+    return chrome.windows.create({
+      url: 'sidebar.html?win=1',
+      type: 'popup',
+      width: 430,
+      height: 680,
+      focused: true
+    }).catch(() => { });
+  }
+  function openPopupMode() {
+    chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
+    return chrome.action.openPopup().catch(() => { });
+  }
+  function bindModeMenu() {
+    if (!els.btnMode || !els.modeMenu) return;
+    els.btnMode.addEventListener('click', e => {
+      e.stopPropagation();
+      if (els.settingsMenu) els.settingsMenu.hidden = true;
+      els.modeMenu.hidden = !els.modeMenu.hidden;
+    });
+    document.addEventListener('click', e => {
+      if (els.modeMenu.hidden) return;
+      if (!e.target.closest('#mode-menu') && !e.target.closest('#btn-mode')) els.modeMenu.hidden = true;
+    });
+    const cur = isWindowMode() ? 'window'
+      : document.body.classList.contains('pg-sidebar') ? 'sidebar' : 'popup';
+    els.modeMenu.querySelectorAll('.mode-item').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === cur);
+    });
+    els.modeMenu.addEventListener('click', e => {
+      const item = e.target.closest('.mode-item');
+      if (!item || item.dataset.mode === cur) { els.modeMenu.hidden = true; return; }
+      els.modeMenu.hidden = true;
+      const mode = item.dataset.mode;
+      const done = mode === 'sidebar' ? openSidebarMode() : mode === 'window' ? openWindowMode() : openPopupMode();
+      done.finally(() => { try { window.close(); } catch (e) { } });
+    });
+  }
+
   // ─── 设置菜单 ───────────────────────────────
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
@@ -548,6 +613,7 @@ const MPP = (() => {
     if (!els.btnSettings || !els.settingsMenu) return;
     els.btnSettings.addEventListener('click', e => {
       e.stopPropagation();
+      if (els.modeMenu) els.modeMenu.hidden = true;
       els.settingsMenu.hidden = !els.settingsMenu.hidden;
     });
     document.addEventListener('click', e => {
