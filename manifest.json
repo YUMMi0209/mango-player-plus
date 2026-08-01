@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "1.0",
+  "default_locale": "zh_CN",
+  "description": "__MSG_extDesc__",
+  "permissions": ["scripting", "sidePanel", "storage", "activeTab"],
+  "host_permissions": ["https://www.mgtv.com/*", "https://*.mgtv.com/*"],
+  "optional_host_permissions": ["<all_urls>"],
+  "content_scripts": [{
+    "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "<all_urls>"],
+    "js": ["content/content.js", "content/control-bar.js"],
+    "run_at": "document_idle",
+    "world": "MAIN"
+  }],
+"action": {
+    "default_title": "芒着拉片 | MG Player+",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidebar.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png",
+    "256": "icons/icon256.png"
+  }
+}

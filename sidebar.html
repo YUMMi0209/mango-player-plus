@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>芒着拉片 · 分屏记录</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body class="pg-sidebar">
+  <header>
+    <div class="brand">记录</div>
+    <div class="hdr-btns">
+      <button id="btn-settings" title="设置">
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.7v1.8M8 12.5v1.8M1.7 8h1.8M12.5 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3"/></svg>
+      </button>
+      <button id="btn-refresh" title="刷新">
+        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>
+      </button>
+      <button id="btn-back" title="切回弹窗模式">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><line x1="2.5" y1="6" x2="13.5" y2="6"/></svg>
+      </button>
+    </div>
+    <div id="settings-menu" hidden>
+      <div class="set-row">
+        <span class="set-label">插件开关</span>
+        <label class="switch"><input type="checkbox" id="tog-enabled"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">亮色模式</span>
+        <label class="switch"><input type="checkbox" id="tog-theme"><span class="track"></span></label>
+      </div>
+      <div class="set-row" id="set-row-all">
+        <div class="set-lbl">
+          <span class="set-label">应用于当前网页<span class="set-tag">实验</span></span>
+        </div>
+        <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
+      </div>
+      <div class="set-danger">
+        <button id="btn-clearall" type="button" class="clear-all-btn" title="清除所有记录">
+          <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>
+          清除所有记录
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div id="err" class="err" hidden>请在芒果TV视频页面打开此面板<br>（当前页面无法访问视频）</div>
+
+  <div id="wrap">
+    <section class="card" id="mk-sec">
+      <div class="sec-head">
+        <button class="collapse" title="收起/展开">
+          <svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+        <span class="sec-name">标记点</span>
+        <span class="grow"></span>
+        <span class="tag" data-set="mk" title="点击全选"><span class="cnt" id="cnt-mk">0</span></span>
+      </div>
+      <div class="list" id="mk-list"></div>
+    </section>
+    <section class="card" id="io-sec">
+      <div class="sec-head">
+        <button class="collapse" title="收起/展开">
+          <svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+        <span class="sec-name">入点到出点</span>
+        <span class="grow"></span>
+        <span class="tag" data-set="io" title="点击全选"><span class="cnt" id="cnt-io">0</span><span class="sep2">|</span><span class="dur" id="sum-io"></span></span>
+      </div>
+      <div class="list" id="io-list"></div>
+    </section>
+  </div>
+
+  <footer>
+    <button id="btn-all">全选</button>
+    <span id="sel-count">已选0条记录</span>
+    <button id="btn-clear" disabled>清除记录</button>
+    <button id="btn-export" disabled>导出记录</button>
+  </footer>
+
+  <script src="xlsx-writer.js"></script>
+  <script src="panel-core.js"></script>
+  <script src="sidebar.js"></script>
+</body>
+</html>
