@@ -767,6 +767,8 @@ const MPP = (() => {
   }
   function openSidebarMode() {
     chrome.action.setPopup({ popup: '' }).catch(() => { });
+    // 点击图标由浏览器原生打开侧边栏，避免 onClicked 异步丢失手势
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => { });
     saveLastMode('sidebar');
     return findTab().then(t => {
       if (t && t.id != null) {
@@ -777,6 +779,7 @@ const MPP = (() => {
   function openWindowMode() {
     // 独立窗口：复用侧边栏布局，以紧凑 popup 窗口打开（无地址栏/标签栏，近似 QQ 登录小窗）
     chrome.action.setPopup({ popup: '' }).catch(() => { });
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => { });
     saveLastMode('window');
     return findTab().then(t => {
       if (t && t.id != null) rememberSrcTab(t.id);
@@ -791,6 +794,7 @@ const MPP = (() => {
   }
   function openPopupMode() {
     chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => { });
     saveLastMode('popup');
     return chrome.action.openPopup().catch(() => { });
   }

@@ -57,18 +57,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// 按记忆的显示模式设置图标点击行为：弹窗 = 保留 popup；侧边栏/独立窗口 = 清空 popup 走 onClicked
+// 按记忆的显示模式设置图标点击行为：
+//   popup   → 保留 popup，点击弹出面板
+//   sidebar → 清空 popup + panelBehavior 接管点击（浏览器原生打开侧边栏，
+//             避免 sidePanel.open 需用户手势、重启后 onClicked 中异步调用会丢失手势的问题）
+//   window  → 清空 popup，点击走 onClicked 打开独立窗口（windows.create 无需手势）
 function applyLastMode(lastMode) {
-  const popup = lastMode === 'popup' ? 'popup.html' : '';
-  return chrome.action.setPopup({ popup }).catch(() => { });
+  const isPopup = lastMode === 'popup';
+  chrome.action.setPopup({ popup: isPopup ? 'popup.html' : '' }).catch(() => { });
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: lastMode === 'sidebar' }).catch(() => { });
 }
 
 chrome.runtime.onInstalled.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
 chrome.runtime.onStartup.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
 
-chrome.action.onClicked.addListener(async tab => {
-  const s = await getSettings();
-  if (s.lastMode === 'window') {
+chrome.action.onClicked.addListener(tab => {
+  // 仅 window 模式会走到（popup 模式有 popup；sidebar 模式被 panelBehavior 接管）
+  getSettings().then(s => {
+    if (s.lastMode !== 'window') return;
     // 独立窗口：与面板切换行为一致，关联当前激活标签页
     if (tab.id != null) chrome.storage.session.set({ mpp_src_tab: tab.id }).catch(() => { });
     chrome.windows.create({
@@ -78,7 +84,5 @@ chrome.action.onClicked.addListener(async tab => {
       height: 680,
       focused: true
     }).catch(() => { });
-    return;
-  }
-  chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => { });
+  });
 });
