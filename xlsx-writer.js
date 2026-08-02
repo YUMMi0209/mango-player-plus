@@ -173,8 +173,8 @@
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
         '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' +
         '</Relationships>' },
-      { name: 'xl/worksheets/sheet1.xml', data: sheetXml(mkRows, [8, 14, 8, 60]) },
-      { name: 'xl/worksheets/sheet2.xml', data: sheetXml(ioRows, [8, 14, 14, 10, 60]) }
+      { name: 'xl/worksheets/sheet1.xml', data: sheetXml(mkRows, [8, 14, 8, 28, 60, 24]) },
+      { name: 'xl/worksheets/sheet2.xml', data: sheetXml(ioRows, [8, 14, 14, 10, 28, 60, 24]) }
     ];
     return makeZip(entries);
   }

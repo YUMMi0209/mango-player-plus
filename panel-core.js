@@ -1,21 +1,37 @@
-/* 芒着拉片 · 面板核心（popup 与分屏侧边栏共用） */
+/* 芒着拉片 · 日志面板核心（popup 与侧边栏共用）v2.0 */
 'use strict';
 
 const MPP = (() => {
   // ─── 注入页面 MAIN world 执行（自包含）──────
-  // 弹窗/分屏：当前窗口即视频所在窗口；独立窗口：当前窗口是扩展窗口，
-  // 需回退到最近活跃的 http(s) 标签页（优先芒果TV）拿到视频页
+  // 弹窗/侧边栏：跟随当前窗口的激活标签页——切换网页后记录随之同步；
+  // 独立窗口：当前窗口是扩展窗口，需回退到记忆的来源视频标签页。
   function findTab() {
+    if (isWindowMode()) {
+      return chrome.storage.session.get('mpp_src_tab').then(({ mpp_src_tab }) => {
+        if (mpp_src_tab == null) return null;
+        return chrome.tabs.get(mpp_src_tab).then(
+          t => (t && t.id != null && t.url && /^https?:/.test(t.url)) ? t : null,
+          () => { chrome.storage.session.remove('mpp_src_tab').catch(() => { }); return null; }
+        );
+      }).then(mem => {
+        if (mem) return mem;
+        return chrome.tabs.query({}).then(all => {
+          const cands = all.filter(t => t.id != null && t.url && /^https?:/.test(t.url));
+          cands.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+          const mgtv = cands.find(t => /mgtv\.com/.test(t.url));
+          return (mgtv || cands[0]) || null;
+        });
+      });
+    }
     return chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
       const t = tabs && tabs[0];
       if (t && t.id != null && t.url && /^https?:/.test(t.url)) return t;
-      return chrome.tabs.query({}).then(all => {
-        const cands = all.filter(t => t.id != null && t.url && /^https?:/.test(t.url));
-        cands.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
-        const mgtv = cands.find(t => /mgtv\.com/.test(t.url));
-        return (mgtv || cands[0]) || null;
-      });
+      return null;
     });
+  }
+
+  function rememberSrcTab(tabId) {
+    if (tabId != null) chrome.storage.session.set({ mpp_src_tab: tabId }).catch(() => { });
   }
 
   function execInPage(func, args) {
@@ -41,9 +57,13 @@ const MPP = (() => {
       if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
       return location.origin + location.pathname;
     }
+    // 网页标题：直接读取 <title> 字段完整文本
+    function pgTitle() {
+      return (document.title || '').trim();
+    }
     let data;
-    // 旧版本页面残留的 __mgpAPI 缺少 clearAll，清除所有记录后其内存缓存仍返回旧数据，
-    // 此时回退读 localStorage（fnClearAll 已将其清空），避免记录“删不掉”的假象。
+    // 旧版本页面残留的 __mgpAPI 缺少 clearAll，其内存缓存可能与本地存储不一致，
+    // 此时回退直接读 localStorage，避免记录“删不掉”的假象。
     if (window.__mgpAPI && typeof window.__mgpAPI.clearAll === 'function') {
       data = window.__mgpAPI.getLogs();
     } else {
@@ -56,7 +76,7 @@ const MPP = (() => {
         data = { inOut: e.inOut || [], marks: e.marks || [] };
       } catch (e) { data = { inOut: [], marks: [] }; }
     }
-    return { logs: data, host: location.hostname, baseURL: location.origin + location.pathname };
+    return { logs: data, host: location.hostname, baseURL: location.origin + location.pathname, title: pgTitle() };
   }
   function fnRemove(selObj) {
     if (window.__mgpAPI) return window.__mgpAPI.removeLogs(selObj);
@@ -111,24 +131,62 @@ const MPP = (() => {
     }
     return ok;
   }
+  // v2.0 打点备注：type 为 'mk' / 'io'
+  function fnSetNote(type, idx, note) {
+    if (window.__mgpAPI && typeof window.__mgpAPI.setNote === 'function') {
+      try { return window.__mgpAPI.setNote(type, idx, note) === true; } catch (e) { }
+    }
+    return false;
+  }
+  // v2.0 历史：列出所有有标记记录的视频（标题 + 链接 + 记录数）
+  function fnGetHistory() {
+    let map = {}, titles = {};
+    try { map = JSON.parse(localStorage.getItem('mpp_logs') || '{}') || {}; } catch (e) { }
+    try { titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {}; } catch (e) { }
+    if (map && Array.isArray(map.inOut)) map = {};
+    const out = [];
+    for (const k of Object.keys(map)) {
+      const e = map[k] || {};
+      const marks = Array.isArray(e.marks) ? e.marks.length : 0;
+      const inOut = Array.isArray(e.inOut) ? e.inOut.length : 0;
+      if (marks + inOut === 0) continue;
+      const t = titles[k] || {};
+      out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut });
+    }
+    out.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
+    return out;
+  }
+  // v2.0 历史：按 videoKey 批量清除；若包含当前视频则同时重置页面端状态
+  function fnRemoveHistory(keys) {
+    function vkey() {
+      const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
+      if (m) return 'id:' + m[1] + '_' + m[2];
+      const m1 = location.pathname.match(/(\d+)\.html$/);
+      if (m1) return 'id:' + m1[1];
+      const v = window.__mgp_video && window.__mgp_video.dataset;
+      if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
+      return location.origin + location.pathname;
+    }
+    let map = {}, titles = {};
+    try { map = JSON.parse(localStorage.getItem('mpp_logs') || '{}') || {}; } catch (e) { }
+    try { titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {}; } catch (e) { }
+    let removed = 0;
+    keys.forEach(k => { if (k in map || k in titles) removed++; delete map[k]; delete titles[k]; });
+    localStorage.setItem('mpp_logs', JSON.stringify(map));
+    localStorage.setItem('mpp_titles', JSON.stringify(titles));
+    if (keys.indexOf(vkey()) !== -1) {
+      try { window.dispatchEvent(new CustomEvent('mgp-reload')); } catch (e) { }
+    }
+    return removed;
+  }
+  // v2.0 历史：全选后清除 = 清除所有记录，直接清空整个存储（含未被列表列出的残留 key）
   function fnClearAll() {
-    let cleared = 0;
-    // 先走页面 API（重置当前页内存状态），再无条件清除本地存储，确保所有网页/分集记录都被清空
-    try {
-      if (window.__mgpAPI && typeof window.__mgpAPI.clearAll === 'function') {
-        if (window.__mgpAPI.clearAll() === true) cleared = 1;
-      }
-    } catch (e) { }
-    try {
-      const raw = localStorage.getItem('mpp_logs') || '{}';
-      try {
-        const n = Object.keys(JSON.parse(raw)).length;
-        if (n) cleared = n;
-      } catch (e) { if (!cleared) cleared = 1; }
-      localStorage.removeItem('mpp_logs');
-      localStorage.removeItem('mpp_state');
-    } catch (e) { }
-    return cleared;
+    let removed = 0;
+    try { removed = Object.keys(JSON.parse(localStorage.getItem('mpp_logs') || '{}') || {}).length; } catch (e) { }
+    localStorage.removeItem('mpp_logs');
+    localStorage.removeItem('mpp_titles');
+    try { window.dispatchEvent(new CustomEvent('mgp-reload')); } catch (e) { }
+    return removed;
   }
 
   // ─── 状态 ───────────────────────────────────
@@ -140,6 +198,8 @@ const MPP = (() => {
   let lastSig = '';
   let show = 'mk';
   let els = {};
+  let histItems = [];
+  let histSel = new Set();
 
   const MARK_COLORS = [
     ['红', '#e74c3c'], ['橙', '#ff7a1a'], ['蓝', '#3498db'], ['绿', '#2ecc71'], ['灰', '#9aa0a6']
@@ -153,6 +213,9 @@ const MPP = (() => {
 
   // ─── 工具 ───────────────────────────────────
   function fmtDur(s) { return String(Math.round(s * 2) / 2); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
   function linkFor(time, url) {
     const base = (url || baseURL).split('#')[0];
     try {
@@ -177,7 +240,22 @@ const MPP = (() => {
   const SETTINGS_KEY = 'mpp_settings';
   function getSettings() {
     return chrome.storage.local.get(SETTINGS_KEY).then(s =>
-      Object.assign({ enabled: true, activeHosts: [], theme: 'dark' }, s[SETTINGS_KEY] || {}));
+      Object.assign({ enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true }, s[SETTINGS_KEY] || {}));
+  }
+
+  // ─── 轻提示（短暂反馈，用于开关失败等场景）──
+  let toastTimer = null;
+  function toast(msg) {
+    let t = document.getElementById('mpp-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'mpp-toast';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
   }
 
   // ─── 二次确认弹窗 ──────────────────────────
@@ -229,44 +307,47 @@ const MPP = (() => {
     els.btnAll = $(cfg.btnAll);
     els.btnClear = $(cfg.btnClear);
     els.btnExport = $(cfg.btnExport);
-    els.btnRefresh = $(cfg.btnRefresh);
+    els.btnReload = $(cfg.btnReload);
     els.btnSettings = $(cfg.btnSettings);
     els.settingsMenu = $(cfg.settingsMenu);
     els.btnMode = $(cfg.btnMode);
     els.modeMenu = $(cfg.modeMenu);
-    els.togEnabled = $(cfg.togEnabled);
+    els.togLog = $(cfg.togLog);
+    els.togBar = $(cfg.togBar);
+    els.togNote = $(cfg.togNote);
+    els.togTitle = $(cfg.togTitle);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
     els.setRowAll = $(cfg.setRowAll);
-    els.btnClearAll = $(cfg.btnClearAll);
+    els.btnHelp = $(cfg.btnHelp);
+    els.sumSep = $(cfg.sumSep);
     els.err = $(cfg.err);
     els.wrap = $(cfg.wrap);
     els.footer = $(cfg.footer);
+    els.pageTitle = $(cfg.pageTitle);
+    els.btnHistory = $(cfg.btnHistory);
+    els.historyMenu = $(cfg.historyMenu);
+    els.histList = $(cfg.histList);
+    els.histAll = $(cfg.histAll);
+    els.histClear = $(cfg.histClear);
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
     bindList(els.mkList);
     if (els.ioList !== els.mkList) bindList(els.ioList);
     els.btnAll.addEventListener('click', toggleAll);
     els.btnClear.addEventListener('click', clearSel);
     els.btnExport.addEventListener('click', exportExcel);
-    els.btnRefresh.addEventListener('click', refresh);
-    if (els.btnClearAll) els.btnClearAll.addEventListener('click', clearAll);
+    if (els.btnReload) els.btnReload.addEventListener('click', () => {
+      // v2.0：重新加载整个插件（改动代码后一键生效）
+      chrome.runtime.reload();
+    });
     bindSettings();
     bindModeMenu();
     bindCollapse();
     bindSelectAll();
+    bindHistory();
   }
 
   // ─── 数据加载 ───────────────────────────────
-  // 刷新按钮：不关闭弹窗/侧边栏，仅重启页面端服务——重扫视频、重建控制栏、重载记录
-  function fnReload() {
-    try { window.dispatchEvent(new CustomEvent('mgp-reload')); return true; }
-    catch (e) { return false; }
-  }
-  function refresh() {
-    execInPage(fnReload).catch(() => { });
-    return load(true);
-  }
-
   async function load(force) {
     let res;
     try { res = await execInPage(fnGetLogs); } catch (e) { res = null; }
@@ -279,25 +360,51 @@ const MPP = (() => {
     }
     const onMgtv = !!(res && res.host && /mgtv\.com$/.test(res.host));
     const active = !!(res && res.host) && Array.isArray(settings.activeHosts) && settings.activeHosts.indexOf(res.host) !== -1;
-    const valid = !!(res && res.host) && settings.enabled !== false && (onMgtv || active);
+    // v2.0：面板是否可用取决于「日志记录」开关（与视频控制栏开关互不影响）
+    const logOn = settings.logEnabled !== false;
+    const valid = !!(res && res.host) && logOn && (onMgtv || active);
     if (els.togAll) els.togAll.checked = !onMgtv && active;
     if (els.setRowAll) els.setRowAll.hidden = onMgtv;
     if (els.err) {
-      els.err.innerHTML = settings.enabled === false
-        ? '插件已关闭<br>点击右上角设置按钮重新开启'
+      els.err.innerHTML = settings.logEnabled === false
+        ? '日志记录已关闭<br>点击右上角设置按钮重新开启'
         : '请在芒果TV视频页面打开此面板<br>或开启「应用于当前网页」';
     }
     setVisible(valid);
     if (!valid) return false;
+    if (els.pageTitle) {
+      const t = (res && res.title) || '';
+      if (t) { els.pageTitle.textContent = t; els.pageTitle.hidden = false; }
+      else els.pageTitle.hidden = true;
+    }
     const sig = JSON.stringify(res.logs);
     if (!force && sig === lastSig) return true;
+    // 备注编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
+    if (!force && document.querySelector('.note-edit:not([hidden])')) return true;
     lastSig = sig;
+    // 数据变化时按记录指纹保留仍存在的选中项，避免轮询刷新打断勾选
+    const prev = logs;
     logs = res.logs || { inOut: [], marks: [] };
     baseURL = res.baseURL || '';
-    sel.io.clear();
-    sel.mk.clear();
+    keepSelection(prev);
     render();
     return true;
+  }
+
+  // 记录指纹：以时间码与时刻定位记录（备注 / 颜色等可变字段不参与匹配）
+  function fpMark(m) {
+    return m && m.tc != null ? 'mk:' + m.tc + ':' + (m.time != null ? m.time.toFixed(3) : '') : '';
+  }
+  function fpIO(u) {
+    return u && u.inTC != null
+      ? 'io:' + u.inTC + ':' + (u.inTime != null ? u.inTime.toFixed(3) : '') + ':' + (u.outTime != null ? u.outTime.toFixed(3) : '')
+      : '';
+  }
+  function keepSelection(prev) {
+    const oldIo = new Set([...sel.io].map(i => prev.inOut[i]).filter(Boolean).map(fpIO));
+    const oldMk = new Set([...sel.mk].map(i => prev.marks[i]).filter(Boolean).map(fpMark));
+    sel.io = new Set(logs.inOut.map((u, i) => (oldIo.has(fpIO(u)) ? i : -1)).filter(i => i >= 0));
+    sel.mk = new Set(logs.marks.map((m, i) => (oldMk.has(fpMark(m)) ? i : -1)).filter(i => i >= 0));
   }
 
   function setVisible(valid) {
@@ -310,16 +417,6 @@ const MPP = (() => {
   function render() {
     if (els.cntMk) els.cntMk.textContent = logs.marks.length;
     if (els.cntIo) els.cntIo.textContent = logs.inOut.length;
-    if (els.sumIo) {
-      if (logs.inOut.length) {
-        const total = logs.inOut.reduce((a, u) => a + (u.outTime - u.inTime), 0);
-        els.sumIo.textContent = fmtDur(total) + 's';
-      } else {
-        els.sumIo.textContent = '';
-      }
-      const tag = els.sumIo.closest('.tag');
-      if (tag) tag.classList.toggle('no-sum', !logs.inOut.length);
-    }
     els.mkList.classList.add('cards');
     if (els.ioList === els.mkList) {
       if (show === 'mk') renderMarks(els.mkList);
@@ -337,6 +434,13 @@ const MPP = (() => {
     render();
   }
 
+  function noteLineHTML(hasNote) {
+    return '<span class="note-line"' + (hasNote ? '' : ' hidden') + '>' +
+      '<span class="note-text"></span>' +
+      '<textarea class="note-edit" rows="1" spellcheck="false" hidden></textarea>' +
+      '</span>';
+  }
+
   function renderMarks(list) {
     if (!logs.marks.length) { list.innerHTML = '<div class="empty">暂无标记点记录</div>'; return; }
     list.innerHTML = '';
@@ -351,7 +455,8 @@ const MPP = (() => {
         '<span class="tc mk">' + m.tc + '</span>' +
         '<span class="mk-colors">' + MARK_COLORS.map(([name, v]) =>
           '<span class="mc-dot' + (m.color === v ? ' on' : '') + '" data-c="' + v + '" data-n="' + name + '" style="--dc:' + v + '" title="设为' + name + '色"></span>'
-        ).join('') + '</span>';
+        ).join('') + '</span>' +
+        noteLineHTML(!!m.note);
       list.appendChild(row);
     });
   }
@@ -370,7 +475,8 @@ const MPP = (() => {
         '<span class="tc in">' + u.inTC + '</span>' +
         '<span class="sep">&rarr;</span>' +
         '<span class="tc out">' + u.outTC + '</span>' +
-        '<span class="dur">' + fmtDur(u.dur) + 's</span>';
+        '<span class="dur">' + fmtDur(u.dur) + 's</span>' +
+        noteLineHTML(!!u.note);
       list.appendChild(row);
     });
   }
@@ -380,11 +486,96 @@ const MPP = (() => {
     if (els.selCount) els.selCount.textContent = '已选' + n + '条记录';
     if (els.btnClear) els.btnClear.disabled = n === 0;
     if (els.btnExport) els.btnExport.disabled = n === 0;
+    // v2.0：计时器统计已选中的入点到出点记录；未选中任何入出点则不显示
+    if (els.sumIo) {
+      const selIo = logs.inOut.filter((u, i) => sel.io.has(i));
+      els.sumIo.textContent = selIo.length
+        ? fmtDur(selIo.reduce((a, u) => a + (u.outTime - u.inTime), 0)) + 's'
+        : '';
+      if (els.sumSep) els.sumSep.hidden = !selIo.length;
+    }
     document.querySelectorAll('.sec-head .tag').forEach(tag => {
       const key = tag.dataset.set === 'io' ? 'io' : 'mk';
       const total = key === 'io' ? logs.inOut.length : logs.marks.length;
       tag.classList.toggle('all-sel', total > 0 && sel[key].size === total);
     });
+    updateNoteLines();
+  }
+
+  // ─── 打点备注：有备注的记录始终展示；选中单条时显示其备注行（可编辑）──
+  function updateNoteLines() {
+    document.querySelectorAll('.note-line').forEach(el => {
+      const row = el.closest('.row');
+      if (!row) return;
+      // 备注与时间码左对齐（序号宽度不定，需实测行内偏移）
+      const tc = row.querySelector('.tc');
+      if (tc) {
+        const padL = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+        el.style.marginLeft = (tc.getBoundingClientRect().left - row.getBoundingClientRect().left - padL) + 'px';
+      }
+      const isMk = row.dataset.mk !== undefined;
+      const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
+      const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
+      const hasNote = !!(rec && rec.note);
+      el.hidden = !hasNote;
+      const text = el.querySelector('.note-text');
+      if (text) {
+        text.textContent = hasNote ? rec.note : '添加备注…';
+        text.classList.toggle('empty', !hasNote);
+      }
+      const edit = el.querySelector('.note-edit');
+      if (edit) edit.value = rec ? (rec.note || '') : '';
+    });
+    if (sel.mk.size + sel.io.size !== 1) return;
+    let idx = -1, type = '';
+    if (sel.mk.size === 1) { idx = [...sel.mk][0]; type = 'mk'; }
+    else if (sel.io.size === 1) { idx = [...sel.io][0]; type = 'io'; }
+    else return;
+    const target = type === 'mk' ? els.mkList : els.ioList;
+    const row = target.querySelector('.row[data-' + type + '="' + idx + '"]');
+    if (!row) return;
+    const line = row.querySelector('.note-line');
+    if (!line) return;
+    const rec = type === 'mk' ? logs.marks[idx] : logs.inOut[idx];
+    if (!rec) return;
+    line.hidden = false;
+    const text = line.querySelector('.note-text');
+    if (text) {
+      text.textContent = rec.note || '添加备注…';
+      text.classList.toggle('empty', !rec.note);
+    }
+    const edit = line.querySelector('.note-edit');
+    if (edit) edit.value = rec.note || '';
+  }
+
+  function enterNoteEdit(edit) {
+    const text = edit.parentElement.querySelector('.note-text');
+    if (text) text.hidden = true;
+    edit.hidden = false;
+    edit.focus();
+    try { edit.setSelectionRange(edit.value.length, edit.value.length); } catch (e) { }
+  }
+  function cancelNoteEdit(edit) {
+    const text = edit.parentElement.querySelector('.note-text');
+    edit.hidden = true;
+    if (text) text.hidden = false;
+  }
+  function commitNoteEdit(edit) {
+    const line = edit.closest('.note-line');
+    const row = line.closest('.row');
+    if (!row) return;
+    const isMk = row.dataset.mk !== undefined;
+    const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
+    const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
+    const val = edit.value.trim();
+    if (!rec) return;
+    execInPage(fnSetNote, [isMk ? 'mk' : 'io', idx, val]).then(ok => {
+      if (!ok) return;
+      if (val) rec.note = val; else delete rec.note;
+      // 原地更新显示，不重建整表（避免打断勾选等其他交互）
+      cancelNoteEdit(edit);
+      updateNoteLines();
+    }).catch(() => { });
   }
 
   // ─── 侧边栏：折叠 + 标题点击全选 ─────────────
@@ -439,6 +630,14 @@ const MPP = (() => {
         }).catch(() => { });
         return;
       }
+      // 备注行：点击进入编辑；输入框区域不触发行的其他行为
+      const noteText = e.target.closest('.note-text');
+      if (noteText) {
+        const edit = noteText.parentElement.querySelector('.note-edit');
+        if (edit) enterNoteEdit(edit);
+        return;
+      }
+      if (e.target.closest('.note-line')) return;
       if (e.target.closest('.chk')) return;
       const row = e.target.closest('.row');
       if (!row) return;
@@ -471,6 +670,18 @@ const MPP = (() => {
       if (chk.checked) set.add(idx); else set.delete(idx);
       row.classList.toggle('sel', chk.checked);
       updateSel();
+    });
+    // 备注编辑：Enter 保存 / Shift+Enter 换行 / Esc 取消 / 失焦保存
+    list.addEventListener('keydown', e => {
+      const edit = e.target.closest('.note-edit');
+      if (!edit || edit.hidden) return;
+      if (e.key === 'Escape') { e.preventDefault(); cancelNoteEdit(edit); return; }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitNoteEdit(edit); }
+    });
+    list.addEventListener('focusout', e => {
+      const edit = e.target.closest('.note-edit');
+      if (!edit || edit.hidden) return;
+      commitNoteEdit(edit);
     });
   }
 
@@ -511,32 +722,21 @@ const MPP = (() => {
     await load(true);
   }
 
-  async function clearAll() {
-    const ok = await confirmDlg('确认清除所有网页的标记点与入点到出点记录？此操作不可恢复。', '清除');
-    if (!ok) return;
-    try { await execInPage(fnClearAll); } catch (e) { }
-    logs = { inOut: [], marks: [] };
-    sel.io.clear();
-    sel.mk.clear();
-    if (els.settingsMenu) els.settingsMenu.hidden = true;
-    await load(true);
-    execInPage(fnToast, ['已清除所有记录']).catch(() => { });
-  }
-
   async function exportExcel() {
     const ioIdx = [...sel.io].sort((a, b) => a - b);
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     if (!ioIdx.length && !mkIdx.length) return;
-    const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '入点链接']];
+    // v2.0：备注字段位于链接之前，标题位于链接之后
+    const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
     ioIdx.forEach((i, n) => {
       const u = logs.inOut[i];
-      ioRows.push([String(n + 1), u.inTC, u.outTC, fmtDur(u.dur), linkFor(u.inTime, u.url)]);
+      ioRows.push([String(n + 1), u.inTC, u.outTC, fmtDur(u.dur), u.note || '', linkFor(u.inTime, u.url), u.title || '']);
     });
-    const mkRows = [['序号', '时间码', '颜色', '链接']];
+    const mkRows = [['序号', '时间码', '颜色', '备注', '链接', '标题']];
     mkIdx.forEach((i, n) => {
       const m = logs.marks[i];
       const hex = markColor(m);
-      mkRows.push([String(n + 1), m.tc, hex ? colorName(hex) : '无', linkFor(m.time, m.url)]);
+      mkRows.push([String(n + 1), m.tc, hex ? colorName(hex) : '无', m.note || '', linkFor(m.time, m.url), m.title || '']);
     });
     const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
@@ -554,25 +754,30 @@ const MPP = (() => {
     return 'MPP_logs_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + '.xlsx';
   }
 
-  // ─── 显示模式切换（弹窗 / 分屏 / 独立窗口）────
+  // ─── 显示模式切换（弹窗 / 侧边栏 / 独立窗口）────
   function isWindowMode() {
     try { return new URLSearchParams(location.search).get('win') === '1'; } catch (e) { return false; }
   }
   function openSidebarMode() {
     chrome.action.setPopup({ popup: '' }).catch(() => { });
     return findTab().then(t => {
-      if (t && t.id != null) return chrome.sidePanel.open({ tabId: t.id }).catch(() => { });
+      if (t && t.id != null) {
+        return chrome.sidePanel.open({ tabId: t.id }).catch(() => { });
+      }
     });
   }
   function openWindowMode() {
     // 独立窗口：复用侧边栏布局，以紧凑 popup 窗口打开（无地址栏/标签栏，近似 QQ 登录小窗）
-    return chrome.windows.create({
-      url: 'sidebar.html?win=1',
-      type: 'popup',
-      width: 430,
-      height: 680,
-      focused: true
-    }).catch(() => { });
+    return findTab().then(t => {
+      if (t && t.id != null) rememberSrcTab(t.id);
+      return chrome.windows.create({
+        url: 'sidebar.html?win=1',
+        type: 'popup',
+        width: 430,
+        height: 680,
+        focused: true
+      }).catch(() => { });
+    });
   }
   function openPopupMode() {
     chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
@@ -583,6 +788,7 @@ const MPP = (() => {
     els.btnMode.addEventListener('click', e => {
       e.stopPropagation();
       if (els.settingsMenu) els.settingsMenu.hidden = true;
+      if (els.historyMenu) els.historyMenu.hidden = true;
       els.modeMenu.hidden = !els.modeMenu.hidden;
     });
     document.addEventListener('click', e => {
@@ -604,6 +810,94 @@ const MPP = (() => {
     });
   }
 
+  // ─── 历史（有标记记录的视频列表）────────────
+  function bindHistory() {
+    if (!els.btnHistory || !els.historyMenu) return;
+    els.btnHistory.addEventListener('click', e => {
+      e.stopPropagation();
+      if (els.settingsMenu) els.settingsMenu.hidden = true;
+      if (els.modeMenu) els.modeMenu.hidden = true;
+      els.historyMenu.hidden = !els.historyMenu.hidden;
+      if (!els.historyMenu.hidden) loadHistory();
+    });
+    document.addEventListener('click', e => {
+      if (els.historyMenu.hidden) return;
+      if (!e.target.closest('#history-menu') && !e.target.closest('#btn-history')) els.historyMenu.hidden = true;
+    });
+    if (els.histList) {
+      els.histList.addEventListener('click', e => {
+        const jump = e.target.closest('.hist-jump');
+        const item = e.target.closest('.hist-item');
+        if (!item) return;
+        const key = item.dataset.key;
+        if (jump) {
+          const url = item.dataset.url;
+          if (url) chrome.tabs.create({ url }).catch(() => { });
+          return;
+        }
+        if (histSel.has(key)) histSel.delete(key); else histSel.add(key);
+        // 仅更新当前行，不重建列表也不关闭菜单，便于连续勾选多项
+        item.classList.toggle('sel', histSel.has(key));
+        const chk = item.querySelector('.chk');
+        if (chk) chk.checked = histSel.has(key);
+        if (els.histClear) els.histClear.disabled = histSel.size === 0;
+      });
+    }
+    if (els.histAll) els.histAll.addEventListener('click', () => {
+      const allSel = histItems.length > 0 && histSel.size === histItems.length;
+      histSel = allSel ? new Set() : new Set(histItems.map(it => it.key));
+      renderHistory();
+    });
+    if (els.histClear) els.histClear.addEventListener('click', async () => {
+      const keys = [...histSel];
+      if (!keys.length) return;
+      // 全选后清除 = 清除所有记录（直接清空整个存储）
+      const all = histItems.length > 0 && histSel.size === histItems.length;
+      const ok = await confirmDlg(
+        all ? '确认清除所有历史记录？此操作不可恢复。'
+            : '确认清除选中的 ' + keys.length + ' 个视频的标记记录？此操作不可恢复。',
+        all ? '清除所有' : '清除'
+      );
+      if (!ok) return;
+      try { await execInPage(all ? fnClearAll : fnRemoveHistory, all ? [] : [keys]); } catch (e) { }
+      histSel = new Set();
+      loadHistory();
+      load(true);
+    });
+  }
+
+  function loadHistory() {
+    execInPage(fnGetHistory).then(items => {
+      histItems = items || [];
+      renderHistory();
+    }).catch(() => { histItems = []; renderHistory(); });
+  }
+
+  function renderHistory() {
+    const list = els.histList;
+    if (!list) return;
+    list.innerHTML = '';
+    if (els.histClear) els.histClear.disabled = histSel.size === 0;
+    if (!histItems.length) {
+      list.innerHTML = '<div class="hist-empty">暂无历史记录</div>';
+      return;
+    }
+    histItems.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'hist-item' + (histSel.has(it.key) ? ' sel' : '');
+      row.dataset.key = it.key;
+      row.dataset.url = it.url || '';
+      row.innerHTML =
+        '<input type="checkbox" class="chk"' + (histSel.has(it.key) ? ' checked' : '') + '>' +
+        '<span class="hist-t">' + esc(it.title || it.key) + '</span>' +
+        '<span class="hist-meta">' + it.marks + '标记·' + it.inOut + '片段</span>' +
+        '<button type="button" class="hist-jump" title="打开视频">' +
+          '<svg viewBox="0 0 16 16"><path d="M6.5 3.5h-3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3"/><path d="M8.5 2.5h5v5"/><path d="M13.5 2.5l-6 6"/></svg>' +
+        '</button>';
+      list.appendChild(row);
+    });
+  }
+
   // ─── 设置菜单 ───────────────────────────────
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
@@ -614,6 +908,7 @@ const MPP = (() => {
     els.btnSettings.addEventListener('click', e => {
       e.stopPropagation();
       if (els.modeMenu) els.modeMenu.hidden = true;
+      if (els.historyMenu) els.historyMenu.hidden = true;
       els.settingsMenu.hidden = !els.settingsMenu.hidden;
     });
     document.addEventListener('click', e => {
@@ -623,22 +918,63 @@ const MPP = (() => {
       }
     });
     getSettings().then(s => {
-      if (els.togEnabled) els.togEnabled.checked = s.enabled !== false;
+      if (els.togLog) els.togLog.checked = s.logEnabled !== false;
+      if (els.togBar) els.togBar.checked = s.barEnabled !== false;
+      if (els.togNote) els.togNote.checked = s.noteFileName !== false;
+      if (els.togTitle) els.togTitle.checked = s.titleFileName !== false;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
-    if (els.togEnabled) els.togEnabled.addEventListener('change', async e => {
+    if (els.togLog) els.togLog.addEventListener('change', async e => {
       const s = await getSettings();
-      s.enabled = e.target.checked;
+      s.logEnabled = e.target.checked;
       await chrome.storage.local.set({ mpp_settings: s });
       load(true);
+    });
+    if (els.togBar) els.togBar.addEventListener('change', async e => {
+      const s = await getSettings();
+      s.barEnabled = e.target.checked;
+      await chrome.storage.local.set({ mpp_settings: s });
+    });
+    if (els.togNote) els.togNote.addEventListener('change', async e => {
+      const s = await getSettings();
+      s.noteFileName = e.target.checked;
+      await chrome.storage.local.set({ mpp_settings: s });
+    });
+    if (els.togTitle) els.togTitle.addEventListener('change', async e => {
+      const s = await getSettings();
+      s.titleFileName = e.target.checked;
+      await chrome.storage.local.set({ mpp_settings: s });
+    });
+    // v2.0：教程帮助按钮 → 新标签页打开 help.html
+    if (els.btnHelp) els.btnHelp.addEventListener('click', () => {
+      if (els.settingsMenu) els.settingsMenu.hidden = true;
+      chrome.tabs.create({ url: chrome.runtime.getURL('help.html') }).catch(() => { });
     });
     if (els.togAll) els.togAll.addEventListener('change', async e => {
       const enable = e.target.checked;
       if (enable) {
-        if (!curHost) { e.target.checked = false; return; }
+        // 无页面数据时回退到当前活动标签页地址（activeTab 授权范围内可读）
+        if (!curHost) {
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab && tab.url) {
+              const u = new URL(tab.url);
+              if (u.protocol === 'http:' || u.protocol === 'https:') { curOrigin = u.origin; curHost = u.hostname; }
+            }
+          } catch (err) { }
+        }
+        if (!curHost) {
+          e.target.checked = false;
+          toast('无法获取当前网页地址，请刷新页面后重试');
+          return;
+        }
         const granted = await chrome.permissions.request({ origins: [curOrigin + '/*'] }).catch(() => false);
-        if (!granted) { e.target.checked = false; return; }
+        if (!granted) {
+          e.target.checked = false;
+          toast('未获得网页授权，请在浏览器弹窗中点击允许');
+          return;
+        }
       } else if (curHost) {
         chrome.permissions.remove({ origins: [curOrigin + '/*'] }).catch(() => { });
       }
@@ -663,5 +999,5 @@ const MPP = (() => {
     chrome.runtime.sendMessage({ type: 'pushSettings' }).catch(() => { });
   }
 
-  return { init, refresh, load, setTab };
+  return { init, load, setTab };
 })();

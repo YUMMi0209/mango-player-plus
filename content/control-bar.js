@@ -1,10 +1,15 @@
 /**
- * MG Player+ v1.0 — Video-top control bar
+ * MG Player+ v2.0 — Video control bar
  */
 (function () {
   let FPS = 25;
   const BTN = '36px';
   const MARK_COLORS = { red: '#e74c3c', orange: '#ff7a1a', blue: '#3498db', green: '#2ecc71', gray: '#9aa0a6' };
+
+  // 网页标题：直接读取 <title> 字段完整文本
+  function pageTitle() {
+    return (document.title || '').trim();
+  }
 
   const STORAGE_KEY = 'mpp_state';
 
@@ -89,6 +94,12 @@
       map[videoKey()] = { inOut: logs.inOut, marks: logs.marks };
       localStorage.setItem(LOGS_KEY, JSON.stringify(map));
     } catch (e) { }
+    // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
+    try {
+      const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
+      titles[videoKey()] = { title: pageTitle(), url: location.href };
+      localStorage.setItem('mpp_titles', JSON.stringify(titles));
+    } catch (e) { }
   }
 
   loadLogs();
@@ -112,37 +123,38 @@
 
   const CSS = `
 :host{all:initial;display:block;width:100%!important;contain:layout style}
+/* v2.0：顶部只留居中时间码；截屏 / 录制分别置于画面垂直中间左、右侧 */
 #mgp-bar{
-  position:absolute;top:0;left:0;right:0;z-index:100;pointer-events:auto;
-  display:flex;align-items:center;gap:6px;
-  height:44px;padding:0 8px;
+  position:absolute;top:0;left:0;right:0;z-index:2147483647;pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
+  height:46px;padding:0 8px;
   color:#ccc;font-size:12px;user-select:none;
 }
-#mgp-bar button{
-  background:rgba(0,0,0,.5);
-  border:1px solid rgba(255,255,255,.08);color:#ccc;cursor:pointer;
-  width:${BTN};height:${BTN};min-width:${BTN};min-height:${BTN};
-  border-radius:4px;font-size:12px;font-family:inherit;
+.mgp-side-btn{
+  position:absolute;top:50%;transform:translateY(-50%);z-index:2147483647;
+  background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.1);color:#ccc;cursor:pointer;
+  border-radius:8px;font-size:12px;font-family:inherit;
   transition:opacity .3s,background .15s,color .15s,border-color .15s;
   display:inline-flex;align-items:center;justify-content:center;
-  flex-shrink:0;padding:0;
+  flex-shrink:0;padding:8px;opacity:0;pointer-events:none;
 }
-#mgp-bar button:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
-#mgp-bar button.active{background:rgba(255,95,0,.4);color:#fff;border-color:#ff5f00}
-/* Hover show/hide: default hidden, show on bar hover */
-.mgp-side-btn{opacity:0;pointer-events:none;transition:opacity .3s}
-#mgp-bar.show-btns .mgp-side-btn{opacity:1;pointer-events:auto}
-#mgp-bar.recording .mgp-side-btn{opacity:1;pointer-events:auto}
-.mgp-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
-#mgp-btn-prev,#mgp-btn-next{font-size:16px;font-weight:700}
+/* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
+#mgp-bar.show-btns ~ .mgp-side-btn,
+#mgp-bar.recording ~ .mgp-side-btn{opacity:1;pointer-events:auto}
+#mgp-btn-ss{left:12px}
+#mgp-btn-rec{right:12px}
+.mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
+.mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
+.mgp-icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 #mgp-tc{
-  display:flex;align-items:center;gap:6px;
-  background:rgba(0,0,0,.5);
+  display:flex;align-items:center;gap:5px;
+  background:rgba(0,0,0,.55);
   border:1px solid rgba(255,255,255,.08);
-  height:${BTN};padding:0 12px;border-radius:4px;cursor:pointer;
+  padding:6px 8px;border-radius:5px;cursor:pointer;
   font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
-  font-size:18px;color:#fff;letter-spacing:1px;
-  margin:0 auto;flex-shrink:0;
+  font-size:18px;color:#fff;letter-spacing:1px;line-height:1;
+  flex-shrink:0;pointer-events:auto;white-space:nowrap;
 }
 #mgp-tc:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
 #mgp-tc-frames{color:#ff5f00;font-size:14px;opacity:.85}
@@ -157,7 +169,6 @@
 .b-ot{background:#2ecc71;color:#fff}
 .b-mk{background:#f39c12;color:#000}
 #mgp-rec-dot{display:none;width:5px;height:5px;background:#e74c3c;border-radius:50%;animation:pulse 1s infinite;position:absolute;top:3px;right:3px}
-	/* Recording red border: injected into document.head, not shadow DOM */
 	/* Timecode custom tooltip */
 	#mgp-tc{position:relative}
 	#mgp-tc::after{
@@ -173,20 +184,18 @@
 
   const HTML = `
 <div id="mgp-bar">
-  <button id="mgp-btn-prev" class="mgp-side-btn" title="前一帧 (,)">◀</button>
-  <button id="mgp-btn-next" class="mgp-side-btn" title="后一帧 (.)">▶</button>
   <span id="mgp-tc">
     <span id="mgp-tc-badge" class="b-pl">PLAY</span>
     <span id="mgp-tc-text">00:00:00<span id="mgp-tc-frames">:00</span></span>
   </span>
-  <button id="mgp-btn-ss" class="mgp-side-btn" title="截图 (S)">
-    <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
-  </button>
-  <button id="mgp-btn-rec" class="mgp-side-btn" title="录制 (R)" style="position:relative">
-    <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
-    <span id="mgp-rec-dot"></span>
-  </button>
 </div>
+<button id="mgp-btn-ss" class="mgp-side-btn" title="截图 (S)">
+  <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
+</button>
+<button id="mgp-btn-rec" class="mgp-side-btn" title="录制 (R)">
+  <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
+  <span id="mgp-rec-dot"></span>
+</button>
 `;
 
   let shadow, wrapper, video, videoContainer,
@@ -199,11 +208,24 @@
 
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
 
-  function mppActive() {
+  // v2.0：总开关拆分为「日志记录」与「视频控制栏」两个独立开关，互不影响
+  function hostOk() {
     const s = window.__mgpSettings || {};
-    if (s.enabled === false) return false;
+    if (s.enabled === false) return false; // 兼容旧版总开关
     if (/mgtv\.com$/.test(location.hostname)) return true;
     return Array.isArray(s.activeHosts) && s.activeHosts.includes(location.hostname);
+  }
+  // 控制栏 UI（画面内控制栏与按钮）是否显示
+  function barActive() {
+    const s = window.__mgpSettings || {};
+    if (s.barEnabled === false) return false;
+    return hostOk();
+  }
+  // 打点是否写入日志记录
+  function loggingActive() {
+    const s = window.__mgpSettings || {};
+    if (s.logEnabled === false) return false;
+    return hostOk();
   }
 
   function getSeekableStart() {
@@ -233,21 +255,6 @@
     video.requestVideoFrameCallback(cb);
   }
 
-  // ─── Hover show/hide buttons ────────────────
-  let hoverTimer = null;
-  function onBarHover(e) {
-    if (!videoContainer || recordingInternal) return;
-    const bar = qs('#mgp-bar'); if (!bar) return;
-    const rect = videoContainer.getBoundingClientRect();
-    // Show buttons when mouse is within 60px of the top edge of video
-    if (e.clientY < rect.top + 60 && e.clientY >= rect.top) {
-      bar.classList.add('show-btns');
-      clearTimeout(hoverTimer);
-    } else if (e.clientY > rect.top + 60) {
-      hoverTimer = setTimeout(() => bar.classList.remove('show-btns'), 500);
-    }
-  }
-
   function inject(v) {
     if (wrapper) remove();
     video = v;
@@ -255,7 +262,8 @@
     videoContainer = video.parentElement;
     if (getComputedStyle(videoContainer).position === 'static') videoContainer.style.position = 'relative';
     wrapper = document.createElement('div');
-    wrapper.style.cssText = 'position:absolute;top:0;left:0;right:0;z-index:100;pointer-events:none;';
+    // bottom:0 使 wrapper 铺满视频容器，侧边按钮才能以 top:50% 定位到画面垂直中间
+    wrapper.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;';
     videoContainer.insertBefore(wrapper, videoContainer.firstChild);
     shadow = wrapper.attachShadow({ mode: 'closed' });
     const style = document.createElement('style'); style.textContent = CSS;
@@ -277,54 +285,48 @@
       document.head.appendChild(ds);
     }
     detectFrameRate(video);
-    video.addEventListener('ended', () => { if (recordingInternal) stopRecording(); });
-    // Hover detection on the video container
-    videoContainer.addEventListener('mousemove', onBarHover);
-    videoContainer.addEventListener('mouseleave', () => {
-      const bar = qs('#mgp-bar');
-      if (bar && !recordingInternal) bar.classList.remove('show-btns');
-    });
+    video.addEventListener('ended', onVideoEnded);
     bindEvents();
     startLoop();
   }
 
+  function onVideoEnded() { if (recordingInternal) stopRecording(); }
+
+  function onBarMouseLeave() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    const bar = qs('#mgp-bar');
+    if (bar && !recordingInternal) bar.classList.remove('show-btns');
+  }
+
   function bindEvents() {
-    qs('#mgp-btn-prev').addEventListener('click', () => {
-      if (!video) return;
-      video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1/FPS);
-      mgpToast('前一帧 ( ' + fmtTC(video.currentTime) + ' )');
-    });
-    qs('#mgp-btn-next').addEventListener('click', () => {
-      if (!video) return;
-      video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/FPS);
-      mgpToast('后一帧 ( ' + fmtTC(video.currentTime) + ' )');
-    });
     qs('#mgp-tc').addEventListener('click', onTC);
     qs('#mgp-btn-ss').addEventListener('click', captureScreenshot);
     qs('#mgp-btn-rec').addEventListener('click', toggleRecording);
-    document.addEventListener('fullscreenchange', () => {
-      if (document.fullscreenElement) {
-        document.addEventListener('mousemove', onFsMouse);
-        // Re-attach hover to fullscreen element
-        const fsEl = document.fullscreenElement;
-        fsEl.addEventListener('mousemove', onBarHover);
-        fsEl.addEventListener('mouseleave', () => {
-          const bar = qs('#mgp-bar');
-          if (bar && !recordingInternal) bar.classList.remove('show-btns');
-        });
-      } else {
-        document.removeEventListener('mousemove', onFsMouse);
-        const bar = qs('#mgp-bar'); if (bar) bar.classList.remove('show-btns');
-      }
-    });
+    // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
+    videoContainer.addEventListener('mousemove', onBarHover);
+    videoContainer.addEventListener('mouseleave', onBarMouseLeave);
   }
 
-  function onFsMouse(e) {
-    const bar = qs('#mgp-bar'); if (!bar) return;
-    if (e.clientY < 60) {
+  // ─── 侧边按钮 hover 显隐（按钮位于画面垂直中间左、右两侧）──
+  let hoverTimer = null;
+  function onBarHover(e) {
+    if (!videoContainer) return;
+    const r = videoContainer.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    // 热区：距左/右边缘 70px 内，且位于垂直中间 ±130px 带
+    const nearSide = Math.min(x, r.width - x) < 70;
+    const nearMid = Math.abs(y - r.height / 2) < 130;
+    const bar = qs('#mgp-bar');
+    if (bar && nearSide && nearMid) {
       bar.classList.add('show-btns');
-    } else {
-      bar.classList.remove('show-btns');
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    } else if (!hoverTimer) {
+      hoverTimer = setTimeout(() => {
+        hoverTimer = null;
+        if (bar && !recordingInternal) bar.classList.remove('show-btns');
+      }, 500);
     }
   }
 
@@ -342,16 +344,23 @@
   }
 
   let lastTCFrame = -1;
+  let loopRaf = null, loopTimer = null;
   function startLoop() {
     function tick() {
       if (!video) return requestAnimationFrame(tick);
       enforceSpeed();
       const cf = Math.floor(video.currentTime * FPS);
       if (cf !== lastTCFrame) { lastTCFrame = cf; updateTC(); }
-      requestAnimationFrame(tick);
+      loopRaf = requestAnimationFrame(tick);
     }
-    tick();
-    setInterval(updateTC, 500);
+    loopRaf = requestAnimationFrame(tick);
+    clearInterval(loopTimer);
+    loopTimer = setInterval(updateTC, 500);
+  }
+  // 控制栏移除时停止循环，避免换集/开关控制栏后僵尸 rAF 与 setInterval 累积
+  function stopLoop() {
+    if (loopRaf) { cancelAnimationFrame(loopRaf); loopRaf = null; }
+    if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
   }
 
   function markColorFor(t) {
@@ -401,6 +410,37 @@
     }
   }
 
+  // 备注进入文件名（可开关）：截图/录制时若当前时刻恰好命中带备注的标记点/入点/出点则附加备注
+  function noteForFile(t) {
+    const s = window.__mgpSettings || {};
+    if (s.noteFileName === false) return '';
+    for (const m of logs.marks) {
+      if (m.note && m.time != null && Math.abs(m.time - t) < 0.02) return m.note;
+    }
+    for (const u of logs.inOut) {
+      if (u.note) {
+        if (u.inTime != null && Math.abs(u.inTime - t) < 0.02) return u.note;
+        if (u.outTime != null && Math.abs(u.outTime - t) < 0.02) return u.note;
+      }
+    }
+    return '';
+  }
+  function noteFileName(t) {
+    const n = noteForFile(t);
+    if (!n) return '';
+    const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
+    return clean ? clean.slice(0, 30) + '_' : '';
+  }
+  // 标题进入文件名（可开关）：取 "_" 或 "-" 前的节目名，如「乘风2026」
+  function titleForFile() {
+    const s = window.__mgpSettings || {};
+    if (s.titleFileName === false) return '';
+    const t = pageTitle();
+    if (!t) return '';
+    const clean = String(t).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
+    return clean ? clean.slice(0, 24) + '_' : '';
+  }
+
   function captureScreenshot() {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
     const c = document.createElement('canvas');
@@ -409,7 +449,7 @@
       c.getContext('2d').drawImage(video, 0, 0);
       c.toBlob(b => {
         if (!b) { mgpToast('截图失败'); return; }
-        downloadBlob(b, 'MG_'+fmtTCPlain(video.currentTime)+'_'+fmtNow()+'.png');
+        downloadBlob(b, 'MG_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlain(video.currentTime) + '_' + fmtNow() + '.png');
         mgpToast('截图保存');
       }, 'image/png');
     } catch(e) { mgpToast('截图失败: 内容保护'); }
@@ -584,7 +624,9 @@
     if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; return; }
     const ext = /^video\/mp4/.test(mimeType) ? 'mp4' : 'webm';
     const blob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
-    downloadBlob(blob, 'MG_rec_'+fmtTCPlain(state.recordingStart||0)+'_'+fmtNow()+'.'+ext);
+    // 从入点开始录制时用入点备注，否则用出点时刻的备注
+    const recNote = noteFileName(state.recordingStart || 0) || (recStopTime != null ? noteFileName(recStopTime) : '');
+    downloadBlob(blob, 'MG_rec_' + titleForFile() + recNote + fmtTCPlain(state.recordingStart||0) + '_' + fmtNow() + '.' + ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -595,6 +637,8 @@
   function markIn() {
     if (recordingInternal || !video) return;
     recStopTime = null;
+    // 新入点重置出点去重标记：否则在相同出点时刻二次打出点会被误判重复而漏记
+    lastLogOutTime = null;
     state.inPoint = video.currentTime; state.outPoint = null;
     state.tcMode = 'in'; saveState();
     if (video.paused) video.play().catch(()=>{});
@@ -605,6 +649,8 @@
     if (recordingInternal || state.inPoint === null || !video) return;
     recStopTime = null;
     const outTime = video.currentTime;
+    // 出点早于入点无意义（时长为 0 的垃圾记录），拒绝并保持入点状态
+    if (outTime < state.inPoint) { mgpToast('出点早于入点，未记录'); return; }
     state.outPoint = outTime; state.tcMode = 'ot';
     video.pause(); resetSpeed();
     if (lastLogOutTime === null || Math.abs(outTime - lastLogOutTime) > 0.001) {
@@ -612,7 +658,8 @@
         inTime: state.inPoint, inTC: fmtTC(state.inPoint),
         outTime, outTC: fmtTC(outTime),
         dur: Math.max(0, outTime - state.inPoint),
-        url: location.href
+        url: location.href,
+        title: pageTitle()
       });
       lastLogOutTime = outTime;
       saveLogs();
@@ -646,16 +693,21 @@
   }
 
   function remove() {
+    // 录制中移除控制栏（关闭控制栏 / 换集重建）：必须停止录制，否则 R 键失效后将无法停止
+    if (recordingInternal) stopRecording();
+    if (video) video.removeEventListener('ended', onVideoEnded);
     if (videoContainer) {
       videoContainer.removeEventListener('mousemove', onBarHover);
+      videoContainer.removeEventListener('mouseleave', onBarMouseLeave);
     }
+    stopLoop();
     if (wrapper && wrapper.parentElement) wrapper.parentElement.removeChild(wrapper);
     wrapper = null; shadow = null; video = null; videoContainer = null;
   }
 
   function syncBar() {
     loadLogs();
-    const on = mppActive();
+    const on = barActive();
     if (window.__mgp_video) applyHashSeek(window.__mgp_video);
     if (on && window.__mgp_video) {
       // 换集后旧容器可能被整体重建：wrapper 虽存在但已脱离 DOM（isConnected=false）时同样需要重建
@@ -667,7 +719,7 @@
     if (!video || recordingInternal) return;
     state.markTime = video.currentTime;
     state.tcMode = 'mk'; saveState();
-    logs.marks.push({ time: state.markTime, tc: fmtTC(state.markTime), url: location.href });
+    logs.marks.push({ time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: pageTitle() });
     saveLogs();
     const c = fmtTC(state.markTime, true).replace(/:/g, '');
     navigator.clipboard.writeText(c).catch(()=>{});
@@ -691,7 +743,7 @@
 
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
-    if (!mppActive()) return;
+    if (!hostOk()) return;
     if (!video) return;
 
     // JKL navigation
@@ -709,10 +761,9 @@
     switch (e.key) {
       case ',': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1/FPS); mgpToast('前一帧 ( ' + fmtTC(video.currentTime) + ' )'); break;
       case '.': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/FPS); mgpToast('后一帧 ( ' + fmtTC(video.currentTime) + ' )'); break;
-      case 'i': case 'I': if (!recordingInternal) { e.preventDefault(); markIn(); } break;
-      case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { e.preventDefault(); markOut(); } break;
-      case 'm': if (!recordingInternal) { e.preventDefault(); mark(); } break;
-      case 'M': e.preventDefault(); if (state.markTime !== null) { video.currentTime = state.markTime; mgpToast('已跳转至标记点'); } break;
+      case 'i': case 'I': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); markIn(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
+      case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { if (loggingActive()) { e.preventDefault(); markOut(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
+      case 'm': case 'M': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); mark(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'r': case 'R': e.preventDefault(); toggleRecording(); break;
       case 's': case 'S': e.preventDefault(); captureScreenshot(); break;
     }
@@ -740,6 +791,9 @@
       if (!recordingInternal) {
         state.inPoint = null; state.outPoint = null; state.markTime = null; state.tcMode = 'live';
       }
+      // 换集后重置：出点去重标记与新分集无关；#mpp= 定位需对新分集重新生效
+      lastLogOutTime = null;
+      hashSeekDone = false;
       loadState();
       loadLogs();
       syncBar();
@@ -822,6 +876,15 @@
       try { mgpToast('标记点已设为 ' + (name || '自定义色')); } catch (e) { }
       return true;
     },
+    // v2.0 打点备注：type 为 'mk'（标记点）或 'io'（入点到出点）；note 为空则删除备注
+    setNote(type, idx, note) {
+      const arr = type === 'io' ? logs.inOut : logs.marks;
+      if (!arr[idx]) return false;
+      if (note === undefined || note === null || String(note).trim() === '') delete arr[idx].note;
+      else arr[idx].note = String(note);
+      saveLogs();
+      return true;
+    },
     copyTC(t) {
       const c = fmtTC(t, true).replace(/:/g, '');
       navigator.clipboard.writeText(c).then(() => mgpToast('已复制时间码 ( ' + c + ' )')).catch(() => mgpToast('已复制时间码'));
@@ -835,6 +898,7 @@
       try {
         localStorage.removeItem(LOGS_KEY);
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('mpp_titles');
         logs = { inOut: [], marks: [] };
         lastLogOutTime = null;
         state.inPoint = null; state.outPoint = null; state.markTime = null;

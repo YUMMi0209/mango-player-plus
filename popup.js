@@ -1,4 +1,4 @@
-/* 芒着拉片 · 记录面板（左右选项卡模式） */
+/* 芒着拉片 · 日志面板（左右选项卡模式） */
 'use strict';
 
 const $ = s => document.querySelector(s);
@@ -14,19 +14,29 @@ MPP.init({
   btnAll: '#btn-all',
   btnClear: '#btn-clear',
   btnExport: '#btn-export',
-  btnRefresh: '#btn-refresh',
+  btnReload: '#btn-reload',
   btnSettings: '#btn-settings',
   settingsMenu: '#settings-menu',
   btnMode: '#btn-mode',
   modeMenu: '#mode-menu',
-  togEnabled: '#tog-enabled',
+  togLog: '#tog-log',
+  togBar: '#tog-bar',
+  togNote: '#tog-note',
+  togTitle: '#tog-title',
   togAll: '#tog-all',
   togTheme: '#tog-theme',
   setRowAll: '#set-row-all',
-  btnClearAll: '#btn-clearall',
+  btnHelp: '#btn-help',
+  sumSep: '#sum-sep',
   err: '#err',
   wrap: '#wrap',
-  footer: 'footer'
+  footer: 'footer',
+  pageTitle: '#page-title',
+  btnHistory: '#btn-history',
+  historyMenu: '#history-menu',
+  histList: '#hist-list',
+  histAll: '#hist-all',
+  histClear: '#hist-clear'
 });
 
 // ─── 选项卡切换 ─────────────────────────────

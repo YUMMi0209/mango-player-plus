@@ -1,10 +1,11 @@
 /* 芒着拉片 · 后台
    - 设置（插件开关 / 应用于所有网页）经 executeScript 注入页面为 window.__mgpSettings
-   - 图标点击：不记忆模式，每次默认弹窗；会话内切到分屏（popup 被清空）后点击则打开侧边栏 */
+   - 图标点击：不记忆模式，每次默认弹窗；会话内切到侧边栏（popup 被清空）后点击则打开侧边栏 */
 'use strict';
 
 const SETTINGS_KEY = 'mpp_settings';
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark' };
+// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关，另含截图录制文件名备注/标题开关
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
@@ -35,11 +36,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   pushSettings(tabId);
 });
 
-// 设置变化时，即时推送到当前活动标签页
+// 设置变化时，即时推送到所有已打开的网页（含独立窗口/侧边栏场景）
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-  chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
-    if (tabs[0]) pushSettings(tabs[0].id);
+  chrome.tabs.query({}).then(tabs => {
+    tabs.forEach(t => {
+      if (t.id != null && t.url && /^https?:/.test(t.url)) pushSettings(t.id);
+    });
   });
 });
 

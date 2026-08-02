@@ -2,49 +2,92 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 · 分屏记录</title>
+<title>芒着拉片 · 日志记录</title>
 <link rel="stylesheet" href="panel.css">
 </head>
 <body class="pg-sidebar">
   <header>
-    <div class="brand">记录</div>
+    <div class="brand-wrap">
+      <div class="brand">
+        日志记录
+      </div>
+      <div class="page-title" id="page-title" hidden></div>
+    </div>
     <div class="hdr-btns">
       <button id="btn-settings" title="设置">
-        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.7v1.8M8 12.5v1.8M1.7 8h1.8M12.5 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3"/></svg>
+        <svg viewBox="0 0 16 16"><path d="M9.3 1.7H6.7l-.4 1.7a5 5 0 0 0-1.5.9l-1.7-.5-1.3 2.2 1.4 1.2a5.6 5.6 0 0 0 0 1.6L1.8 9.9l1.3 2.2 1.7-.5a5 5 0 0 0 1.5.9l.4 1.7h2.6l.4-1.7a5 5 0 0 0 1.5-.9l1.7.5 1.3-2.2-1.4-1.2a5.6 5.6 0 0 0 0-1.6l1.4-1.2-1.3-2.2-1.7.5a5 5 0 0 0-1.5-.9L9.3 1.7z"/><circle cx="8" cy="8" r="2.2"/></svg>
       </button>
-      <button id="btn-refresh" title="刷新">
-        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>
+      <button id="btn-history" title="历史记录">
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.8V8l2.4 1.4"/><path d="M2.8 4.8V1.8h-1M2.8 1.8l2 .5"/></svg>
       </button>
       <button id="btn-mode" title="切换显示模式">
         <svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+        <span>模式</span>
       </button>
     </div>
     <div id="mode-menu" hidden>
-      <button type="button" class="mode-item" data-mode="popup">弹窗模式</button>
-      <button type="button" class="mode-item" data-mode="sidebar">分屏模式</button>
-      <button type="button" class="mode-item" data-mode="window">独立窗口模式<span class="set-tag">实验</span></button>
+      <button type="button" class="mode-item" data-mode="popup">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="9.5" height="9.5" rx="1.5"/><path d="M10 2h4v4"/><path d="M6.7 9.3L14 2"/></svg>
+        弹窗
+      </button>
+      <button type="button" class="mode-item" data-mode="sidebar">
+        <svg viewBox="0 0 16 16"><rect x="1.8" y="2.5" width="12.4" height="11" rx="1.6"/><path d="M6.5 2.5v11"/></svg>
+        侧边栏
+      </button>
+      <button type="button" class="mode-item" data-mode="window">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M2.5 5.5h11"/></svg>
+        独立窗口
+      </button>
     </div>
     <div id="settings-menu" hidden>
-      <div class="set-row">
-        <span class="set-label">插件开关</span>
-        <label class="switch"><input type="checkbox" id="tog-enabled"><span class="track"></span></label>
-      </div>
       <div class="set-row">
         <span class="set-label">亮色模式</span>
         <label class="switch"><input type="checkbox" id="tog-theme"><span class="track"></span></label>
       </div>
+      <div class="set-row">
+        <span class="set-label">日志记录</span>
+        <label class="switch"><input type="checkbox" id="tog-log"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">视频控制栏</span>
+        <label class="switch"><input type="checkbox" id="tog-bar"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">文件名包含标题</span>
+        <label class="switch"><input type="checkbox" id="tog-title"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">文件名包含备注</span>
+        <label class="switch"><input type="checkbox" id="tog-note"><span class="track"></span></label>
+      </div>
       <div class="set-row" id="set-row-all">
-        <div class="set-lbl">
-          <span class="set-label">应用于当前网页<span class="set-tag">实验</span></span>
-        </div>
+        <span class="set-label">应用于当前网页</span>
+        <span class="set-tag">实验</span>
         <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
       </div>
-      <div class="set-danger">
-        <button id="btn-clearall" type="button" class="clear-all-btn" title="清除所有记录">
-          <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>
-          清除所有记录
+      <div class="set-actions">
+        <button id="btn-help" type="button" class="set-action-btn" title="打开使用教程">
+          <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.2v.3"/><circle cx="8" cy="11.7" r=".8" fill="currentColor" stroke="none"/></svg>
+          教程帮助
+        </button>
+        <button id="btn-reload" type="button" class="set-action-btn" title="重新加载整个插件（修改代码后一键生效）">
+          <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>
+          重新加载
         </button>
       </div>
+    </div>
+    <div id="history-menu" hidden>
+      <div class="hist-head">
+        <span class="hist-title">历史记录</span>
+        <span class="grow"></span>
+        <button type="button" id="hist-all" class="hist-act" title="全选/取消全选">
+          <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
+        </button>
+        <button type="button" id="hist-clear" class="hist-act danger" title="清除选中" disabled>
+          <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>
+        </button>
+      </div>
+      <div class="hist-list" id="hist-list"></div>
     </div>
   </header>
 
@@ -69,17 +112,25 @@
         </button>
         <span class="sec-name">入点到出点</span>
         <span class="grow"></span>
-        <span class="tag" data-set="io" title="点击全选"><span class="cnt" id="cnt-io">0</span><span class="sep2">|</span><span class="dur" id="sum-io"></span></span>
+        <span class="tag" data-set="io" title="点击全选"><span class="cnt" id="cnt-io">0</span></span>
       </div>
       <div class="list" id="io-list"></div>
     </section>
   </div>
 
   <footer>
-    <button id="btn-all">全选</button>
-    <span id="sel-count">已选0条记录</span>
-    <button id="btn-clear" disabled>清除记录</button>
-    <button id="btn-export" disabled>导出记录</button>
+    <button id="btn-all" title="全选">
+      <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
+    </button>
+    <div class="footer-meta">
+      <span id="sel-count">已选0条记录</span>
+      <span id="sum-sep" class="sum-sep" hidden>|</span>
+      <span id="sum-io" class="sum-line"></span>
+    </div>
+    <button id="btn-clear" title="清除记录" disabled>
+      <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>
+    </button>
+    <button id="btn-export" disabled>导出日志</button>
   </footer>
 
   <script src="xlsx-writer.js"></script>

@@ -1,4 +1,4 @@
-/* 芒着拉片 · 分屏侧边栏（上下堆叠 + 自动刷新） */
+/* 芒着拉片 · 侧边栏（上下堆叠 + 自动刷新） */
 'use strict';
 
 (async function setup() {
@@ -12,19 +12,29 @@
     btnAll: '#btn-all',
     btnClear: '#btn-clear',
     btnExport: '#btn-export',
-    btnRefresh: '#btn-refresh',
+    btnReload: '#btn-reload',
     btnSettings: '#btn-settings',
     settingsMenu: '#settings-menu',
     btnMode: '#btn-mode',
     modeMenu: '#mode-menu',
-    togEnabled: '#tog-enabled',
+    togLog: '#tog-log',
+    togBar: '#tog-bar',
+    togNote: '#tog-note',
+    togTitle: '#tog-title',
     togAll: '#tog-all',
     togTheme: '#tog-theme',
     setRowAll: '#set-row-all',
-    btnClearAll: '#btn-clearall',
+    btnHelp: '#btn-help',
+    sumSep: '#sum-sep',
     err: '#err',
     wrap: '#wrap',
-    footer: 'footer'
+    footer: 'footer',
+    pageTitle: '#page-title',
+    btnHistory: '#btn-history',
+    historyMenu: '#history-menu',
+    histList: '#hist-list',
+    histAll: '#hist-all',
+    histClear: '#hist-clear'
   });
 
   MPP.load(true);
