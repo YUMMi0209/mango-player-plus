@@ -1,11 +1,11 @@
 /* 芒着拉片 · 后台
    - 设置（插件开关 / 应用于所有网页）经 executeScript 注入页面为 window.__mgpSettings
-   - 图标点击：不记忆模式，每次默认弹窗；会话内切到侧边栏（popup 被清空）后点击则打开侧边栏 */
+   - 图标点击：记忆上次使用的面板模式（弹窗 / 侧边栏 / 独立窗口），浏览器重启后依旧按该模式打开 */
 'use strict';
 
 const SETTINGS_KEY = 'mpp_settings';
-// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关，另含截图录制文件名备注/标题开关
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true };
+// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关，另含截图录制文件名备注/标题开关；lastMode 记忆上次的面板显示模式
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true, lastMode: 'popup' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
@@ -57,9 +57,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(() => chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { }));
-chrome.runtime.onStartup.addListener(() => chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { }));
+// 按记忆的显示模式设置图标点击行为：弹窗 = 保留 popup；侧边栏/独立窗口 = 清空 popup 走 onClicked
+function applyLastMode(lastMode) {
+  const popup = lastMode === 'popup' ? 'popup.html' : '';
+  return chrome.action.setPopup({ popup }).catch(() => { });
+}
 
-chrome.action.onClicked.addListener(tab => {
+chrome.runtime.onInstalled.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
+chrome.runtime.onStartup.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
+
+chrome.action.onClicked.addListener(async tab => {
+  const s = await getSettings();
+  if (s.lastMode === 'window') {
+    // 独立窗口：与面板切换行为一致，关联当前激活标签页
+    if (tab.id != null) chrome.storage.session.set({ mpp_src_tab: tab.id }).catch(() => { });
+    chrome.windows.create({
+      url: 'sidebar.html?win=1',
+      type: 'popup',
+      width: 430,
+      height: 680,
+      focused: true
+    }).catch(() => { });
+    return;
+  }
   chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => { });
 });

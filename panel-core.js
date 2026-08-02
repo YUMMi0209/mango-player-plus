@@ -758,8 +758,16 @@ const MPP = (() => {
   function isWindowMode() {
     try { return new URLSearchParams(location.search).get('win') === '1'; } catch (e) { return false; }
   }
+  // 记忆上次使用的显示模式：浏览器重启后图标点击仍按该模式打开
+  function saveLastMode(mode) {
+    return getSettings().then(s => {
+      s.lastMode = mode;
+      return chrome.storage.local.set({ mpp_settings: s }).catch(() => { });
+    });
+  }
   function openSidebarMode() {
     chrome.action.setPopup({ popup: '' }).catch(() => { });
+    saveLastMode('sidebar');
     return findTab().then(t => {
       if (t && t.id != null) {
         return chrome.sidePanel.open({ tabId: t.id }).catch(() => { });
@@ -768,6 +776,8 @@ const MPP = (() => {
   }
   function openWindowMode() {
     // 独立窗口：复用侧边栏布局，以紧凑 popup 窗口打开（无地址栏/标签栏，近似 QQ 登录小窗）
+    chrome.action.setPopup({ popup: '' }).catch(() => { });
+    saveLastMode('window');
     return findTab().then(t => {
       if (t && t.id != null) rememberSrcTab(t.id);
       return chrome.windows.create({
@@ -781,6 +791,7 @@ const MPP = (() => {
   }
   function openPopupMode() {
     chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
+    saveLastMode('popup');
     return chrome.action.openPopup().catch(() => { });
   }
   function bindModeMenu() {
