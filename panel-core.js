@@ -621,12 +621,12 @@ const MPP = (() => {
     const val = edit.value.trim();
     if (!rec) return;
     execInPage(fnSetNote, [isMk ? 'mk' : 'io', idx, val]).then(ok => {
-      if (!ok) return;
+      if (!ok) { edit.value = val; return; } // 保存失败：恢复输入内容，停留编辑态
       if (val) rec.note = val; else delete rec.note;
       // 原地更新显示，不重建整表（避免打断勾选等其他交互）
       cancelNoteEdit(edit);
       updateNoteLines();
-    }).catch(() => { });
+    }).catch(() => { edit.value = val; });
   }
 
   // ─── 侧边栏：折叠 + 标题点击全选 ─────────────
@@ -734,6 +734,8 @@ const MPP = (() => {
       if (e.key === 'Escape') { e.preventDefault(); cancelNoteEdit(edit); return; }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        // 先提交保存（同步读取输入值），再取消选中——updateSel 会重置备注输入框的值
+        commitNoteEdit(edit);
         const row = edit.closest('.row');
         if (row) {
           const isMk = row.dataset.mk !== undefined;
@@ -747,7 +749,6 @@ const MPP = (() => {
             updateSel();
           }
         }
-        commitNoteEdit(edit);
       }
     });
     list.addEventListener('focusout', e => {
