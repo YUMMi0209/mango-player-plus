@@ -1029,8 +1029,10 @@ const MPP = (() => {
       el.hidden = true;
       wrap.appendChild(input);
       input.focus();
-      // 光标置于最左侧开始编辑（不全选）
-      try { input.setSelectionRange(0, 0); } catch (e) { }
+      // 光标置于文字最左侧开始编辑（不全选；等焦点定位稳定后再设一次）
+      const caretAtStart = () => { try { input.setSelectionRange(0, 0); } catch (e) { } };
+      caretAtStart();
+      requestAnimationFrame(caretAtStart);
       let done = false;
       const finish = save => {
         if (done) return;

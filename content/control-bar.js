@@ -196,7 +196,7 @@
 	  pointer-events:auto;white-space:nowrap;
 	}
 	#mgp-seek-in{
-	  width:200px;height:24px;padding:0 8px;
+	  width:168px;height:24px;padding:0 8px;
 	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:4px;
 	  color:#fff;font-size:11px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
 	  outline:none;
@@ -425,7 +425,7 @@
     const box = document.createElement('div');
     box.id = 'mgp-seek';
     box.innerHTML =
-      '<input id="mgp-seek-in" spellcheck="false" placeholder="hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss">' +
+      '<input id="mgp-seek-in" spellcheck="false" placeholder="输入时间码，任意格式均可">' +
       '<button id="mgp-seek-go" type="button">跳转</button>';
     tcEl.appendChild(box);
     tcEl.classList.add('seek-open');
