@@ -563,7 +563,8 @@ const MPP = (() => {
         text.classList.toggle('empty', !hasNote);
       }
       const edit = el.querySelector('.note-edit');
-      if (edit) edit.value = rec ? (rec.note || '') : '';
+      // 正在编辑的输入框不被覆写，避免选中态变化时清空已输入内容
+      if (edit && edit !== document.activeElement) edit.value = rec ? (rec.note || '') : '';
     });
     if (sel.mk.size + sel.io.size !== 1) return;
     let idx = -1, type = '';
@@ -602,6 +603,7 @@ const MPP = (() => {
       edit.style.height = Math.max(18, text.getBoundingClientRect().height) + 'px';
       text.hidden = true;
     }
+    delete edit.dataset.committing;
     edit.hidden = false;
     edit.focus();
     try { edit.setSelectionRange(edit.value.length, edit.value.length); } catch (e) { }
@@ -612,6 +614,9 @@ const MPP = (() => {
     if (text) text.hidden = false;
   }
   function commitNoteEdit(edit) {
+    // 防重提交：Enter 后失焦会再触发一次 blur 保存，跳过避免用旧值覆盖已存内容
+    if (edit.dataset.committing) return;
+    edit.dataset.committing = '1';
     const line = edit.closest('.note-line');
     const row = line.closest('.row');
     if (!row) return;
@@ -621,12 +626,12 @@ const MPP = (() => {
     const val = edit.value.trim();
     if (!rec) return;
     execInPage(fnSetNote, [isMk ? 'mk' : 'io', idx, val]).then(ok => {
-      if (!ok) { edit.value = val; return; } // 保存失败：恢复输入内容，停留编辑态
+      if (!ok) { edit.value = val; delete edit.dataset.committing; return; } // 保存失败：恢复输入内容，停留编辑态
       if (val) rec.note = val; else delete rec.note;
       // 原地更新显示，不重建整表（避免打断勾选等其他交互）
       cancelNoteEdit(edit);
       updateNoteLines();
-    }).catch(() => { edit.value = val; });
+    }).catch(() => { edit.value = val; delete edit.dataset.committing; });
   }
 
   // ─── 侧边栏：折叠 + 标题点击全选 ─────────────
