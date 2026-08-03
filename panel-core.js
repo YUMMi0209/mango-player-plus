@@ -1029,7 +1029,8 @@ const MPP = (() => {
       el.hidden = true;
       wrap.appendChild(input);
       input.focus();
-      input.select();
+      // 光标置于最左侧开始编辑（不全选）
+      try { input.setSelectionRange(0, 0); } catch (e) { }
       let done = false;
       const finish = save => {
         if (done) return;

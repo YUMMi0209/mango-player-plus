@@ -185,6 +185,30 @@
 	  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
 	}
 	#mgp-tc:hover::after{opacity:1}
+	/* 右键时间码：输入跳转弹窗（输入时隐藏“复制”提示气泡） */
+	#mgp-tc.seek-open::after{display:none}
+	#mgp-seek{
+	  position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
+	  z-index:2147483647;display:flex;align-items:center;gap:6px;
+	  background:rgba(20,20,26,.96);
+	  border:1px solid rgba(255,255,255,.15);border-radius:6px;
+	  padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+	  pointer-events:auto;white-space:nowrap;
+	}
+	#mgp-seek-in{
+	  width:200px;height:24px;padding:0 8px;
+	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:4px;
+	  color:#fff;font-size:11px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+	  outline:none;
+	}
+	#mgp-seek-in:focus{border-color:#ff5f00}
+	#mgp-seek-in::placeholder{color:#777;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+	#mgp-seek-go{
+	  height:24px;padding:0 10px;
+	  background:#ff5f00;border:none;border-radius:4px;color:#fff;
+	  font-size:12px;font-family:inherit;cursor:pointer;
+	}
+	#mgp-seek-go:hover{background:#ff6a1a}
 @keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
 `;
 
@@ -306,6 +330,11 @@
 
   function bindEvents() {
     qs('#mgp-tc').addEventListener('click', onTC);
+    qs('#mgp-tc').addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      openSeek();
+    });
     qs('#mgp-btn-ss').addEventListener('click', captureScreenshot);
     qs('#mgp-btn-rec').addEventListener('click', toggleRecording);
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
@@ -347,6 +376,84 @@
     navigator.clipboard.writeText(c).then(() => {
       mgpToast('已复制当前时间码 ( ' + c + ' )');
     }).catch(() => mgpToast('已复制当前时间码'));
+  }
+
+  // ─── 右键时间码：输入时间码跳转 ───────────────
+  // 兼容 hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss
+  function parseTCInput(raw) {
+    const s = String(raw || '').trim();
+    if (!s || !/^[0-9:]+$/.test(s)) return null;
+    if (s.indexOf(':') !== -1) {
+      const parts = s.split(':');
+      if (parts.length < 2 || parts.length > 4) return null;
+      const n = parts.map(Number);
+      if (n.some(isNaN)) return null;
+      if (parts.length === 2) {
+        // mm:ss
+        if (n[1] >= 60) return null;
+        return n[0] * 60 + n[1];
+      }
+      // 3 段：mm:ss:ff；4 段：hh:mm:ss:ff（末段为帧）
+      const ff = n[n.length - 1], ss = n[n.length - 2];
+      if (ss >= 60 || ff >= FPS) return null;
+      if (parts.length === 3) return n[0] * 60 + ss + ff / FPS;
+      const hh = n[0], mm = n[1];
+      if (mm >= 60) return null;
+      return hh * 3600 + mm * 60 + ss + ff / FPS;
+    }
+    const d = s.length;
+    if (d === 4) {
+      const mm = Number(s.slice(0, 2)), ss = Number(s.slice(2, 4));
+      return ss < 60 ? mm * 60 + ss : null;
+    }
+    if (d === 6) {
+      const mm = Number(s.slice(0, 2)), ss = Number(s.slice(2, 4)), ff = Number(s.slice(4, 6));
+      return (ss < 60 && ff < FPS) ? mm * 60 + ss + ff / FPS : null;
+    }
+    if (d === 8) {
+      const hh = Number(s.slice(0, 2)), mm = Number(s.slice(2, 4)), ss = Number(s.slice(4, 6)), ff = Number(s.slice(6, 8));
+      return (mm < 60 && ss < 60 && ff < FPS) ? hh * 3600 + mm * 60 + ss + ff / FPS : null;
+    }
+    return null;
+  }
+
+  function openSeek() {
+    const tcEl = qs('#mgp-tc');
+    if (!tcEl || !video) return;
+    const old = tcEl.querySelector('#mgp-seek');
+    if (old) old.remove();
+    const box = document.createElement('div');
+    box.id = 'mgp-seek';
+    box.innerHTML =
+      '<input id="mgp-seek-in" spellcheck="false" placeholder="hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss">' +
+      '<button id="mgp-seek-go" type="button">跳转</button>';
+    tcEl.appendChild(box);
+    tcEl.classList.add('seek-open');
+    const input = box.querySelector('#mgp-seek-in');
+    const go = box.querySelector('#mgp-seek-go');
+    const close = () => {
+      box.remove();
+      tcEl.classList.remove('seek-open');
+    };
+    const jump = () => {
+      const t = parseTCInput(input.value);
+      if (t == null) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
+      if (!video) return;
+      try { video.currentTime = Math.max(0, Math.min(t, video.duration || t)); } catch (e) { }
+      mgpToast('已跳转 ' + fmtTC(video.currentTime));
+      close();
+    };
+    input.addEventListener('keydown', e => {
+      // 阻止事件冒泡到页面：输入框在 Shadow DOM 内，页面按键监听会把宿主当目标
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); jump(); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+    input.addEventListener('blur', () => setTimeout(() => {
+      if (box.isConnected) close();
+    }, 150));
+    go.addEventListener('click', jump);
+    input.focus();
   }
 
   let lastTCFrame = -1;
