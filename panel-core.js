@@ -587,10 +587,13 @@ const MPP = (() => {
     if (edit) edit.value = rec.note || '';
   }
 
-  // 多行备注：输入时按内容自动增高（保留手动拖拽改高的余地）
+  // 多行备注：输入时按内容自动增高（保留手动拖拽改高的余地）。
+  // scrollHeight 不含上下边框，需加上边框高度，否则内容溢出 2px 触发内部滚动条，
+  // 滚动条挤窄文本宽度导致换行点变化，编辑与完成状态行数不一致。
   function growEdit(edit) {
     edit.style.height = 'auto';
-    edit.style.height = Math.max(18, edit.scrollHeight) + 'px';
+    const extra = (edit.offsetHeight - edit.clientHeight) || 2;
+    edit.style.height = Math.max(18, edit.scrollHeight + extra) + 'px';
   }
   function enterNoteEdit(edit) {
     const text = edit.parentElement.querySelector('.note-text');
@@ -739,6 +742,8 @@ const MPP = (() => {
           if (set.has(idx)) {
             set.delete(idx);
             row.classList.remove('sel');
+            const chk = row.querySelector('.chk');
+            if (chk) chk.checked = false;
             updateSel();
           }
         }

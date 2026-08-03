@@ -256,7 +256,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .note-text{font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word;cursor:text;padding:0 7px;border:1px dashed transparent;border-radius:5px;min-width:0;max-width:100%;line-height:1.5;display:block;text-align:left;flex:1}
 .note-text:hover{border-color:var(--card-brd);background:var(--row)}
 .note-text.empty{color:var(--faint);text-align:left}
-.note-edit{width:100%;min-height:18px;resize:vertical;background:var(--row);border:1px solid var(--orange);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;line-height:1.5;padding:0 7px;outline:none;flex:1;white-space:pre-wrap;word-break:break-word}
+.note-edit{width:100%;min-height:18px;resize:vertical;overflow:hidden;background:var(--row);border:1px solid var(--orange);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;line-height:1.5;padding:0 7px;outline:none;flex:1;white-space:pre-wrap;word-break:break-word}
 
 /* ─── Empty / error ──────────────────────── */
 .empty{padding:0;text-align:center;color:var(--faint)}
