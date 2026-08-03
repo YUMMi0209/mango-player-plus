@@ -931,6 +931,21 @@ const MPP = (() => {
   }
 
   // ─── 历史（有标记记录的视频列表）────────────
+  // 选中状态持久化到会话存储：面板重开 / 历史菜单重开时恢复
+  let histRestored = false;
+  function saveHistSel() {
+    chrome.storage.session.set({ mpp_hist_sel: [...histSel] }).catch(() => { });
+  }
+  function restoreHistSel() {
+    if (histRestored) return;
+    histRestored = true;
+    chrome.storage.session.get('mpp_hist_sel').then(({ mpp_hist_sel }) => {
+      if (!Array.isArray(mpp_hist_sel)) return;
+      const valid = new Set(histItems.map(it => it.key));
+      histSel = new Set(mpp_hist_sel.filter(k => valid.has(k)));
+      renderHistory();
+    }).catch(() => { });
+  }
   function bindHistory() {
     if (!els.btnHistory || !els.historyMenu) return;
     els.btnHistory.addEventListener('click', e => {
@@ -957,6 +972,7 @@ const MPP = (() => {
           const chk = item.querySelector('.chk');
           if (chk) chk.checked = histSel.has(key);
           if (els.histClear) els.histClear.disabled = histSel.size === 0;
+          saveHistSel();
           return;
         }
         const url = item.dataset.url;
@@ -966,6 +982,7 @@ const MPP = (() => {
     if (els.histAll) els.histAll.addEventListener('click', () => {
       const allSel = histItems.length > 0 && histSel.size === histItems.length;
       histSel = allSel ? new Set() : new Set(histItems.map(it => it.key));
+      saveHistSel();
       renderHistory();
     });
     if (els.histClear) els.histClear.addEventListener('click', async () => {
@@ -980,14 +997,16 @@ const MPP = (() => {
       );
       if (!ok) return;
       try { await execInPage(all ? fnClearAll : fnRemoveHistory, all ? [] : [keys]); } catch (e) { }
-      // 同步清除全局历史索引（跨网站）
-      chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
+      // 同步清除全局历史索引（跨网站）；务必等待写入完成后再刷新列表，
+      // 否则 loadHistory 会读到旧索引并合并写回，被删条目“复活”
+      await chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
         const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
         if (all) Object.keys(map).forEach(k => delete map[k]);
         else keys.forEach(k => delete map[k]);
-        chrome.storage.local.set({ mpp_history: map }).catch(() => { });
-      });
+        return chrome.storage.local.set({ mpp_history: map });
+      }).catch(() => { });
       histSel = new Set();
+      saveHistSel();
       loadHistory();
       load(true);
     });
@@ -1025,6 +1044,7 @@ const MPP = (() => {
       }));
       histItems.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
       renderHistory();
+      restoreHistSel();
     }).catch(() => { histItems = []; renderHistory(); });
   }
 
