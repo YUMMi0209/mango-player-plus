@@ -590,13 +590,16 @@ const MPP = (() => {
   // 多行备注：输入时按内容自动增高（保留手动拖拽改高的余地）
   function growEdit(edit) {
     edit.style.height = 'auto';
-    edit.style.height = Math.max(24, edit.scrollHeight) + 'px';
+    edit.style.height = Math.max(18, edit.scrollHeight) + 'px';
   }
   function enterNoteEdit(edit) {
     const text = edit.parentElement.querySelector('.note-text');
-    if (text) text.hidden = true;
+    if (text) {
+      // 进入编辑态时与展示文本同高，避免布局跳动（多行备注也不会塌缩成一行）
+      edit.style.height = Math.max(18, text.getBoundingClientRect().height) + 'px';
+      text.hidden = true;
+    }
     edit.hidden = false;
-    growEdit(edit);
     edit.focus();
     try { edit.setSelectionRange(edit.value.length, edit.value.length); } catch (e) { }
   }
@@ -999,22 +1002,28 @@ const MPP = (() => {
   function bindTitleEdit() {
     const el = els.pageTitle;
     if (!el) return;
-    el.addEventListener('click', () => {
+    el.addEventListener('click', e => {
+      // 已在编辑态（如连点）时直接复用现有输入框，避免出现两个标题
+      const wrap = el.parentElement;
+      const existing = wrap && wrap.querySelector('.pg-title-edit');
+      if (existing) { existing.focus(); return; }
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'pg-title-edit';
       input.value = el.textContent;
       input.maxLength = 80;
       input.title = '修改标题，Enter 保存，Esc 取消';
+      // 输入框与标题同高：切换编辑态时布局不跳动
+      input.style.height = el.getBoundingClientRect().height + 'px';
       el.hidden = true;
-      el.parentElement.appendChild(input);
+      wrap.appendChild(input);
       input.focus();
       input.select();
       let done = false;
       const finish = save => {
         if (done) return;
         done = true;
-        input.remove();
+        if (input.parentElement) input.parentElement.removeChild(input);
         el.hidden = false;
         const val = save ? input.value.trim() : '';
         if (val) {
