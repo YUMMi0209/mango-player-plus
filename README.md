@@ -9,11 +9,17 @@
 
 ## 0. 安装教程
 
+Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
+
 1. 获取代码：`git clone https://github.com/YUMMi0209/mango-player-plus.git`，或直接在 GitHub 页面下载 ZIP 并解压。
-2. Chrome 地址栏输入 `chrome://extensions` 打开扩展管理页。
-3. 开启右上角「开发者模式」。
-4. 点击「加载已解压的扩展程序」，选择项目文件夹。
+2. 打开扩展管理页：
+   - Chrome：地址栏输入 `chrome://extensions`
+   - Edge：地址栏输入 `edge://extensions`
+3. 开启页面右上角「开发者模式」。
+4. 点击「加载已解压的扩展程序」（Edge 文案为「加载解压缩的扩展」），选择项目文件夹。
 5. 打开芒果TV视频播放页即可使用；建议点击浏览器右上角插件图标，将其固定到工具栏。
+
+> 也可通过 Edge 加载项商店搜索「芒着拉片」直接安装（商店版本审核通过后可用）。
 
 ---
 
