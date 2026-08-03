@@ -111,10 +111,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .hist-item:hover{background:var(--row-h);border-radius:8px}
 .hist-item:last-child{border-bottom:none}
 .hist-item.sel{background:var(--orange-dk);border-radius:8px}
-.hist-item.sel:has(+ .hist-item.sel){border-radius:8px 8px 0 0;border-bottom-color:rgba(255,255,255,.07)}
+/* 组内分割线保留原色，不随合并高亮淡化消失 */
+.hist-item.sel:has(+ .hist-item.sel){border-radius:8px 8px 0 0;border-bottom-color:var(--row-brd)}
 .hist-item.sel + .hist-item.sel{border-radius:0}
 .hist-item.sel + .hist-item.sel:not(:has(+ .hist-item.sel)){border-radius:0 0 8px 8px}
-::root[data-theme="light"] .hist-item.sel:has(+ .hist-item.sel){border-bottom-color:rgba(0,0,0,.08)}
 .hist-t{flex:1;min-width:0;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s}
 .hist-item:hover .hist-t{color:var(--orange)}
 .hist-meta{color:var(--faint);font-size:10px;font-family:var(--mono);flex-shrink:0;white-space:nowrap}
