@@ -416,6 +416,7 @@ const MPP = (() => {
         els.pageTitle.textContent = t;
       } else if (t) {
         els.pageTitle.textContent = t;
+        els.pageTitle.title = t;
         els.pageTitle.hidden = false;
       } else {
         els.pageTitle.hidden = true;
@@ -1041,9 +1042,10 @@ const MPP = (() => {
       row.className = 'hist-item' + (histSel.has(it.key) ? ' sel' : '');
       row.dataset.key = it.key;
       row.dataset.url = it.url || '';
+      const titleTxt = it.title || it.key;
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (histSel.has(it.key) ? ' checked' : '') + '>' +
-        '<span class="hist-t">' + esc(it.title || it.key) + '</span>' +
+        '<span class="hist-t" title="' + esc(titleTxt) + '">' + esc(titleTxt) + '</span>' +
         '<span class="hist-meta">' + it.marks + '标记·' + it.inOut + '片段</span>';
       list.appendChild(row);
     });
