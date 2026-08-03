@@ -971,6 +971,13 @@ const MPP = (() => {
       );
       if (!ok) return;
       try { await execInPage(all ? fnClearAll : fnRemoveHistory, all ? [] : [keys]); } catch (e) { }
+      // 同步清除全局历史索引（跨网站）
+      chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
+        const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
+        if (all) Object.keys(map).forEach(k => delete map[k]);
+        else keys.forEach(k => delete map[k]);
+        chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+      });
       histSel = new Set();
       loadHistory();
       load(true);
@@ -978,8 +985,33 @@ const MPP = (() => {
   }
 
   function loadHistory() {
-    execInPage(fnGetHistory).then(items => {
-      histItems = items || [];
+    // 历史记录全局生效：合并扩展级索引（跨网站汇总）+ 当前页面本地索引（兼容旧数据 / 未同步页面）
+    const pageP = execInPage(fnGetHistory).catch(() => null);
+    const storeP = chrome.storage.local.get('mpp_history').then(({ mpp_history }) =>
+      (mpp_history && typeof mpp_history === 'object') ? mpp_history : {}
+    ).catch(() => ({}));
+    Promise.all([pageP, storeP]).then(([pageItems, storeMap]) => {
+      const map = {};
+      Object.keys(storeMap).forEach(k => {
+        const e = storeMap[k] || {};
+        if ((e.marks || 0) + (e.inOut || 0) > 0) map[k] = e;
+      });
+      if (Array.isArray(pageItems)) {
+        pageItems.forEach(it => {
+          if ((it.marks || 0) + (it.inOut || 0) > 0) {
+            map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut };
+          }
+        });
+      }
+      chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+      histItems = Object.keys(map).map(k => ({
+        key: k,
+        title: map[k].title || '',
+        url: map[k].url || '',
+        marks: map[k].marks || 0,
+        inOut: map[k].inOut || 0
+      }));
+      histItems.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
       renderHistory();
     }).catch(() => { histItems = []; renderHistory(); });
   }

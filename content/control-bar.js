@@ -96,15 +96,29 @@
     } catch (e) { }
     // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
     // 面板重命名过的标题（custom 标记）在保存记录时保留，不被网页 <title> 覆盖
+    let titleTxt = '';
     try {
       const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
       const cur = titles[videoKey()];
       if (cur && cur.custom === true) {
-        titles[videoKey()] = { title: cur.title || pageTitle(), url: location.href, custom: true };
+        titleTxt = cur.title || pageTitle();
+        titles[videoKey()] = { title: titleTxt, url: location.href, custom: true };
       } else {
-        titles[videoKey()] = { title: pageTitle(), url: location.href };
+        titleTxt = pageTitle();
+        titles[videoKey()] = { title: titleTxt, url: location.href };
       }
       localStorage.setItem('mpp_titles', JSON.stringify(titles));
+    } catch (e) { }
+    // 全局历史索引：跨网站汇总（经 content 脚本桥接写入扩展存储）
+    try {
+      window.postMessage({
+        __mgp: 'history',
+        key: videoKey(),
+        title: titleTxt,
+        url: location.href,
+        marks: logs.marks.length,
+        inOut: logs.inOut.length
+      }, '*');
     } catch (e) { }
   }
 

@@ -74,4 +74,20 @@
     lastSrc = null;
     scan();
   });
+
+  // 全局历史索引桥：接收页面（MAIN world）发来的打点统计，写入扩展级存储（跨网站共享）
+  window.addEventListener('message', e => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d.__mgp !== 'history' || !d.key) return;
+    chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
+      const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
+      if ((d.marks || 0) + (d.inOut || 0) > 0) {
+        map[d.key] = { title: String(d.title || ''), url: String(d.url || ''), marks: d.marks || 0, inOut: d.inOut || 0 };
+      } else {
+        delete map[d.key];
+      }
+      chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+    }).catch(() => { });
+  });
 })();
