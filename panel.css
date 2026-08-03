@@ -198,7 +198,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 
 /* ─── Rows ───────────────────────────────── */
 /* v2.0：行内允许备注第二行；时间码等关键信息绝不截断 */
-.row{display:flex;align-items:center;gap:8px 2px;flex-wrap:wrap;padding:4px 10px;border-bottom:1px solid var(--row-brd);cursor:pointer;width:100%;min-width:0}
+.row{display:flex;align-items:center;gap:2px 8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid var(--row-brd);cursor:pointer;width:100%;min-width:0}
 .row:hover{background:var(--row-h);border-radius:8px}
 .row.sel{background:var(--orange-dk);border-radius:8px}
 /* 多选连续行合并为圆角矩形：首行只留顶部两角、尾行只留底部两角、中间行无圆角；
@@ -247,7 +247,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mc-dot:hover{transform:scale(1.25)}
 .mc-dot.on{background:var(--dc,#999)}
 .list.cards{display:flex;flex-direction:column;padding:6px}
-.list.cards .row{border:0;border-bottom:1px solid var(--row-brd);padding:4px 8px;min-width:0}
+.list.cards .row{border:0;border-bottom:1px solid var(--row-brd);padding:8px;min-width:0}
 /* 最下面一条记录不再需要下划线 */
 .list.cards .row:last-child{border-bottom:none}
 
