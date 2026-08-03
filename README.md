@@ -11,7 +11,9 @@
 
 Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
-1. 获取代码：`git clone https://github.com/YUMMi0209/mango-player-plus.git`，或直接在 GitHub 页面下载 ZIP 并解压。
+1. 获取代码（任选其一）：
+   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v2.0.zip` 并解压；
+   - 或 `git clone https://github.com/YUMMi0209/mango-player-plus.git` 克隆仓库。
 2. 打开扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
    - Edge：地址栏输入 `edge://extensions`
