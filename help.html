@@ -85,7 +85,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <tr><td class="k"><kbd>L</kbd></td><td>加速播放（逐级翻倍，最高 16X）</td></tr>
     <tr><td class="k"><kbd>空格</kbd></td><td>恢复常速（不暂停）</td></tr>
     <tr><td class="k"><kbd>I</kbd></td><td>打<strong>入点</strong>：记录当前时刻为片段起点</td></tr>
-    <tr><td class="k"><kbd>O</kbd></td><td>打<strong>出点</strong>：与入点组成一条「入点到出点」记录（自动计算时长）</td></tr>
+    <tr><td class="k"><kbd>O</kbd></td><td>打<strong>出点</strong>：与入点组成一条「片段」记录（自动计算时长）</td></tr>
     <tr><td class="k"><kbd>M</kbd></td><td>打<strong>标记点</strong>：记录当前时刻，可后续标记颜色</td></tr>
     <tr><td class="k"><kbd>Shift</kbd>+<kbd>I</kbd> <kbd>O</kbd> <kbd>M</kbd></td><td>跳转到最近打下的入点 / 出点 / 标记点</td></tr>
     <tr><td class="k"><kbd>,</kbd> <kbd>.</kbd></td><td>逐帧后退 / 前进（按视频帧率 1 帧）</td></tr>
@@ -102,7 +102,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   </ul>
 
   <h2><span class="num">4</span>日志面板</h2>
-  <p>点击浏览器右上角插件图标打开面板。面板顶部显示当前视频的网页标题（直接读取 <span class="mono">&lt;title&gt;</span> 字段完整文本，宽度随窗口自适应，拉宽窗口可显示更多文字）。弹窗 / 侧边栏模式会跟随当前标签页，切换网页后记录自动同步。</p>
+  <p>点击浏览器右上角插件图标打开面板。面板顶部「日志记录」下方显示当前视频标题（宽度随窗口自适应，拉宽窗口可显示更多文字），<strong>点击标题即可就地改名</strong>（<kbd>Enter</kbd> 保存 / <kbd>Esc</kbd> 取消），修改后的标题会同步到「历史记录」列表与导出表格的标题列。弹窗 / 侧边栏模式会跟随当前标签页，切换网页后记录自动同步。</p>
   <h3>三种显示模式</h3>
   <p>点击右上角「模式」按钮可切换：</p>
   <div class="flow">
@@ -111,7 +111,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <span class="chip">独立窗口</span>
   </div>
   <ul style="padding-left:22px;margin:8px 0">
-    <li><strong>弹窗</strong>：紧凑窗口，页签切换「标记点 / 入点到出点」。</li>
+    <li><strong>弹窗</strong>：紧凑窗口，页签切换「标记 | Mark / 片段 | Clip」（竖线为主题强调色）。</li>
     <li><strong>侧边栏</strong>：浏览器右侧侧边栏，两组记录上下堆叠，可折叠。</li>
     <li><strong>独立窗口</strong>：独立小窗，可脱离浏览器使用。</li>
   </ul>
@@ -122,22 +122,27 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <li><strong>点击时间码</strong>跳转到视频对应时刻。</li>
     <li><strong>点击行空白处</strong>复制紧凑时间码（如 <span class="mono">00391214</span>）。</li>
     <li><strong>标记点颜色</strong>：点击记录行右侧的色圆点设为对应颜色，再次点击取消。颜色会写入导出的「颜色」列。</li>
-    <li><strong>备注</strong>：带备注的记录<strong>始终显示</strong>备注行（与所在行的时间码左对齐，无需选中）；只选中一条记录时，即使无备注也会出现「添加备注…」编辑入口。点击备注即可编辑，<kbd>Enter</kbd> 保存、<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行、<kbd>Esc</kbd> 取消。</li>
+    <li><strong>备注</strong>：带备注的记录<strong>始终显示</strong>备注行（与所在行的时间码左对齐，无需选中），多行备注<strong>完整展示所有行</strong>；只选中一条记录时，即使无备注也会出现「添加备注…」编辑入口。点击备注即可编辑，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行（输入框随内容自动增高），<kbd>Enter</kbd> 保存并取消选中，<kbd>Esc</kbd> 取消。</li>
     <li>底部单行展示 <span class="mono">已选 2条记录 | 3.5s</span>：计时器统计<strong>已选中</strong>的入点到出点记录总时长，未选中任何入出点记录时不显示。</li>
   </ul>
 
   <h2><span class="num">5</span>导出日志</h2>
-  <p>勾选记录后点击「导出日志」，生成 <span class="mono">.xlsx</span> 表格：</p>
+  <p>勾选记录后点击「导出日志」，生成 <span class="mono">.xlsx</span> 表格（两个工作表：<span class="mono">标记 | Mark</span> / <span class="mono">片段 | Clip</span>）：</p>
   <ul style="padding-left:22px;margin:8px 0">
-    <li><strong>标记点</strong>：序号 / 时间码 / 颜色 / 备注 / 链接 / 标题</li>
-    <li><strong>入点到出点</strong>：序号 / 入点时间码 / 出点时间码 / 时长 / 备注 / 入点链接 / 标题</li>
+    <li><strong>标记 | Mark</strong>：序号 / 时间码 / 颜色 / 备注 / 链接 / 标题</li>
+    <li><strong>片段 | Clip</strong>：序号 / 入点时间码 / 出点时间码 / 时长 / 备注 / 入点链接 / 标题</li>
   </ul>
   <p class="muted">链接点击可在浏览器中直接打开并自动跳转到对应时刻。</p>
+  <h3>导出文件命名</h3>
+  <p>导出文件按「<span class="mono">R/S_标题_备注_时间码_时间</span>」命名：<span class="mono">R</span> 表示录制片段（片段记录）、<span class="mono">S</span> 表示截图关键帧（标记记录），时间取 <span class="mono">mmddhhmmss</span>（如 <span class="mono">08011200</span>）。标题 / 备注是否写入文件名由设置中「文件名包含标题 / 文件名包含备注」控制。</p>
+  <div class="flow">
+    <span class="chip">R_乘风2026_第3期高光_00115210_08011200.xlsx</span>
+  </div>
 
   <h2><span class="num">6</span>历史记录</h2>
-  <p>点击面板右上角时钟按钮，列出所有打过分集（视频）的历史记录，按记录数排序。勾选时可连续选择多项，菜单不会关闭：</p>
+  <p>点击面板右上角历史按钮，列出所有打过分集（视频）的历史记录，按记录数排序。勾选时可连续选择多项，菜单不会关闭：</p>
   <ul style="padding-left:22px;margin:8px 0">
-    <li>每行显示<strong>节目标题</strong>、标记点与片段数量，右侧按钮可直接<strong>打开该视频</strong>。</li>
+    <li>每行显示<strong>节目标题</strong>（与面板上修改过的标题同步）、标记与片段数量，右侧按钮可直接<strong>打开该视频</strong>。</li>
     <li>顶部「全选」与「清除选中」按钮可批量清除某个分集的全部记录（有二次确认）。</li>
   </ul>
 
@@ -147,17 +152,17 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <tr><td class="k">亮色模式</td><td>切换面板亮色 / 暗色主题</td></tr>
     <tr><td class="k">日志记录</td><td>关闭后打点键不写入记录，面板提示「日志记录已关闭」</td></tr>
     <tr><td class="k">视频控制栏</td><td>关闭后画面内不再显示控制栏（快捷键仍然生效）</td></tr>
-    <tr><td class="k">文件名包含标题</td><td>截图 / 录制文件名开头附加节目标题（如 <span class="mono">MG_乘风2026_…</span>）</td></tr>
-    <tr><td class="k">文件名包含备注</td><td>截图 / 录制命中带备注的标记点时，文件名附加该备注</td></tr>
+    <tr><td class="k">文件名包含标题</td><td>截图 / 录制 / 导出文件名开头附加节目标题（如 <span class="mono">S_乘风2026_…</span>）</td></tr>
+    <tr><td class="k">文件名包含备注</td><td>截图 / 录制 / 导出命中带备注的标记点或片段时，文件名附加该备注</td></tr>
     <tr><td class="k">应用于当前网页（实验）</td><td>在其他非芒果TV网站启用打点与记录（需授予站点权限；授权失败或无法获取页面地址时面板会提示原因）</td></tr>
-    <tr><td class="k">重新加载</td><td>重新加载整个插件：修改代码后一键生效（面板会随之关闭）</td></tr>
+    <tr><td class="k">重载插件</td><td>重新加载整个插件：修改代码后一键生效（面板会随之关闭）</td></tr>
   </table>
   <h3>导出文件命名</h3>
   <div class="flow">
-    <span class="chip">MG_标题_备注_时间码_日期.png</span>
+    <span class="chip">S_标题_备注_时间码_mmddhhmmss.png</span>
   </div>
   <div class="flow">
-    <span class="chip">MG_rec_标题_备注_起始时间码_日期.webm / .mp4</span>
+    <span class="chip">R_标题_备注_起始时间码_mmddhhmmss.webm / .mp4</span>
   </div>
 
   <h2><span class="num">8</span>常见问题</h2>

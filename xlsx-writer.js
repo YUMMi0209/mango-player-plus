@@ -1,4 +1,4 @@
-/* 最小 XLSX 生成器：两个工作表（标记点 / 入点到出点），无第三方依赖
+/* 最小 XLSX 生成器：两个工作表（标记 | Mark / 片段 | Clip），无第三方依赖
    ZIP 条目用 STORED（不压缩）+ inlineStr 单元格，Excel / WPS 均可打开 */
 'use strict';
 (function (root, factory) {
@@ -163,8 +163,8 @@
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
         '<sheets>' +
-        '<sheet name="' + enc('标记点') + '" sheetId="1" r:id="rId1"/>' +
-        '<sheet name="' + enc('入点到出点') + '" sheetId="2" r:id="rId2"/>' +
+        '<sheet name="' + enc('标记 | Mark') + '" sheetId="1" r:id="rId1"/>' +
+        '<sheet name="' + enc('片段 | Clip') + '" sheetId="2" r:id="rId2"/>' +
         '</sheets>' +
         '</workbook>' },
       { name: 'xl/_rels/workbook.xml.rels', data:

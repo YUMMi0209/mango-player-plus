@@ -61,8 +61,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .brand-wrap{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
 .brand{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:13px;letter-spacing:.5px;white-space:nowrap}
 .brand .accent{color:var(--orange)}
-/* 当前视频标题：一行小字，随窗口宽度自适应，超长截断 */
-.page-title{font-size:10px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.3}
+/* 当前视频标题：一行小字，随窗口宽度自适应，超长截断；点击可修改 */
+.page-title{font-size:10px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.3;cursor:pointer;border-radius:4px;transition:color .12s,background .12s}
+.page-title:hover{color:var(--muted);background:var(--row)}
+.page-title + .pg-title-edit{font-size:10px;color:var(--text);background:var(--row);border:1px solid var(--orange);border-radius:5px;padding:1px 6px;line-height:1.4;outline:none;font-family:inherit;width:100%;min-width:0}
 .hdr-btns{display:flex;gap:6px;flex-shrink:0}
 .hdr-btns button{height:28px;min-width:28px;padding:0 7px;border:1px solid var(--tape-brd);background:var(--tape);color:var(--muted);border-radius:6px;cursor:pointer;font-family:inherit;line-height:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;transition:all .15s;box-shadow:inset 0 -2px 0 rgba(0,0,0,.22)}
 .hdr-btns button:hover{color:#fff;border-color:var(--orange)}
@@ -113,6 +115,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .hist-jump svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
 .hist-jump:hover{color:#fff;border-color:var(--orange)}
 .hist-empty{padding:24px 10px;text-align:center;color:var(--faint);font-size:12px}
+/* 亮色模式：历史弹窗内图标悬浮用主题色，避免白字白底不可见 */
+:root[data-theme="light"] .hist-act:hover:not(:disabled){color:var(--orange)}
+:root[data-theme="light"] .hist-act.danger:hover:not(:disabled){color:#c0392b}
+:root[data-theme="light"] .hist-jump:hover{color:var(--orange)}
 
 /* ─── 设置操作按钮（教程帮助 / 重新加载，低调中性色）── */
 .set-actions{display:flex;flex-direction:column;gap:6px;padding:9px 10px 10px}
@@ -150,6 +156,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .tab:hover{color:#fff;border-color:var(--faint)}
 .tab.active{color:var(--led);border-color:var(--orange);background:var(--orange-dk);font-weight:600;text-shadow:0 0 6px var(--led-glow);box-shadow:inset 0 0 8px rgba(255,95,0,.22)}
 .tab > .cnt{display:inline-flex;align-items:center;height:20px;padding:0 5px;box-sizing:border-box;background:var(--row);border:1px solid var(--card-brd);border-radius:8px;color:var(--muted);font-size:11px;font-family:var(--mono);line-height:1;flex-shrink:0}
+/* 页签 / 标题中的「|」分隔竖线使用主题强调色 */
+.tsep{color:var(--orange)}
 .tab.active > .cnt{color:var(--orange);border-color:var(--orange);background:var(--bg)}
 
 /* ─── 面板区（popup / 侧边栏）────────────── */
@@ -240,13 +248,15 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mc-dot.on{background:var(--dc,#999)}
 .list.cards{display:flex;flex-direction:column;padding:6px}
 .list.cards .row{border:0;border-bottom:1px solid var(--row-brd);padding:7px 8px;min-width:0}
+/* 最下面一条记录不再需要下划线 */
+.list.cards .row:last-child{border-bottom:none}
 
-/* 打点备注：时间码下一行小字（单行截断，点击展开编辑） */
-.note-line{flex-basis:100%;display:flex;align-items:flex-start;gap:6px;margin:0 0 1px 26px;min-width:0}
-.note-text{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:text;padding:0 7px;border:1px dashed transparent;border-radius:5px;min-width:0;max-width:100%;line-height:20px;display:block;text-align:left;flex:1}
+/* 打点备注：时间码下一行小字（多行完整展示，点击展开编辑；与上行间距 2px） */
+.note-line{flex-basis:100%;display:flex;align-items:flex-start;gap:6px;margin:-6px 0 1px 26px;min-width:0}
+.note-text{font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word;cursor:text;padding:0 7px;border:1px dashed transparent;border-radius:5px;min-width:0;max-width:100%;line-height:1.5;display:block;text-align:left;flex:1}
 .note-text:hover{border-color:var(--card-brd);background:var(--row)}
 .note-text.empty{color:var(--faint);text-align:left}
-.note-edit{width:100%;height:22px;min-height:22px;max-height:22px;resize:none;background:var(--row);border:1px solid var(--orange);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;line-height:1.3;padding:2px 7px;outline:none;flex:1}
+.note-edit{width:100%;min-height:24px;resize:vertical;background:var(--row);border:1px solid var(--orange);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;line-height:1.5;padding:3px 7px;outline:none;flex:1;white-space:pre-wrap;word-break:break-word}
 
 /* ─── Empty / error ──────────────────────── */
 .empty{padding:0;text-align:center;color:var(--faint)}
@@ -269,7 +279,8 @@ footer button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-wi
 #btn-clear:hover:not(:disabled){border-color:#e74c3c;color:#fff;background:rgba(231,76,60,.14)}
 #btn-export{flex-shrink:0;background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600}
 #btn-export:hover:not(:disabled){background:#ff6a1a}
-#btn-export:disabled{background:var(--row)}
+/* 禁用态与清除按钮一致：边框/文字回退中性色，仅保留行底色 */
+#btn-export:disabled{background:var(--row);border-color:var(--card-brd);color:var(--text)}
 
 /* ─── 键盘可访问性 ───────────────────────── */
 button:focus-visible{outline:2px solid var(--orange);outline-offset:1px}

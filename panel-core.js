@@ -57,8 +57,13 @@ const MPP = (() => {
       if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
       return location.origin + location.pathname;
     }
-    // 网页标题：直接读取 <title> 字段完整文本
+    // 网页标题：优先取自定义标题（mpp_titles 中 custom 标记），否则读 <title>
     function pgTitle() {
+      try {
+        const t = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
+        const e = t[vkey()];
+        if (e && String(e.title || '').trim()) return String(e.title).trim();
+      } catch (e) { }
       return (document.title || '').trim();
     }
     let data;
@@ -137,6 +142,33 @@ const MPP = (() => {
       try { return window.__mgpAPI.setNote(type, idx, note) === true; } catch (e) { }
     }
     return false;
+  }
+  // v2.0 标题重命名：写入 mpp_titles 并标记 custom，页面端保存记录时保留自定义标题
+  function fnSetTitle(title) {
+    const t = String(title || '').trim();
+    if (window.__mgpAPI && typeof window.__mgpAPI.setTitle === 'function') {
+      try { return window.__mgpAPI.setTitle(t) === true; } catch (e) { }
+    }
+    function vkey() {
+      const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
+      if (m) return 'id:' + m[1] + '_' + m[2];
+      const m1 = location.pathname.match(/(\d+)\.html$/);
+      if (m1) return 'id:' + m1[1];
+      const v = window.__mgp_video && window.__mgp_video.dataset;
+      if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
+      return location.origin + location.pathname;
+    }
+    try {
+      const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
+      const key = vkey();
+      if (!t) {
+        if (titles[key]) { delete titles[key].custom; delete titles[key].title; }
+      } else {
+        titles[key] = { title: t, url: location.href, custom: true };
+      }
+      localStorage.setItem('mpp_titles', JSON.stringify(titles));
+      return true;
+    } catch (e) { return false; }
   }
   // v2.0 历史：列出所有有标记记录的视频（标题 + 链接 + 记录数）
   function fnGetHistory() {
@@ -345,6 +377,7 @@ const MPP = (() => {
     bindCollapse();
     bindSelectAll();
     bindHistory();
+    bindTitleEdit();
   }
 
   // ─── 数据加载 ───────────────────────────────
@@ -374,13 +407,21 @@ const MPP = (() => {
     if (!valid) return false;
     if (els.pageTitle) {
       const t = (res && res.title) || '';
-      if (t) { els.pageTitle.textContent = t; els.pageTitle.hidden = false; }
-      else els.pageTitle.hidden = true;
+      // 标题编辑中不打断显隐，避免输入框与标题同时出现
+      if (document.querySelector('.pg-title-edit')) {
+        els.pageTitle.textContent = t;
+      } else if (t) {
+        els.pageTitle.textContent = t;
+        els.pageTitle.hidden = false;
+      } else {
+        els.pageTitle.hidden = true;
+      }
     }
     const sig = JSON.stringify(res.logs);
     if (!force && sig === lastSig) return true;
-    // 备注编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
+    // 备注 / 标题编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
     if (!force && document.querySelector('.note-edit:not([hidden])')) return true;
+    if (!force && document.querySelector('.pg-title-edit')) return true;
     lastSig = sig;
     // 数据变化时按记录指纹保留仍存在的选中项，避免轮询刷新打断勾选
     const prev = logs;
@@ -448,7 +489,6 @@ const MPP = (() => {
       const row = document.createElement('div');
       row.className = 'row' + (sel.mk.has(i) ? ' sel' : '');
       row.dataset.mk = i;
-      row.title = '点击时间码跳转 · 色点设标记色 · 空白处复制';
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.mk.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + (i + 1) + '</span>' +
@@ -468,7 +508,6 @@ const MPP = (() => {
       const row = document.createElement('div');
       row.className = 'row' + (sel.io.has(i) ? ' sel' : '');
       row.dataset.io = i;
-      row.title = '点击时间码跳转 · 空白处复制';
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.io.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + (i + 1) + '</span>' +
@@ -548,10 +587,16 @@ const MPP = (() => {
     if (edit) edit.value = rec.note || '';
   }
 
+  // 多行备注：输入时按内容自动增高（保留手动拖拽改高的余地）
+  function growEdit(edit) {
+    edit.style.height = 'auto';
+    edit.style.height = Math.max(24, edit.scrollHeight) + 'px';
+  }
   function enterNoteEdit(edit) {
     const text = edit.parentElement.querySelector('.note-text');
     if (text) text.hidden = true;
     edit.hidden = false;
+    growEdit(edit);
     edit.focus();
     try { edit.setSelectionRange(edit.value.length, edit.value.length); } catch (e) { }
   }
@@ -671,12 +716,31 @@ const MPP = (() => {
       row.classList.toggle('sel', chk.checked);
       updateSel();
     });
-    // 备注编辑：Enter 保存 / Shift+Enter 换行 / Esc 取消 / 失焦保存
+    // 备注输入：随内容自动增高
+    list.addEventListener('input', e => {
+      const edit = e.target.closest('.note-edit');
+      if (edit) growEdit(edit);
+    });
+    // 备注编辑：Enter 保存并取消选中 / Shift+Enter 换行 / Esc 取消 / 失焦保存
     list.addEventListener('keydown', e => {
       const edit = e.target.closest('.note-edit');
       if (!edit || edit.hidden) return;
       if (e.key === 'Escape') { e.preventDefault(); cancelNoteEdit(edit); return; }
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitNoteEdit(edit); }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const row = edit.closest('.row');
+        if (row) {
+          const isMk = row.dataset.mk !== undefined;
+          const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
+          const set = isMk ? sel.mk : sel.io;
+          if (set.has(idx)) {
+            set.delete(idx);
+            row.classList.remove('sel');
+            updateSel();
+          }
+        }
+        commitNoteEdit(edit);
+      }
     });
     list.addEventListener('focusout', e => {
       const edit = e.target.closest('.note-edit');
@@ -726,6 +790,7 @@ const MPP = (() => {
     const ioIdx = [...sel.io].sort((a, b) => a - b);
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     if (!ioIdx.length && !mkIdx.length) return;
+    const settings = await getSettings();
     // v2.0：备注字段位于链接之前，标题位于链接之后
     const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
     ioIdx.forEach((i, n) => {
@@ -741,17 +806,34 @@ const MPP = (() => {
     const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = fileName();
+    a.href = url; a.download = fileName(settings);
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     try { await execInPage(fnToast, ['已导出记录']); } catch (e) { }
   }
 
-  function fileName() {
-    const d = new Date();
-    const p = n => String(n).padStart(2, '0');
-    return 'MPP_logs_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + '.xlsx';
+  // 导出文件命名：R/S_标题_备注_时间码_时间（R=录制片段，S=截图关键帧；时间 mmddhhmmss）
+  function sanitizeName(s) {
+    return String(s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function fileName(s) {
+    const mkIdx = [...sel.mk].sort((a, b) => a - b);
+    const ioIdx = [...sel.io].sort((a, b) => a - b);
+    let kind, rec, tc;
+    if (mkIdx.length) { kind = 'S'; rec = logs.marks[mkIdx[0]]; tc = rec.tc; }
+    else if (ioIdx.length) { kind = 'R'; rec = logs.inOut[ioIdx[0]]; tc = rec.inTC; }
+    else return 'MPP_logs.xlsx';
+    const parts = [kind];
+    const fallback = els.pageTitle ? (els.pageTitle.textContent || '') : '';
+    const title = (s.titleFileName !== false) ? sanitizeName(rec.title || fallback || '') : '';
+    const note = (s.noteFileName !== false) ? sanitizeName(rec.note || '') : '';
+    if (title) parts.push(title);
+    if (note) parts.push(note);
+    parts.push(String(tc).replace(/:/g, ''));
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    parts.push(p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()));
+    return parts.join('_') + '.xlsx';
   }
 
   // ─── 显示模式切换（弹窗 / 侧边栏 / 独立窗口）────
@@ -910,6 +992,41 @@ const MPP = (() => {
           '<svg viewBox="0 0 16 16"><path d="M6.5 3.5h-3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3"/><path d="M8.5 2.5h5v5"/><path d="M13.5 2.5l-6 6"/></svg>' +
         '</button>';
       list.appendChild(row);
+    });
+  }
+
+  // ─── 标题编辑：点击面板下方标题就地改名，同步历史记录 ──
+  function bindTitleEdit() {
+    const el = els.pageTitle;
+    if (!el) return;
+    el.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'pg-title-edit';
+      input.value = el.textContent;
+      input.maxLength = 80;
+      input.title = '修改标题，Enter 保存，Esc 取消';
+      el.hidden = true;
+      el.parentElement.appendChild(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = save => {
+        if (done) return;
+        done = true;
+        input.remove();
+        el.hidden = false;
+        const val = save ? input.value.trim() : '';
+        if (val) {
+          el.textContent = val;
+          execInPage(fnSetTitle, [val]).catch(() => { });
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
     });
   }
 

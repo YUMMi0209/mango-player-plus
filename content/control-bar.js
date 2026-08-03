@@ -95,9 +95,15 @@
       localStorage.setItem(LOGS_KEY, JSON.stringify(map));
     } catch (e) { }
     // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
+    // 面板重命名过的标题（custom 标记）在保存记录时保留，不被网页 <title> 覆盖
     try {
       const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
-      titles[videoKey()] = { title: pageTitle(), url: location.href };
+      const cur = titles[videoKey()];
+      if (cur && cur.custom === true) {
+        titles[videoKey()] = { title: cur.title || pageTitle(), url: location.href, custom: true };
+      } else {
+        titles[videoKey()] = { title: pageTitle(), url: location.href };
+      }
       localStorage.setItem('mpp_titles', JSON.stringify(titles));
     } catch (e) { }
   }
@@ -115,10 +121,10 @@
     return frames ? hms+':'+String(f).padStart(2,'0') : hms;
   }
   function fmtTCPlain(sec) { return fmtTC(sec, false).replace(/:/g, '-'); }
+  // v2.0 导出文件时间：mmddhhmmss（如 08011200）
   function fmtNow() {
     const d = new Date(), p = n => String(n).padStart(2, '0');
-    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
-      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    return p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
   const CSS = `
@@ -449,7 +455,7 @@
       c.getContext('2d').drawImage(video, 0, 0);
       c.toBlob(b => {
         if (!b) { mgpToast('截图失败'); return; }
-        downloadBlob(b, 'MG_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlain(video.currentTime) + '_' + fmtNow() + '.png');
+        downloadBlob(b, 'S_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlain(video.currentTime) + '_' + fmtNow() + '.png');
         mgpToast('截图保存');
       }, 'image/png');
     } catch(e) { mgpToast('截图失败: 内容保护'); }
@@ -626,7 +632,7 @@
     const blob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
     // 从入点开始录制时用入点备注，否则用出点时刻的备注
     const recNote = noteFileName(state.recordingStart || 0) || (recStopTime != null ? noteFileName(recStopTime) : '');
-    downloadBlob(blob, 'MG_rec_' + titleForFile() + recNote + fmtTCPlain(state.recordingStart||0) + '_' + fmtNow() + '.' + ext);
+    downloadBlob(blob, 'R_' + titleForFile() + recNote + fmtTCPlain(state.recordingStart||0) + '_' + fmtNow() + '.' + ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -883,6 +889,25 @@
       if (note === undefined || note === null || String(note).trim() === '') delete arr[idx].note;
       else arr[idx].note = String(note);
       saveLogs();
+      return true;
+    },
+    // v2.0 标题重命名：写入 mpp_titles（custom 标记），并同步更新已有记录的标题字段
+    setTitle(t) {
+      const clean = String(t || '').trim();
+      let titles = {};
+      try { titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {}; } catch (e) { }
+      const key = videoKey();
+      if (!clean) {
+        const cur = titles[key];
+        if (cur) { delete cur.custom; cur.title = pageTitle(); }
+        localStorage.setItem('mpp_titles', JSON.stringify(titles));
+      } else {
+        titles[key] = { title: clean, url: location.href, custom: true };
+        localStorage.setItem('mpp_titles', JSON.stringify(titles));
+        logs.marks.forEach(m => { m.title = clean; });
+        logs.inOut.forEach(u => { u.title = clean; });
+        saveLogs();
+      }
       return true;
     },
     copyTC(t) {
