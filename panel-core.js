@@ -170,23 +170,27 @@ const MPP = (() => {
       return true;
     } catch (e) { return false; }
   }
-  // v2.0 历史：列出所有有标记记录的视频（标题 + 链接 + 记录数）
+  // v2.0 历史：列出所有有标记记录的视频（标题 + 链接 + 记录数）；
+  // 同时返回本页已知但已无记录的 key，供面板清除全局索引中的残留条目
   function fnGetHistory() {
     let map = {}, titles = {};
     try { map = JSON.parse(localStorage.getItem('mpp_logs') || '{}') || {}; } catch (e) { }
     try { titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {}; } catch (e) { }
     if (map && Array.isArray(map.inOut)) map = {};
-    const out = [];
+    const out = [], zeroKeys = [];
     for (const k of Object.keys(map)) {
       const e = map[k] || {};
       const marks = Array.isArray(e.marks) ? e.marks.length : 0;
       const inOut = Array.isArray(e.inOut) ? e.inOut.length : 0;
-      if (marks + inOut === 0) continue;
+      if (marks + inOut === 0) { zeroKeys.push(k); continue; }
       const t = titles[k] || {};
       out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut });
     }
+    for (const k of Object.keys(titles)) {
+      if (!(k in map) && zeroKeys.indexOf(k) === -1) zeroKeys.push(k);
+    }
     out.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
-    return out;
+    return { items: out, zeroKeys };
   }
   // v2.0 历史：按 videoKey 批量清除；若包含当前视频则同时重置页面端状态
   function fnRemoveHistory(keys) {
@@ -429,6 +433,8 @@ const MPP = (() => {
     baseURL = res.baseURL || '';
     keepSelection(prev);
     render();
+    // 历史菜单打开期间记录变化（打点 / 删除）时同步刷新列表
+    if (els.historyMenu && !els.historyMenu.hidden) loadHistory();
     return true;
   }
 
@@ -798,6 +804,8 @@ const MPP = (() => {
     sel.io.clear();
     sel.mk.clear();
     await load(true);
+    // 历史菜单打开时同步刷新，避免删除后列表残留
+    if (els.historyMenu && !els.historyMenu.hidden) loadHistory();
   }
 
   async function exportExcel() {
@@ -937,21 +945,21 @@ const MPP = (() => {
     });
     if (els.histList) {
       els.histList.addEventListener('click', e => {
-        const jump = e.target.closest('.hist-jump');
         const item = e.target.closest('.hist-item');
         if (!item) return;
         const key = item.dataset.key;
-        if (jump) {
-          const url = item.dataset.url;
-          if (url) chrome.tabs.create({ url }).catch(() => { });
+        // 复选框：切换选中；其余区域：打开该视频
+        if (e.target.closest('.chk')) {
+          if (histSel.has(key)) histSel.delete(key); else histSel.add(key);
+          // 仅更新当前行，不重建列表也不关闭菜单，便于连续勾选多项
+          item.classList.toggle('sel', histSel.has(key));
+          const chk = item.querySelector('.chk');
+          if (chk) chk.checked = histSel.has(key);
+          if (els.histClear) els.histClear.disabled = histSel.size === 0;
           return;
         }
-        if (histSel.has(key)) histSel.delete(key); else histSel.add(key);
-        // 仅更新当前行，不重建列表也不关闭菜单，便于连续勾选多项
-        item.classList.toggle('sel', histSel.has(key));
-        const chk = item.querySelector('.chk');
-        if (chk) chk.checked = histSel.has(key);
-        if (els.histClear) els.histClear.disabled = histSel.size === 0;
+        const url = item.dataset.url;
+        if (url) chrome.tabs.create({ url }).catch(() => { });
       });
     }
     if (els.histAll) els.histAll.addEventListener('click', () => {
@@ -990,19 +998,22 @@ const MPP = (() => {
     const storeP = chrome.storage.local.get('mpp_history').then(({ mpp_history }) =>
       (mpp_history && typeof mpp_history === 'object') ? mpp_history : {}
     ).catch(() => ({}));
-    Promise.all([pageP, storeP]).then(([pageItems, storeMap]) => {
+    Promise.all([pageP, storeP]).then(([pageRes, storeMap]) => {
       const map = {};
       Object.keys(storeMap).forEach(k => {
         const e = storeMap[k] || {};
         if ((e.marks || 0) + (e.inOut || 0) > 0) map[k] = e;
       });
-      if (Array.isArray(pageItems)) {
-        pageItems.forEach(it => {
-          if ((it.marks || 0) + (it.inOut || 0) > 0) {
-            map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut };
-          }
-        });
+      // 当前页面已无记录的 key：从全局索引清除（记录被删后历史列表不残留）
+      if (pageRes && Array.isArray(pageRes.zeroKeys)) {
+        pageRes.zeroKeys.forEach(k => delete map[k]);
       }
+      const pageItems = pageRes && Array.isArray(pageRes.items) ? pageRes.items : [];
+      pageItems.forEach(it => {
+        if ((it.marks || 0) + (it.inOut || 0) > 0) {
+          map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut };
+        }
+      });
       chrome.storage.local.set({ mpp_history: map }).catch(() => { });
       histItems = Object.keys(map).map(k => ({
         key: k,
@@ -1033,10 +1044,7 @@ const MPP = (() => {
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (histSel.has(it.key) ? ' checked' : '') + '>' +
         '<span class="hist-t">' + esc(it.title || it.key) + '</span>' +
-        '<span class="hist-meta">' + it.marks + '标记·' + it.inOut + '片段</span>' +
-        '<button type="button" class="hist-jump" title="打开视频">' +
-          '<svg viewBox="0 0 16 16"><path d="M6.5 3.5h-3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3"/><path d="M8.5 2.5h5v5"/><path d="M13.5 2.5l-6 6"/></svg>' +
-        '</button>';
+        '<span class="hist-meta">' + it.marks + '标记·' + it.inOut + '片段</span>';
       list.appendChild(row);
     });
   }
