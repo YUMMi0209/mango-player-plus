@@ -97,3 +97,7 @@
 - 默认仅对芒果TV 生效，可对任意网页开启；Shadow DOM 样式隔离
 - 帧率自动检测（25/30/50/60fps）
 - Canvas + MediaRecorder 截图 / 录制（MP4，WebM 后备）
+
+## 更新日志
+
+版本迭代与修复记录见 [CHANGELOG.md](CHANGELOG.md)。
