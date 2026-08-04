@@ -154,7 +154,7 @@
   position:absolute;top:50%;transform:translateY(-50%);z-index:2147483647;
   background:rgba(0,0,0,.55);
   border:1px solid rgba(255,255,255,.1);color:#ccc;cursor:pointer;
-  border-radius:8px;font-size:12px;font-family:inherit;
+  border-radius:6px;font-size:12px;font-family:inherit;
   transition:opacity .3s,background .15s,color .15s,border-color .15s;
   display:inline-flex;align-items:center;justify-content:center;
   flex-shrink:0;padding:8px;opacity:0;pointer-events:none;
@@ -162,20 +162,34 @@
 /* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
 #mgp-bar.show-btns ~ .mgp-side-btn,
 #mgp-bar.recording ~ .mgp-side-btn{opacity:1;pointer-events:auto}
-#mgp-btn-ss{left:12px}
-#mgp-btn-rec{right:12px}
+#mgp-btn-ss{left:8px}
+#mgp-btn-rec{right:8px}
 .mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
 .mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
+/* hover 提示：视觉样式与时间码气泡一致；截图在左向右弹、录制在右向左弹 */
+.mgp-side-btn::after{
+  content:attr(data-tip);position:absolute;top:50%;transform:translateY(-50%);
+  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
+  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
+  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
+}
+.mgp-side-btn:hover::after{opacity:1}
+#mgp-btn-ss::after{left:calc(100% + 8px)}
+#mgp-btn-rec::after{right:calc(100% + 8px)}
 .mgp-icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 #mgp-tc{
   display:flex;align-items:center;gap:5px;
   background:rgba(0,0,0,.55);
   border:1px solid rgba(255,255,255,.08);
-  padding:6px 8px;border-radius:5px;cursor:pointer;
+  padding:6px 8px;border-radius:6px;cursor:pointer;
   font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
   font-size:18px;color:#fff;letter-spacing:1px;line-height:1;
   flex-shrink:0;pointer-events:auto;white-space:nowrap;
+  /* 悬浮画面时右移动画：位移由 JS 计算写入 transform；全屏无操作 5s 淡出 */
+  transition:transform .2s ease,opacity .3s ease;
 }
+#mgp-tc.tc-hidden{opacity:0;pointer-events:none}
 #mgp-tc:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
 #mgp-tc-frames{color:#ff5f00;font-size:14px;opacity:.85}
 #mgp-tc-badge{
@@ -192,9 +206,9 @@
 	/* Timecode custom tooltip */
 	#mgp-tc{position:relative}
 	#mgp-tc::after{
-	  content:'复制当前时间码';position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
-	  background:rgba(0,0,0,.88);color:#fff;padding:5px 12px;border-radius:4px;
-	  font-size:11px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+	  content:'复制当前时间码';position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
+	  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
+	  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
 	  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
 	  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
 	}
@@ -226,6 +240,9 @@
 @keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
 `;
 
+  // 弹幕容器类名统一含 danmu / danmaku，属性选择器兜底匹配（屏蔽弹幕开关与设置一并隐藏）
+  const DANMU_CSS = '[class*="danmu"],[class*="danmaku"],[id*="danmu"],[id*="danmaku"]{display:none!important}';
+
   const HTML = `
 <div id="mgp-bar">
   <span id="mgp-tc">
@@ -233,10 +250,10 @@
     <span id="mgp-tc-text">00:00:00<span id="mgp-tc-frames">:00</span></span>
   </span>
 </div>
-<button id="mgp-btn-ss" class="mgp-side-btn" title="截图 (S)">
+<button id="mgp-btn-ss" class="mgp-side-btn" data-tip="截图 (S)">
   <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
 </button>
-<button id="mgp-btn-rec" class="mgp-side-btn" title="录制 (R)">
+<button id="mgp-btn-rec" class="mgp-side-btn" data-tip="录制 (R)">
   <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
   <span id="mgp-rec-dot"></span>
 </button>
@@ -339,6 +356,8 @@
   function onBarMouseLeave() {
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     const bar = qs('#mgp-bar');
+    const tc = qs('#mgp-tc');
+    if (tc) tc.style.transform = '';   // 时间码滑回居中
     if (bar && !recordingInternal) bar.classList.remove('show-btns');
   }
 
@@ -358,15 +377,42 @@
 
   // ─── 侧边按钮 hover 显隐（按钮位于画面垂直中间左、右两侧）──
   let hoverTimer = null;
+  // 全屏无操作 5s 自动隐藏时间码；任一鼠标移动即恢复显示并重置计时
+  let fsIdleTimer = null;
+  function showTC() {
+    const tc = qs('#mgp-tc');
+    if (tc) tc.classList.remove('tc-hidden');
+  }
+  function scheduleFsHide() {
+    if (!document.fullscreenElement) return;
+    clearTimeout(fsIdleTimer);
+    fsIdleTimer = setTimeout(() => {
+      const tc = qs('#mgp-tc');
+      if (tc) tc.classList.add('tc-hidden');
+    }, 5000);
+  }
+  // 时间码平滑右移：从居中位置移到距右缘 8px 处；全屏时距顶部边距 ×2（再下移 8px）
+  function moveTCRight() {
+    const tc = qs('#mgp-tc');
+    if (!tc || !videoContainer) return;
+    const r = videoContainer.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const dx = Math.max(0, r.width / 2 - 8 - tc.offsetWidth / 2);
+    const dy = document.fullscreenElement ? 8 : 0;
+    tc.style.transform = 'translateX(' + dx + 'px)' + (dy ? ' translateY(' + dy + 'px)' : '');
+  }
   function onBarHover(e) {
     if (!videoContainer) return;
     const r = videoContainer.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
     const x = e.clientX - r.left, y = e.clientY - r.top;
+    const bar = qs('#mgp-bar');
+    moveTCRight();
+    showTC();
+    scheduleFsHide();
     // 热区：距左/右边缘 70px 内，且位于垂直中间 ±130px 带
     const nearSide = Math.min(x, r.width - x) < 70;
     const nearMid = Math.abs(y - r.height / 2) < 130;
-    const bar = qs('#mgp-bar');
     if (bar && nearSide && nearMid) {
       bar.classList.add('show-btns');
       clearTimeout(hoverTimer);
@@ -649,10 +695,10 @@
     // 尽量贴近视频原始码率：直链播放时用资源加载统计估算源码率（以分辨率档位为下限），
     // 分片流（HLS/DASH）估算不到时退回分辨率档位。MediaRecorder 必然重编码，只能逼近原码率。
     const recPx = video.videoWidth * video.videoHeight;
-    const tierBits = recPx >= 3840 * 2160 ? 50000000
-      : recPx >= 1920 * 1080 ? 20000000
-      : recPx >= 1280 * 720 ? 12000000
-      : 8000000;
+    const tierBits = recPx >= 3840 * 2160 ? 37500000
+      : recPx >= 1920 * 1080 ? 15000000
+      : recPx >= 1280 * 720 ? 9000000
+      : 6000000;
     const srcBits = (() => {
       try {
         const url = video.currentSrc || video.src || '';
@@ -832,8 +878,23 @@
     wrapper = null; shadow = null; video = null; videoContainer = null;
   }
 
+  // 插件启用期间（当前站点适用）屏蔽弹幕：注入 document 级样式，设置变化 / 换集时同步
+  function syncDanmuBlock() {
+    const on = hostOk();
+    const st = document.getElementById('mpp-danmu-style');
+    if (on && !st) {
+      const s = document.createElement('style');
+      s.id = 'mpp-danmu-style';
+      s.textContent = DANMU_CSS;
+      document.head.appendChild(s);
+    } else if (!on && st) {
+      st.remove();
+    }
+  }
+
   function syncBar() {
     loadLogs();
+    syncDanmuBlock();
     const on = barActive();
     if (window.__mgp_video) applyHashSeek(window.__mgp_video);
     if (on && window.__mgp_video) {
@@ -898,6 +959,19 @@
 
   window.addEventListener('mgp-video-found', syncBar);
   window.addEventListener('mgp-settings', syncBar);
+
+  // 全屏切换：进入时时间码右移并启动无操作计时，退出时回到居中并停止计时
+  document.addEventListener('fullscreenchange', () => {
+    showTC();
+    if (document.fullscreenElement) {
+      moveTCRight();
+      scheduleFsHide();
+    } else {
+      const tc = qs('#mgp-tc');
+      if (tc) tc.style.transform = '';
+      clearTimeout(fsIdleTimer);
+    }
+  });
 
   // 面板「刷新」：不关闭弹窗/侧边栏，仅重启页面端服务——重建控制栏并重载记录
   window.addEventListener('mgp-reload', () => {
