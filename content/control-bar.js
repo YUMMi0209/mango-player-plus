@@ -672,10 +672,12 @@
     recCanvas = document.createElement('canvas');
     recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
     recCtx = recCanvas.getContext('2d');
-
-    // 采集帧率与源视频对齐：无参 captureStream 默认按 60fps 采样，源为 25/30fps 时会产生大量重复帧，
-    // 编码器 backlog 导致偶发卡顿丢帧；按检测帧率采集后输出帧率与源一致、顺滑不卡顿
-    recStream = recCanvas.captureStream(FPS);
+    // 立即绘制首帧，避免录制开头输出空白帧
+    paintRecFrame();
+    // 采集帧率取源帧率 2 倍（30~60 封顶）：captureStream 定时采样与视频帧绘制同频时相位随机，
+    // 采样点常落在两次绘制之间导致丢帧；加倍采样后每次绘制必被采到，输出顺滑不卡顿
+    const capFps = Math.min(60, Math.max(FPS * 2, 30));
+    recStream = recCanvas.captureStream(capFps);
 
     // Add audio track from video element
     try {
