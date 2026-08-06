@@ -673,8 +673,9 @@
     recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
     recCtx = recCanvas.getContext('2d');
 
-    // 无 fps 提示：捕获跟随画布更新逐帧输出，避免 captureStream(fps) 采样抖动导致录制卡顿
-    recStream = recCanvas.captureStream();
+    // 采集帧率与源视频对齐：无参 captureStream 默认按 60fps 采样，源为 25/30fps 时会产生大量重复帧，
+    // 编码器 backlog 导致偶发卡顿丢帧；按检测帧率采集后输出帧率与源一致、顺滑不卡顿
+    recStream = recCanvas.captureStream(FPS);
 
     // Add audio track from video element
     try {
