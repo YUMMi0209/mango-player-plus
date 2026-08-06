@@ -350,6 +350,7 @@ const MPP = (() => {
     els.modeMenu = $(cfg.modeMenu);
     els.togLog = $(cfg.togLog);
     els.togBar = $(cfg.togBar);
+    els.togDanmu = $(cfg.togDanmu);
     els.togNote = $(cfg.togNote);
     els.togTitle = $(cfg.togTitle);
     els.togAll = $(cfg.togAll);
@@ -850,9 +851,7 @@ const MPP = (() => {
     const parts = [kind];
     const fallback = els.pageTitle ? (els.pageTitle.textContent || '') : '';
     const title = (s.titleFileName !== false) ? sanitizeName(rec.title || fallback || '') : '';
-    const note = (s.noteFileName !== false) ? sanitizeName(rec.note || '') : '';
     if (title) parts.push(title);
-    if (note) parts.push(note);
     parts.push(String(tc).replace(/:/g, ''));
     const d = new Date(), p = n => String(n).padStart(2, '0');
     parts.push(p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()));
@@ -1140,6 +1139,7 @@ const MPP = (() => {
     getSettings().then(s => {
       if (els.togLog) els.togLog.checked = s.logEnabled !== false;
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
+      if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togNote) els.togNote.checked = s.noteFileName !== false;
       if (els.togTitle) els.togTitle.checked = s.titleFileName !== false;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
@@ -1154,6 +1154,11 @@ const MPP = (() => {
     if (els.togBar) els.togBar.addEventListener('change', async e => {
       const s = await getSettings();
       s.barEnabled = e.target.checked;
+      await chrome.storage.local.set({ mpp_settings: s });
+    });
+    if (els.togDanmu) els.togDanmu.addEventListener('change', async e => {
+      const s = await getSettings();
+      s.danmuBlock = e.target.checked;
       await chrome.storage.local.set({ mpp_settings: s });
     });
     if (els.togNote) els.togNote.addEventListener('change', async e => {

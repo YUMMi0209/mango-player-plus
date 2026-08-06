@@ -1,5 +1,5 @@
 :root{
-  --bg:#17171a; --card:#202024; --card-brd:#35353c;
+  --bg:#131518; --card:#1a1c1e; --card-brd:#35353c;
   --row:#26262b; --row-h:#313138; --row-brd:#2e2e34;
   --text:#ececef; --muted:#a0a0a8; --faint:#6e6e76;
   --orange:#ff5f00; --orange-dk:rgba(255,95,0,.16);
@@ -81,9 +81,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .switch{position:relative;width:34px;height:19px;flex-shrink:0}
 .switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}
 .switch .track{position:absolute;inset:0;background:var(--row-h);border:1px solid var(--card-brd);border-radius:11px;transition:background .15s,border-color .15s}
-.switch .track::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;background:#fff;border-radius:50%;transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.switch .track::after{content:"";position:absolute;top:50%;left:2px;width:13px;height:13px;background:#fff;border-radius:50%;transform:translateY(-50%);transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 .switch input:checked + .track{background:var(--orange);border-color:var(--orange)}
-.switch input:checked + .track::after{transform:translateX(15px)}
+.switch input:checked + .track::after{transform:translateX(15px) translateY(-50%)}
 
 /* ─── 模式切换菜单 ────────────────────────── */
 #mode-menu{position:absolute;top:calc(100% - 4px);right:12px;min-width:168px;background:var(--card);border:1px solid var(--card-brd);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);padding:5px;z-index:21;display:flex;flex-direction:column;gap:2px}

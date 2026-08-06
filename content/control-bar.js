@@ -162,8 +162,9 @@
 /* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
 #mgp-bar.show-btns ~ .mgp-side-btn,
 #mgp-bar.recording ~ .mgp-side-btn{opacity:1;pointer-events:auto}
-#mgp-btn-ss{left:8px}
-#mgp-btn-rec{right:8px}
+/* 距视频边框边距统一为视频宽度的 1% */
+#mgp-btn-ss{left:1%}
+#mgp-btn-rec{right:1%}
 .mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
 .mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
 /* hover 提示：视觉样式与时间码气泡一致；截图在左向右弹、录制在右向左弹 */
@@ -391,15 +392,15 @@
       if (tc) tc.classList.add('tc-hidden');
     }, 5000);
   }
-  // 时间码平滑右移：从居中位置移到距右缘 8px 处；全屏时距顶部边距 ×2（再下移 8px）
-  function moveTCRight() {
+  // 时间码下移：常规下移量为视频宽度的 2.5%（平滑动画）；全屏固定下移 0.5%、不做移动动画
+  function moveTCDown() {
     const tc = qs('#mgp-tc');
     if (!tc || !videoContainer) return;
     const r = videoContainer.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
-    const dx = Math.max(0, r.width / 2 - 8 - tc.offsetWidth / 2);
-    const dy = document.fullscreenElement ? 8 : 0;
-    tc.style.transform = 'translateX(' + dx + 'px)' + (dy ? ' translateY(' + dy + 'px)' : '');
+    const fs = !!document.fullscreenElement;
+    tc.style.transition = fs ? 'none' : '';
+    tc.style.transform = 'translateY(' + (r.width * (fs ? 0.005 : 0.025)) + 'px)';
   }
   function onBarHover(e) {
     if (!videoContainer) return;
@@ -407,7 +408,7 @@
     if (r.width <= 0 || r.height <= 0) return;
     const x = e.clientX - r.left, y = e.clientY - r.top;
     const bar = qs('#mgp-bar');
-    moveTCRight();
+    moveTCDown();
     showTC();
     scheduleFsHide();
     // 热区：距左/右边缘 70px 内，且位于垂直中间 ±130px 带
@@ -684,6 +685,7 @@
 
     const mt = (() => {
       const candidates = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
         'video/mp4;codecs=avc1.42E01E,opus',
         'video/webm;codecs=vp9,opus',
         'video/webm;codecs=vp8,opus',
@@ -695,10 +697,10 @@
     // 尽量贴近视频原始码率：直链播放时用资源加载统计估算源码率（以分辨率档位为下限），
     // 分片流（HLS/DASH）估算不到时退回分辨率档位。MediaRecorder 必然重编码，只能逼近原码率。
     const recPx = video.videoWidth * video.videoHeight;
-    const tierBits = recPx >= 3840 * 2160 ? 37500000
-      : recPx >= 1920 * 1080 ? 15000000
-      : recPx >= 1280 * 720 ? 9000000
-      : 6000000;
+    const tierBits = recPx >= 3840 * 2160 ? 50000000
+      : recPx >= 1920 * 1080 ? 20000000
+      : recPx >= 1280 * 720 ? 12000000
+      : 8000000;
     const srcBits = (() => {
       try {
         const url = video.currentSrc || video.src || '';
@@ -878,15 +880,16 @@
     wrapper = null; shadow = null; video = null; videoContainer = null;
   }
 
-  // 插件启用期间（当前站点适用）屏蔽弹幕：注入 document 级样式，设置变化 / 换集时同步
+  // 插件启用期间（当前站点适用且「禁用弹幕」开启）屏蔽弹幕：注入 document 级样式，设置变化 / 换集时同步
   function syncDanmuBlock() {
-    const on = hostOk();
+    const s = window.__mgpSettings || {};
+    const on = hostOk() && s.danmuBlock !== false;
     const st = document.getElementById('mpp-danmu-style');
     if (on && !st) {
-      const s = document.createElement('style');
-      s.id = 'mpp-danmu-style';
-      s.textContent = DANMU_CSS;
-      document.head.appendChild(s);
+      const el = document.createElement('style');
+      el.id = 'mpp-danmu-style';
+      el.textContent = DANMU_CSS;
+      document.head.appendChild(el);
     } else if (!on && st) {
       st.remove();
     }
@@ -960,11 +963,11 @@
   window.addEventListener('mgp-video-found', syncBar);
   window.addEventListener('mgp-settings', syncBar);
 
-  // 全屏切换：进入时时间码右移并启动无操作计时，退出时回到居中并停止计时
+  // 全屏切换：进入时时间码下移并启动无操作计时，退出时回到原位并停止计时
   document.addEventListener('fullscreenchange', () => {
     showTC();
     if (document.fullscreenElement) {
-      moveTCRight();
+      moveTCDown();
       scheduleFsHide();
     } else {
       const tc = qs('#mgp-tc');

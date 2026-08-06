@@ -5,7 +5,7 @@
 <title>芒着拉片 | MG Player+ 教程帮助</title>
 <style>
 :root{
-  --bg:#17171a; --card:#202024; --card-brd:#35353c;
+  --bg:#131518; --card:#1a1c1e; --card-brd:#35353c;
   --row:#26262b; --row-h:#313138;
   --text:#ececef; --muted:#a0a0a8; --faint:#6e6e76;
   --orange:#ff5f00; --orange-dk:rgba(255,95,0,.16);
@@ -97,8 +97,9 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   <h2><span class="num">3</span>视频控制栏</h2>
   <p>进入芒果TV视频页后，画面内会出现轻量控制栏：</p>
   <ul style="padding-left:22px;margin:8px 0">
-    <li><strong>顶部居中时间码</strong>：实时显示当前时间与状态徽章（<span class="mono">PLAY / IN / OUT / MARK / REC</span>）。点击可复制当前时间码；打点后自动显示入点以来的计时。<strong>右键点击</strong>弹出输入框，输入时间码直接跳转，兼容 <span class="mono">hh:mm:ss:ff</span>、<span class="mono">mm:ss:ff</span>、<span class="mono">mm:ss</span>、<span class="mono">hhmmssff</span>、<span class="mono">mmssff</span>、<span class="mono">mmss</span> 六种格式（<kbd>Enter</kbd> 跳转 / <kbd>Esc</kbd> 关闭）。</li>
+    <li><strong>顶部时间码</strong>：实时显示当前时间与状态徽章（<span class="mono">PLAY / IN / OUT / MARK / REC</span>）。点击可复制当前时间码；打点后自动显示入点以来的计时。鼠标悬浮画面时，时间码自动<strong>平滑下移</strong>，避开新版播放器的顶部遮挡，移出画面后回到原位。全屏状态下：位置自动调整，无操作 5 秒自动隐藏，移动鼠标立即恢复。<strong>右键点击</strong>弹出输入框，输入时间码直接跳转，兼容 <span class="mono">hh:mm:ss:ff</span>、<span class="mono">mm:ss:ff</span>、<span class="mono">mm:ss</span>、<span class="mono">hhmmssff</span>、<span class="mono">mmssff</span>、<span class="mono">mmss</span> 六种格式（<kbd>Enter</kbd> 跳转 / <kbd>Esc</kbd> 关闭）。</li>
     <li><strong>鼠标悬停画面</strong>时，左右两侧浮现圆形按钮：左侧<strong>截图</strong>、右侧<strong>录制</strong>；录制中常驻显示并带红色描边。</li>
+    <li><strong>弹幕屏蔽</strong>：插件启用期间自动隐藏视频弹幕（默认开启，可在设置中关闭）。</li>
   </ul>
 
   <h2><span class="num">4</span>日志面板</h2>
@@ -134,9 +135,9 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   </ul>
   <p class="muted">链接点击可在浏览器中直接打开并自动跳转到对应时刻。</p>
   <h3>导出文件命名</h3>
-  <p>导出文件按「<span class="mono">R/S_标题_备注_时间码_时间</span>」命名：<span class="mono">R</span> 表示录制片段（片段记录）、<span class="mono">S</span> 表示截图关键帧（标记记录），时间取 <span class="mono">mmddhhmmss</span>（如 <span class="mono">08011200</span>）。标题 / 备注是否写入文件名由设置中「文件名包含标题 / 文件名包含备注」控制。</p>
+  <p>Excel 导出文件名按「<span class="mono">R/S_标题_时间码_时间</span>」命名（<strong>不含备注</strong>）：<span class="mono">R</span> 表示录制片段（片段记录）、<span class="mono">S</span> 表示截图关键帧（标记记录），时间取 <span class="mono">mmddhhmmss</span>（如 <span class="mono">08011200</span>）。标题是否写入由设置中「文件名包含标题」控制。</p>
   <div class="flow">
-    <span class="chip">R_乘风2026_第3期高光_00115210_08011200.xlsx</span>
+    <span class="chip">R_乘风2026_00115210_08011200.xlsx</span>
   </div>
 
   <h2><span class="num">6</span>历史记录</h2>
@@ -153,10 +154,11 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   <table>
     <tr><th>设置项</th><th>说明</th></tr>
     <tr><td class="k">亮色模式</td><td>切换面板亮色 / 暗色主题</td></tr>
+    <tr><td class="k">禁用弹幕</td><td>插件启用期间自动隐藏视频弹幕（默认开启，关闭后恢复显示）</td></tr>
+    <tr><td class="k">视频控制</td><td>关闭后画面内不再显示控制栏（快捷键仍然生效）</td></tr>
     <tr><td class="k">日志记录</td><td>关闭后打点键不写入记录，面板提示「日志记录已关闭」</td></tr>
-    <tr><td class="k">视频控制栏</td><td>关闭后画面内不再显示控制栏（快捷键仍然生效）</td></tr>
     <tr><td class="k">文件名包含标题</td><td>截图 / 录制 / 导出文件名开头附加节目标题（如 <span class="mono">S_乘风2026_…</span>）</td></tr>
-    <tr><td class="k">文件名包含备注</td><td>截图 / 录制 / 导出命中带备注的标记点或片段时，文件名附加该备注</td></tr>
+    <tr><td class="k">文件名包含备注</td><td>截图 / 录制命中带备注的标记点或片段时，文件名附加该备注（Excel 导出不含备注）</td></tr>
     <tr><td class="k">应用于当前网页（实验）</td><td>在其他非芒果TV网站启用打点与记录（需授予站点权限；授权失败或无法获取页面地址时面板会提示原因）</td></tr>
     <tr><td class="k">重载插件</td><td>重新加载整个插件：修改代码后一键生效（面板会随之关闭）</td></tr>
   </table>

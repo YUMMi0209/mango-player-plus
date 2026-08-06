@@ -19,6 +19,7 @@
     modeMenu: '#mode-menu',
     togLog: '#tog-log',
     togBar: '#tog-bar',
+    togDanmu: '#tog-danmu',
     togNote: '#tog-note',
     togTitle: '#tog-title',
     togAll: '#tog-all',

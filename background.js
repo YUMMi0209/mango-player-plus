@@ -5,7 +5,7 @@
 
 const SETTINGS_KEY = 'mpp_settings';
 // v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关，另含截图录制文件名备注/标题开关；lastMode 记忆上次的面板显示模式
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true, lastMode: 'popup' };
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, titleFileName: true, lastMode: 'popup' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
