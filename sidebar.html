@@ -53,8 +53,12 @@
         <label class="switch"><input type="checkbox" id="tog-bar"><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <span class="set-label">日志记录</span>
-        <label class="switch"><input type="checkbox" id="tog-log"><span class="track"></span></label>
+        <span class="set-label">打点自动截图</span>
+        <label class="switch"><input type="checkbox" id="tog-shot"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">时间码显示回避</span>
+        <label class="switch"><input type="checkbox" id="tog-avoid"><span class="track"></span></label>
       </div>
       <div class="set-row">
         <span class="set-label">文件名包含标题</span>
@@ -70,6 +74,10 @@
         <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
       </div>
       <div class="set-actions">
+        <button id="btn-webfs" type="button" class="set-action-btn">
+          <svg viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 6.5v-4M6.5 2.5h-4v4M9.5 13.5h4v-4"/></svg>
+          网页全屏
+        </button>
         <button id="btn-help" type="button" class="set-action-btn">
           <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.2v.3"/><circle cx="8" cy="11.7" r=".8" fill="currentColor" stroke="none"/></svg>
           教程帮助
@@ -84,6 +92,9 @@
       <div class="hist-head">
         <span class="hist-title">历史记录</span>
         <span class="grow"></span>
+        <button type="button" id="hist-import" class="hist-act" title="导入日志 Excel">
+          <svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7"/><path d="M2.5 11.5v2h11v-2"/></svg>
+        </button>
         <button type="button" id="hist-all" class="hist-act" title="全选/取消全选">
           <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
         </button>
@@ -138,6 +149,7 @@
   </footer>
 
   <script src="xlsx-writer.js"></script>
+  <script src="xlsx-reader.js"></script>
   <script src="panel-core.js"></script>
   <script src="sidebar.js"></script>
 </body>

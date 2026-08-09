@@ -5,7 +5,7 @@
   "default_locale": "zh_CN",
   "description": "__MSG_extDesc__",
   "permissions": ["scripting", "sidePanel", "storage", "activeTab", "windows"],
-  "host_permissions": ["https://www.mgtv.com/*", "https://*.mgtv.com/*"],
+  "host_permissions": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
   "optional_host_permissions": ["<all_urls>"],
   "content_scripts": [{
     "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "<all_urls>"],

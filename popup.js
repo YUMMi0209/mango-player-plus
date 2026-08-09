@@ -19,7 +19,8 @@ MPP.init({
   settingsMenu: '#settings-menu',
   btnMode: '#btn-mode',
   modeMenu: '#mode-menu',
-  togLog: '#tog-log',
+  togShot: '#tog-shot',
+  togAvoid: '#tog-avoid',
   togBar: '#tog-bar',
   togDanmu: '#tog-danmu',
   togNote: '#tog-note',
@@ -27,6 +28,7 @@ MPP.init({
   togAll: '#tog-all',
   togTheme: '#tog-theme',
   setRowAll: '#set-row-all',
+  btnWebFs: '#btn-webfs',
   btnHelp: '#btn-help',
   sumSep: '#sum-sep',
   err: '#err',
@@ -36,6 +38,7 @@ MPP.init({
   btnHistory: '#btn-history',
   historyMenu: '#history-menu',
   histList: '#hist-list',
+  histImport: '#hist-import',
   histAll: '#hist-all',
   histClear: '#hist-clear'
 });

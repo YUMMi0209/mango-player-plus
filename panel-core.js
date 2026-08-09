@@ -90,6 +90,34 @@ const MPP = (() => {
   function fnToast(msg) {
     try { if (window.__mgpToast) window.__mgpToast(msg, true); } catch (e) { }
   }
+  // 页面 videoKey（与 control-bar 一致）
+  function fnPageKey() {
+    const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
+    if (m) return 'id:' + m[1] + '_' + m[2];
+    const m1 = location.pathname.match(/(\d+)\.html$/);
+    if (m1) return 'id:' + m1[1];
+    const v = window.__mgp_video && window.__mgp_video.dataset;
+    if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
+    return location.origin + location.pathname;
+  }
+  // 日志导入合并到当前页面（control-bar __mgpAPI.importLogs），返回新增条数
+  function fnImportLogs(marks, inOut) {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.importLogs === 'function') {
+        return window.__mgpAPI.importLogs(marks, inOut);
+      }
+    } catch (e) { }
+    return 0;
+  }
+  // 网页全屏切换：进入返回 true，退出返回 false
+  function fnToggleWebFs() {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.toggleWebFs === 'function') {
+        return window.__mgpAPI.toggleWebFs() === true;
+      }
+    } catch (e) { }
+    return false;
+  }
   function fnJump(time) {
     try {
       if (window.__mgpAPI && typeof window.__mgpAPI.jumpTo === 'function') {
@@ -274,14 +302,12 @@ const MPP = (() => {
   }
 
   const SETTINGS_KEY = 'mpp_settings';
-  function getSettings() {
-    return chrome.storage.local.get(SETTINGS_KEY).then(s =>
-      Object.assign({ enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true }, s[SETTINGS_KEY] || {}));
-  }
-
-  // ─── 轻提示（短暂反馈，用于开关失败等场景）──
-  let toastTimer = null;
-  function toast(msg) {
+  // 默认白名单站点：无需「应用于当前网页」授权即可打点（芒果TV 与百度网盘）
+  function isMgtv(host) { return !!host && /mgtv\.com$/.test(host); }
+  function isDefaultHost(host) { return isMgtv(host) || host === 'pan.baidu.com'; }
+  // ─── 面板轻提示（导入 / 删除 / 导出等面板操作反馈）──
+  let panelToastTimer = null;
+  function panelToast(msg) {
     let t = document.getElementById('mpp-toast');
     if (!t) {
       t = document.createElement('div');
@@ -290,8 +316,12 @@ const MPP = (() => {
     }
     t.textContent = msg;
     t.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+    clearTimeout(panelToastTimer);
+    panelToastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+  function getSettings() {
+    return chrome.storage.local.get(SETTINGS_KEY).then(s =>
+      Object.assign({ enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: false, titleFileName: false }, s[SETTINGS_KEY] || {}));
   }
 
   // ─── 二次确认弹窗 ──────────────────────────
@@ -348,7 +378,8 @@ const MPP = (() => {
     els.settingsMenu = $(cfg.settingsMenu);
     els.btnMode = $(cfg.btnMode);
     els.modeMenu = $(cfg.modeMenu);
-    els.togLog = $(cfg.togLog);
+    els.togShot = $(cfg.togShot);
+    els.togAvoid = $(cfg.togAvoid);
     els.togBar = $(cfg.togBar);
     els.togDanmu = $(cfg.togDanmu);
     els.togNote = $(cfg.togNote);
@@ -356,6 +387,7 @@ const MPP = (() => {
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
     els.setRowAll = $(cfg.setRowAll);
+    els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
     els.sumSep = $(cfg.sumSep);
     els.err = $(cfg.err);
@@ -365,6 +397,7 @@ const MPP = (() => {
     els.btnHistory = $(cfg.btnHistory);
     els.historyMenu = $(cfg.historyMenu);
     els.histList = $(cfg.histList);
+    els.histImport = $(cfg.histImport);
     els.histAll = $(cfg.histAll);
     els.histClear = $(cfg.histClear);
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
@@ -396,20 +429,23 @@ const MPP = (() => {
         if (/^https?:$/.test(u.protocol)) { curOrigin = u.origin; curHost = u.hostname; }
       } catch (e) { }
     }
-    const onMgtv = !!(res && res.host && /mgtv\.com$/.test(res.host));
+    const onDefault = isDefaultHost(res && res.host);
     const active = !!(res && res.host) && Array.isArray(settings.activeHosts) && settings.activeHosts.indexOf(res.host) !== -1;
     // v2.0：面板是否可用取决于「日志记录」开关（与视频控制栏开关互不影响）
     const logOn = settings.logEnabled !== false;
-    const valid = !!(res && res.host) && logOn && (onMgtv || active);
-    if (els.togAll) els.togAll.checked = !onMgtv && active;
-    if (els.setRowAll) els.setRowAll.hidden = onMgtv;
+    const valid = !!(res && res.host) && logOn && (onDefault || active);
+    if (els.togAll) els.togAll.checked = !onDefault && active;
+    if (els.setRowAll) els.setRowAll.hidden = onDefault;
+    // 时间码显示回避：未手动设置过时按站点默认（芒果TV开、其他站点关）
+    if (els.togAvoid) els.togAvoid.checked = settings.avoidTimecode === undefined ? isMgtv(res && res.host) : settings.avoidTimecode !== false;
     if (els.err) {
       els.err.innerHTML = settings.logEnabled === false
         ? '日志记录已关闭<br>点击右上角设置按钮重新开启'
         : '请在芒果TV视频页面打开此面板<br>或开启「应用于当前网页」';
     }
     setVisible(valid);
-    if (!valid) return false;
+    pageValid = valid;
+    // 标题始终跟随当前网页：未开启「应用于当前网页」的页面也显示网页名，而非残留上一页标题
     if (els.pageTitle) {
       const t = (res && res.title) || '';
       // 标题编辑中不打断显隐，避免输入框与标题同时出现
@@ -423,6 +459,7 @@ const MPP = (() => {
         els.pageTitle.hidden = true;
       }
     }
+    if (!valid) return false;
     const sig = JSON.stringify(res.logs);
     if (!force && sig === lastSig) return true;
     // 备注 / 标题编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
@@ -834,21 +871,21 @@ const MPP = (() => {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    try { await execInPage(fnToast, ['已导出记录']); } catch (e) { }
+    panelToast('已导出记录');
   }
 
-  // 导出文件命名：R/S_标题_备注_时间码_时间（R=录制片段，S=截图关键帧；时间 mmddhhmmss）
+  // 导出文件命名：LOG_标题_时间码_时间（日志 Excel，前缀统一 LOG；时间 mmddhhmmss）
   function sanitizeName(s) {
     return String(s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
   }
   function fileName(s) {
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     const ioIdx = [...sel.io].sort((a, b) => a - b);
-    let kind, rec, tc;
-    if (mkIdx.length) { kind = 'S'; rec = logs.marks[mkIdx[0]]; tc = rec.tc; }
-    else if (ioIdx.length) { kind = 'R'; rec = logs.inOut[ioIdx[0]]; tc = rec.inTC; }
-    else return 'MPP_logs.xlsx';
-    const parts = [kind];
+    let rec, tc;
+    if (mkIdx.length) { rec = logs.marks[mkIdx[0]]; tc = rec.tc; }
+    else if (ioIdx.length) { rec = logs.inOut[ioIdx[0]]; tc = rec.inTC; }
+    else return 'LOG_芒着拉片日志.xlsx';
+    const parts = ['LOG'];
     const fallback = els.pageTitle ? (els.pageTitle.textContent || '') : '';
     const title = (s.titleFileName !== false) ? sanitizeName(rec.title || fallback || '') : '';
     if (title) parts.push(title);
@@ -978,6 +1015,23 @@ const MPP = (() => {
         if (url) chrome.tabs.create({ url }).catch(() => { });
       });
     }
+    // 日志 Excel 导入：历史弹窗导入按钮 + 拖拽文件到插件窗口
+    if (els.histImport) {
+      const fi = document.createElement('input');
+      fi.type = 'file'; fi.accept = '.xlsx'; fi.hidden = true;
+      document.body.appendChild(fi);
+      els.histImport.addEventListener('click', () => fi.click());
+      fi.addEventListener('change', () => {
+        importLogsFromFiles([...fi.files]);
+        fi.value = '';
+      });
+    }
+    ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      const files = [...(e.dataTransfer ? e.dataTransfer.files : [])].filter(f => /\.xlsx?$/i.test(f.name));
+      if (files.length) importLogsFromFiles(files);
+    });
     if (els.histAll) els.histAll.addEventListener('click', () => {
       const allSel = histItems.length > 0 && histSel.size === histItems.length;
       histSel = allSel ? new Set() : new Set(histItems.map(it => it.key));
@@ -1004,20 +1058,141 @@ const MPP = (() => {
         else keys.forEach(k => delete map[k]);
         return chrome.storage.local.set({ mpp_history: map });
       }).catch(() => { });
+      // 同步清除导入日志明细（与历史索引保持一致）
+      await chrome.storage.local.get('mpp_imported').then(({ mpp_imported }) => {
+        const imp = (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {};
+        if (all) Object.keys(imp).forEach(k => delete imp[k]);
+        else keys.forEach(k => delete imp[k]);
+        return chrome.storage.local.set({ mpp_imported: imp });
+      }).catch(() => { });
       histSel = new Set();
       saveHistSel();
       loadHistory();
       load(true);
+      panelToast('已清除 ' + keys.length + ' 个视频的记录');
     });
   }
 
+  // ─── 日志 Excel 导入（仅支持本插件导出的 xlsx）──
+  function keyFromUrl(url) {
+    try {
+      const u = new URL(String(url || ''));
+      const m = u.pathname.match(/(\d+)\/(\d+)\.html$/);
+      if (m) return 'id:' + m[1] + '_' + m[2];
+      const m1 = u.pathname.match(/(\d+)\.html$/);
+      if (m1) return 'id:' + m1[1];
+      return u.origin + u.pathname;
+    } catch (e) { return null; }
+  }
+  // 时间码 → 秒（帧号按 25fps 估算；链接含 #mpp= 时用精确值）
+  function tcToSec(tc) {
+    const p = String(tc || '').split(':').map(Number);
+    if (p.length < 2 || p.some(isNaN)) return null;
+    if (p.length === 2) return p[0] * 60 + p[1];
+    if (p.length === 3) return p[0] * 60 + p[1] + p[2] / 25;
+    if (p.length === 4) return p[0] * 3600 + p[1] * 60 + p[2] + p[3] / 25;
+    return null;
+  }
+  function timeFromUrl(url) {
+    const m = String(url || '').match(/mpp=([\d.]+)/);
+    return m ? parseFloat(m[1]) : null;
+  }
+  async function importLogsFromFiles(files) {
+    const recs = [];
+    let filesOk = 0;
+    for (const f of files) {
+      let buf;
+      try { buf = await f.arrayBuffer(); } catch (e) { continue; }
+      let data = null;
+      try { data = window.XlsxReader ? XlsxReader.read(buf) : null; } catch (e) { data = null; }
+      if (!data) continue;
+      filesOk++;
+      (data.marks || []).slice(1).forEach(r => {
+        if (!r[1]) return;
+        recs.push({ kind: 'marks', tc: r[1], color: r[2] || null, note: r[3] || null, url: r[4] || '', title: r[5] || '' });
+      });
+      (data.inOut || []).slice(1).forEach(r => {
+        if (!r[1] || !r[2]) return;
+        recs.push({ kind: 'inOut', inTC: r[1], outTC: r[2], dur: parseFloat(r[3]) || 0, note: r[4] || null, url: r[5] || '', title: r[6] || '' });
+      });
+    }
+    if (!filesOk) {
+      panelToast('无法解析 Excel（仅支持本插件导出的 xlsx）');
+      return;
+    }
+    if (!recs.length) {
+      panelToast('Excel 中没有可导入的记录');
+      return;
+    }
+    const groups = {};
+    recs.forEach(r => {
+      const key = keyFromUrl(r.url) || 'unknown';
+      (groups[key] = groups[key] || []).push(r);
+    });
+    // 与当前视频页匹配的记录 → 合并进页面日志（去重后追加，日志面板实时可见）
+    let pageKey = null;
+    try { pageKey = await execInPage(fnPageKey); } catch (e) { }
+    const pageRecs = pageKey ? (groups[pageKey] || []) : [];
+    let pageAdded = 0;
+    if (pageRecs.length) {
+      try {
+        const mk = pageRecs.filter(r => r.kind === 'marks').map(r => ({
+          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc),
+          tc: r.tc, color: r.color, note: r.note
+        }));
+        const io = pageRecs.filter(r => r.kind === 'inOut').map(r => ({
+          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC),
+          inTC: r.inTC, outTime: tcToSec(r.outTC), outTC: r.outTC, dur: r.dur, note: r.note
+        }));
+        pageAdded = (await execInPage(fnImportLogs, [mk, io])) || 0;
+      } catch (e) { }
+    }
+    // 其他视频 → 导入明细合并（按时间码去重，历史记录显示计数）
+    const cur = await chrome.storage.local.get('mpp_imported').catch(() => ({}));
+    const base = (cur.mpp_imported && typeof cur.mpp_imported === 'object') ? cur.mpp_imported : {};
+    let impAdded = 0;
+    Object.keys(groups).forEach(key => {
+      if (key === pageKey) return;
+      const rs = groups[key];
+      const first = rs[0];
+      const entry = base[key] || { title: first.title || '', url: first.url || '', marks: [], inOut: [] };
+      const mkTcs = new Set((entry.marks || []).map(m => m.tc));
+      const ioTcs = new Set((entry.inOut || []).map(u => u.inTC + '|' + u.outTC));
+      rs.forEach(r => {
+        if (r.kind === 'marks') {
+          if (mkTcs.has(r.tc)) return;
+          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc), tc: r.tc, color: r.color, note: r.note });
+          mkTcs.add(r.tc); impAdded++;
+        } else {
+          const k2 = r.inTC + '|' + r.outTC;
+          if (ioTcs.has(k2)) return;
+          entry.inOut.push({
+            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC),
+            inTC: r.inTC, outTime: tcToSec(r.outTC), outTC: r.outTC, dur: r.dur, note: r.note
+          });
+          ioTcs.add(k2); impAdded++;
+        }
+      });
+      if (!entry.title && first.title) entry.title = first.title;
+      if (!entry.url && first.url) entry.url = first.url;
+      base[key] = entry;
+    });
+    if (impAdded) await chrome.storage.local.set({ mpp_imported: base }).catch(() => { });
+    panelToast('已导入 ' + Object.keys(groups).length + ' 个视频 · ' + (pageAdded + impAdded) + ' 条记录');
+    loadHistory();
+    load(true);
+  }
+
   function loadHistory() {
-    // 历史记录全局生效：合并扩展级索引（跨网站汇总）+ 当前页面本地索引（兼容旧数据 / 未同步页面）
+    // 历史记录全局生效：合并扩展级索引（跨网站汇总）+ 当前页面本地索引（兼容旧数据 / 未同步页面）+ 导入日志明细
     const pageP = execInPage(fnGetHistory).catch(() => null);
     const storeP = chrome.storage.local.get('mpp_history').then(({ mpp_history }) =>
       (mpp_history && typeof mpp_history === 'object') ? mpp_history : {}
     ).catch(() => ({}));
-    Promise.all([pageP, storeP]).then(([pageRes, storeMap]) => {
+    const importedP = chrome.storage.local.get('mpp_imported').then(({ mpp_imported }) =>
+      (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {}
+    ).catch(() => ({}));
+    Promise.all([pageP, storeP, importedP]).then(([pageRes, storeMap, importedMap]) => {
       const map = {};
       Object.keys(storeMap).forEach(k => {
         const e = storeMap[k] || {};
@@ -1033,7 +1208,25 @@ const MPP = (() => {
           map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut };
         }
       });
+      // 写回仅限本地索引（不包含导入计数，避免重复累积）
       chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+      // 显示层合并导入日志明细：与本地记录冲突时计数相加，标题 / 链接优先取已有
+      Object.keys(importedMap).forEach(k => {
+        const e = importedMap[k] || {};
+        const mk = Array.isArray(e.marks) ? e.marks.length : 0;
+        const io = Array.isArray(e.inOut) ? e.inOut.length : 0;
+        if (mk + io === 0) return;
+        if (map[k]) {
+          map[k] = {
+            title: map[k].title || e.title || '',
+            url: map[k].url || e.url || '',
+            marks: (map[k].marks || 0) + mk,
+            inOut: (map[k].inOut || 0) + io
+          };
+        } else {
+          map[k] = { title: e.title || '', url: e.url || '', marks: mk, inOut: io };
+        }
+      });
       histItems = Object.keys(map).map(k => ({
         key: k,
         title: map[k].title || '',
@@ -1070,11 +1263,14 @@ const MPP = (() => {
     });
   }
 
-  // ─── 标题编辑：点击面板下方标题就地改名，同步历史记录 ──
+  // ─── 标题编辑：点击面板下方标题就地改名，同步历史记录（仅有效打点页面可编辑）──
+  let pageValid = false;
   function bindTitleEdit() {
     const el = els.pageTitle;
     if (!el) return;
     el.addEventListener('click', e => {
+      if (!pageValid) return;   // 未开启「应用于当前网页」的普通网页仅展示，不可改名
+
       // 已在编辑态（如连点）时直接复用现有输入框，避免出现两个标题
       const wrap = el.parentElement;
       const existing = wrap && wrap.querySelector('.pg-title-edit');
@@ -1137,7 +1333,8 @@ const MPP = (() => {
       }
     });
     getSettings().then(s => {
-      if (els.togLog) els.togLog.checked = s.logEnabled !== false;
+      // 打点自动截图：未手动设置过时按站点默认（百度网盘开、其他站点关）
+      if (els.togShot) els.togShot.checked = s.autoShot === undefined ? (res && res.host === 'pan.baidu.com') : s.autoShot === true;
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togNote) els.togNote.checked = s.noteFileName !== false;
@@ -1145,11 +1342,15 @@ const MPP = (() => {
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
-    if (els.togLog) els.togLog.addEventListener('change', async e => {
+    if (els.togShot) els.togShot.addEventListener('change', async e => {
       const s = await getSettings();
-      s.logEnabled = e.target.checked;
+      s.autoShot = e.target.checked;
       await chrome.storage.local.set({ mpp_settings: s });
-      load(true);
+    });
+    if (els.togAvoid) els.togAvoid.addEventListener('change', async e => {
+      const s = await getSettings();
+      s.avoidTimecode = e.target.checked;
+      await chrome.storage.local.set({ mpp_settings: s });
     });
     if (els.togBar) els.togBar.addEventListener('change', async e => {
       const s = await getSettings();
@@ -1171,6 +1372,12 @@ const MPP = (() => {
       s.titleFileName = e.target.checked;
       await chrome.storage.local.set({ mpp_settings: s });
     });
+    // 网页全屏按钮：视频铺满当前窗口（非浏览器全屏），ESC 退出；反馈提示统一显示在网页
+    if (els.btnWebFs) els.btnWebFs.addEventListener('click', () => {
+      execInPage(fnToggleWebFs).then(() => {
+        if (els.settingsMenu) els.settingsMenu.hidden = true;
+      }).catch(() => execInPage(fnToast, ['当前页面无视频']).catch(() => { }));
+    });
     // v2.0：教程帮助按钮 → 新标签页打开 help.html
     if (els.btnHelp) els.btnHelp.addEventListener('click', () => {
       if (els.settingsMenu) els.settingsMenu.hidden = true;
@@ -1191,13 +1398,13 @@ const MPP = (() => {
         }
         if (!curHost) {
           e.target.checked = false;
-          toast('无法获取当前网页地址，请刷新页面后重试');
+          execInPage(fnToast, ['无法获取当前网页地址，请刷新页面后重试']).catch(() => { });
           return;
         }
         const granted = await chrome.permissions.request({ origins: [curOrigin + '/*'] }).catch(() => false);
         if (!granted) {
           e.target.checked = false;
-          toast('未获得网页授权，请在浏览器弹窗中点击允许');
+          execInPage(fnToast, ['未获得网页授权，请在浏览器弹窗中点击允许']).catch(() => { });
           return;
         }
       } else if (curHost) {

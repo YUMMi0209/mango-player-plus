@@ -84,7 +84,16 @@
     const e = readLogsMap()[videoKey()];
     logs = (e && Array.isArray(e.inOut) && Array.isArray(e.marks))
       ? { inOut: e.inOut, marks: e.marks } : { inOut: [], marks: [] };
+    // 标记 / 片段按时间码先后排列（兼容历史乱序数据）
+    logs.marks.sort((a, b) => (a.time != null ? a.time : 0) - (b.time != null ? b.time : 0));
+    logs.inOut.sort((a, b) => (a.inTime != null ? a.inTime : 0) - (b.inTime != null ? b.inTime : 0));
     window.__mgp_logs = logs;
+  }
+  // 按时间码有序插入（标记按 time，片段按 inTime），保持列表始终按时间先后排列
+  function insertSorted(arr, item, keyFn) {
+    let i = 0;
+    while (i < arr.length && keyFn(arr[i]) <= keyFn(item)) i++;
+    arr.splice(i, 0, item);
   }
 
   function saveLogs() {
@@ -127,7 +136,8 @@
   function fmtTC(sec, frames) {
     if (frames === undefined) frames = true;
     if (isNaN(sec) || sec < 0) sec = 0;
-    const tf = Math.floor(sec * FPS);
+    // +1e-6：修正浮点边界（如 0.04*25=1.0000000000000002 会误进下一帧）
+    const tf = Math.floor(sec * FPS + 1e-6);
     const fph = FPS * 3600, fpm = FPS * 60;
     const h = Math.floor(tf / fph), m = Math.floor((tf % fph) / fpm);
     const s = Math.floor((tf % fpm) / FPS), f = tf % FPS;
@@ -135,6 +145,8 @@
     return frames ? hms+':'+String(f).padStart(2,'0') : hms;
   }
   function fmtTCPlain(sec) { return fmtTC(sec, false).replace(/:/g, '-'); }
+  // 带帧号文件名时间码 HH-MM-SS-FF：截图文件名与打点记录时间码精确对应，便于截图管理匹配
+  function fmtTCPlainF(sec) { return fmtTC(sec, true).replace(/:/g, '-'); }
   // v2.0 导出文件时间：mmddhhmmss（如 08011200）
   function fmtNow() {
     const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -146,8 +158,8 @@
 /* v2.0：顶部只留居中时间码；截屏 / 录制分别置于画面垂直中间左、右侧 */
 #mgp-bar{
   position:absolute;top:0;left:0;right:0;z-index:2147483647;pointer-events:none;
-  display:flex;align-items:center;justify-content:center;
-  height:46px;padding:0 8px;
+  display:flex;align-items:flex-start;justify-content:center;
+  height:46px;padding:8px 8px 0;
   color:#ccc;font-size:12px;user-select:none;
 }
 .mgp-side-btn{
@@ -274,7 +286,8 @@
   function hostOk() {
     const s = window.__mgpSettings || {};
     if (s.enabled === false) return false; // 兼容旧版总开关
-    if (/mgtv\.com$/.test(location.hostname)) return true;
+    // 默认白名单站点：芒果TV 与 百度网盘（无需「应用于当前网页」授权）
+    if (/mgtv\.com$/.test(location.hostname) || location.hostname === 'pan.baidu.com') return true;
     return Array.isArray(s.activeHosts) && s.activeHosts.includes(location.hostname);
   }
   // 控制栏 UI（画面内控制栏与按钮）是否显示
@@ -295,26 +308,39 @@
     return video.seekable.start(0);
   }
 
-  function detectFrameRate(video) {
-    if (!video.requestVideoFrameCallback) return;
-    let count = 0, lastTime = 0;
+  // 实际渲染帧的最新媒体时间（rVFC meta.mediaTime 与该帧一一对应）：
+  // 掉帧/丢帧时 currentTime 仍按媒体时间轴前进，而画面实际显示的是跳变后的帧，
+  // 因此时间码必须以 mediaTime 为准才能与画面内嵌时间码一致
+  let lastFrameMediaTime = null;
+  // 持续校准帧率：掉帧会让单帧间隔翻倍，取滑动窗口中位数抗噪；
+  // 网络波动/丢帧不影响最终稳定值，23.976/29.97 等非整数帧率会归到最近的 5 的倍数
+  function detectFrameRate(v) {
+    if (!v.requestVideoFrameCallback) return;
+    let lastMedia = 0;
     const intervals = [];
     function cb(now, meta) {
-      if (meta.presentationTime && lastTime > 0) {
-        const iv = meta.presentationTime - lastTime;
-        if (iv > 0.001 && iv < 0.2) intervals.push(iv);
+      if (v !== video) return;   // 换集/移除后终止
+      const mt = meta.mediaTime;
+      if (mt != null) lastFrameMediaTime = mt;
+      if (mt != null && lastMedia > 0) {
+        const iv = mt - lastMedia;
+        if (iv > 0.001 && iv < 0.2) {
+          intervals.push(iv);
+          if (intervals.length > 60) intervals.shift();
+          const sorted = intervals.slice().sort((a, b) => a - b);
+          const m = sorted[Math.floor(sorted.length / 2)];
+          const detected = Math.round(1 / m / 5) * 5;
+          if (detected >= 20 && detected <= 120 && detected !== FPS) { FPS = detected; lastTCFrame = -1; }
+        }
       }
-      lastTime = meta.presentationTime;
-      count++;
-      if (count < 20) { video.requestVideoFrameCallback(cb); }
-      else if (intervals.length >= 5) {
-        intervals.sort((a, b) => a - b);
-        const m = intervals[Math.floor(intervals.length / 2)];
-        const detected = Math.round(1 / m / 5) * 5;
-        if (detected >= 20 && detected <= 120) { FPS = detected; lastTCFrame = -1; }
-      }
+      lastMedia = mt;
+      v.requestVideoFrameCallback(cb);
     }
-    video.requestVideoFrameCallback(cb);
+    v.requestVideoFrameCallback(cb);
+  }
+  // 时间码基准：优先实际渲染帧的媒体时间（精确到帧），回退 video.currentTime
+  function dispTime() {
+    return lastFrameMediaTime != null ? lastFrameMediaTime : (video ? video.currentTime : 0);
   }
 
   function inject(v) {
@@ -335,6 +361,8 @@
     if (!recordingInternal) {
       state.inPoint = null; state.outPoint = null; state.markTime = null; state.tcMode = 'live';
     }
+    lastFrameMediaTime = null;   // 换 video 后清除旧渲染帧时间
+    pendingShot = null;          // 换 video 后丢弃未保存的入点截图
     loadState();
     if (state.markTime !== null || state.inPoint !== null) {
       updateTC();
@@ -358,7 +386,9 @@
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     const bar = qs('#mgp-bar');
     const tc = qs('#mgp-tc');
-    if (tc) tc.style.transform = '';   // 时间码滑回居中
+    // 网页全屏：时间码固定 96px，鼠标离开画面不回落
+    if (webFsActive) { if (tc) tc.style.transform = 'translateY(88px)'; }
+    else if (tc) tc.style.transform = '';
     if (bar && !recordingInternal) bar.classList.remove('show-btns');
   }
 
@@ -393,18 +423,33 @@
     }, 5000);
   }
   // 时间码下移：常规下移量为视频宽度的 2.5%（平滑动画）；全屏固定下移 0.5%、不做移动动画
+  // 「时间码显示回避」关闭时不再向下移动；未手动设置过时按站点默认（芒果TV开、其他站点关）
+  function avoidTimecodeOn() {
+    const s = window.__mgpSettings || {};
+    if (s.avoidTimecode === true) return true;
+    if (s.avoidTimecode === false) return false;
+    return /mgtv\.com$/.test(location.hostname);
+  }
   function moveTCDown() {
     const tc = qs('#mgp-tc');
     if (!tc || !videoContainer) return;
-    const r = videoContainer.getBoundingClientRect();
+    // 网页全屏：时间码固定距顶部 96px（8px 默认位置 + 88px），不受回避开关影响
+    if (webFsActive) { tc.style.transform = 'translateY(88px)'; return; }
+    if (!avoidTimecodeOn()) { tc.style.transform = ''; return; }
+    const r = rectForUI();
     if (r.width <= 0 || r.height <= 0) return;
     const fs = !!document.fullscreenElement;
     tc.style.transition = fs ? 'none' : '';
     tc.style.transform = 'translateY(' + (r.width * (fs ? 0.005 : 0.025)) + 'px)';
   }
+  // 网页全屏时 video 脱离容器，热区/下移计算改用窗口尺寸
+  function rectForUI() {
+    if (webFsActive) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    return videoContainer.getBoundingClientRect();
+  }
   function onBarHover(e) {
     if (!videoContainer) return;
-    const r = videoContainer.getBoundingClientRect();
+    const r = rectForUI();
     if (r.width <= 0 || r.height <= 0) return;
     const x = e.clientX - r.left, y = e.clientY - r.top;
     const bar = qs('#mgp-bar');
@@ -433,7 +478,7 @@
       clearTimeout(stateTimer);
       saveState();
     }
-    const c = fmtTC(video.currentTime, true).replace(/:/g, '');
+    const c = fmtTC(dispTime(), true).replace(/:/g, '');
     navigator.clipboard.writeText(c).then(() => {
       mgpToast('已复制当前时间码 ( ' + c + ' )');
     }).catch(() => mgpToast('已复制当前时间码'));
@@ -501,7 +546,7 @@
       if (t == null) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
       if (!video) return;
       try { video.currentTime = Math.max(0, Math.min(t, video.duration || t)); } catch (e) { }
-      mgpToast('已跳转 ' + fmtTC(video.currentTime));
+      mgpToast('已跳转 ' + fmtTC(dispTime()));
       close();
     };
     input.addEventListener('keydown', e => {
@@ -523,7 +568,7 @@
     function tick() {
       if (!video) return requestAnimationFrame(tick);
       enforceSpeed();
-      const cf = Math.floor(video.currentTime * FPS);
+      const cf = Math.floor(dispTime() * FPS + 1e-6);
       if (cf !== lastTCFrame) { lastTCFrame = cf; updateTC(); }
       loopRaf = requestAnimationFrame(tick);
     }
@@ -552,10 +597,10 @@
     if (!txt || !badge || !video) return;
     let dt, bl, bc;
     if (state.tcMode === 'rec' || recordingInternal) {
-      dt = Math.max(0, video.currentTime - (state.recordingStart || 0));
+      dt = Math.max(0, dispTime() - (state.recordingStart || 0));
       bl = 'REC'; bc = 'b-rec';
     } else if (state.tcMode === 'in') {
-      dt = state.inPoint !== null ? Math.max(0, video.currentTime - state.inPoint) : 0;
+      dt = state.inPoint !== null ? Math.max(0, dispTime() - state.inPoint) : 0;
       bl = 'IN'; bc = 'b-in';
     } else if (state.tcMode === 'ot') {
       dt = recStopTime !== null
@@ -563,14 +608,14 @@
         : (state.inPoint !== null && state.outPoint !== null) ? Math.max(0, state.outPoint - state.inPoint) : 0;
       bl = 'OUT'; bc = 'b-ot';
     } else if (state.tcMode === 'mk') {
-      dt = state.markTime !== null ? state.markTime : video.currentTime;
+      dt = state.markTime !== null ? state.markTime : dispTime();
       bl = 'MARK'; bc = 'b-mk';
     } else if (video.paused) {
-      dt = video.currentTime; bl = 'STOP'; bc = 'b-st';
+      dt = dispTime(); bl = 'STOP'; bc = 'b-st';
     } else if (curSpeed > 1 || curSpeed < 1) {
-      dt = video.currentTime; bl = curSpeed + 'X'; bc = 'b-pl';
+      dt = dispTime(); bl = curSpeed + 'X'; bc = 'b-pl';
     } else {
-      dt = video.currentTime; bl = 'PLAY'; bc = 'b-pl';
+      dt = dispTime(); bl = 'PLAY'; bc = 'b-pl';
     }
     const p = fmtTC(dt, true).split(':');
     if (p.length === 4) txt.innerHTML = p.slice(0,3).join(':') + '<span id="mgp-tc-frames">:' + p[3] + '</span>';
@@ -623,10 +668,35 @@
       c.getContext('2d').drawImage(video, 0, 0);
       c.toBlob(b => {
         if (!b) { mgpToast('截图失败'); return; }
-        downloadBlob(b, 'S_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlain(video.currentTime) + '_' + fmtNow() + '.png');
+        downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
         mgpToast('截图保存');
       }, 'image/png');
     } catch(e) { mgpToast('截图失败: 内容保护'); }
+  }
+
+  // ─── 打点自动截图：M 打点立即保存；I 打入点暂存，O 打出点时保存最后一次 I 的截图 ──
+  let pendingShot = null;   // { blob, tcPlain } 入点暂存截图
+  // 未手动设置过时按站点默认：百度网盘开启，其他站点关闭
+  function autoShot() {
+    const s = window.__mgpSettings || {};
+    if (s.autoShot === true) return true;
+    if (s.autoShot === false) return false;
+    return location.hostname === 'pan.baidu.com';
+  }
+  function shotToBlob(cb) {
+    if (!video || !video.videoWidth) { cb(null); return; }
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    try {
+      c.getContext('2d').drawImage(video, 0, 0);
+      c.toBlob(cb, 'image/png');
+    } catch (e) { cb(null); }
+  }
+  // 保存打点截图：前缀统一 SCS；t 为打点时刻视频时间（备注匹配）
+  function saveShotBlob(b, t, toast) {
+    if (!b) { mgpToast('截图失败', true); return; }
+    downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(t) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
+    if (toast) mgpToast(toast, true);
   }
 
   // ─── Recording (improved quality) ───────────
@@ -804,7 +874,7 @@
     const blob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
     // 从入点开始录制时用入点备注，否则用出点时刻的备注
     const recNote = noteFileName(state.recordingStart || 0) || (recStopTime != null ? noteFileName(recStopTime) : '');
-    downloadBlob(blob, 'R_' + titleForFile() + recNote + fmtTCPlain(state.recordingStart||0) + '_' + fmtNow() + '.' + ext);
+    downloadBlob(blob, 'REC_' + titleForFile() + recNote + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.' + ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -821,6 +891,10 @@
     state.tcMode = 'in'; saveState();
     if (video.paused) video.play().catch(()=>{});
     mgpToast('入点 ( ' + fmtTC(video.currentTime) + ' | 0s )');
+    // 打点自动截图：暂存当前画面，待 O 打出点时保存（多次 I 只保留最后一次，与日志入点逻辑一致）
+    if (autoShot()) {
+      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fmtTCPlainF(dispTime()) }; });
+    }
   }
 
   function markOut() {
@@ -832,13 +906,13 @@
     state.outPoint = outTime; state.tcMode = 'ot';
     video.pause(); resetSpeed();
     if (lastLogOutTime === null || Math.abs(outTime - lastLogOutTime) > 0.001) {
-      logs.inOut.push({
+      insertSorted(logs.inOut, {
         inTime: state.inPoint, inTC: fmtTC(state.inPoint),
         outTime, outTC: fmtTC(outTime),
         dur: Math.max(0, outTime - state.inPoint),
         url: location.href,
         title: pageTitle()
-      });
+      }, u => u.inTime != null ? u.inTime : 0);
       lastLogOutTime = outTime;
       saveLogs();
     }
@@ -846,6 +920,14 @@
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
     saveState();
     mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )', true);
+    // 保存最后一次 I 键时暂存的入点截图（记录已写入，备注可匹配）；文件名时间码用入点时刻
+    if (autoShot() && pendingShot) {
+      const ps = pendingShot; pendingShot = null;
+      if (ps.blob) {
+        downloadBlob(ps.blob, 'SCS_' + titleForFile() + noteFileName(state.inPoint) + ps.tcPlain + '_' + fmtNow() + '.png');
+        mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's ) · 已截图', true);
+      }
+    }
     clearTimeout(stateTimer);
     stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000);
   }
@@ -870,6 +952,45 @@
     document.body.removeChild(a); URL.revokeObjectURL(u);
   }
 
+  // ─── 网页全屏：视频铺满当前窗口（非浏览器全屏），ESC 退出 ──
+  let webFsActive = false;
+  let webFsSaved = null;
+  function enterWebFs() {
+    if (!video || !video.videoWidth) { mgpToast('无画面'); return false; }
+    if (webFsActive) return true;
+    webFsSaved = {
+      v: video, vStyle: video.getAttribute('style') || '',
+      w: wrapper, wStyle: wrapper ? wrapper.getAttribute('style') : ''
+    };
+    video.style.cssText =
+      'position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
+      'width:100vw!important;height:100vh!important;object-fit:contain!important;' +
+      'background:#000!important;z-index:2147483646!important;margin:0!important;' +
+      'max-width:none!important;max-height:none!important;';
+    if (wrapper) wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;';
+    webFsActive = true;
+    moveTCDown();
+    mgpToast('网页全屏（ESC 退出）', true);
+    return true;
+  }
+  // 用保存的元素引用还原（换集/移除后 video/wrapper 可能已不是原对象）
+  function exitWebFs() {
+    if (!webFsActive) return false;
+    if (webFsSaved) {
+      if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
+      if (webFsSaved.w) webFsSaved.w.setAttribute('style', webFsSaved.wStyle);
+    }
+    webFsActive = false;
+    webFsSaved = null;
+    const tc = qs('#mgp-tc');
+    if (tc) tc.style.transform = '';
+    mgpToast('已退出网页全屏', true);
+    return false;
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && webFsActive) exitWebFs();
+  });
+
   function remove() {
     // 录制中移除控制栏（关闭控制栏 / 换集重建）：必须停止录制，否则 R 键失效后将无法停止
     if (recordingInternal) stopRecording();
@@ -879,6 +1000,8 @@
       videoContainer.removeEventListener('mouseleave', onBarMouseLeave);
     }
     stopLoop();
+    pendingShot = null;
+    if (webFsActive) exitWebFs();
     if (wrapper && wrapper.parentElement) wrapper.parentElement.removeChild(wrapper);
     wrapper = null; shadow = null; video = null; videoContainer = null;
   }
@@ -913,11 +1036,15 @@
     if (!video || recordingInternal) return;
     state.markTime = video.currentTime;
     state.tcMode = 'mk'; saveState();
-    logs.marks.push({ time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: pageTitle() });
+    insertSorted(logs.marks, { time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: pageTitle() }, m => m.time != null ? m.time : 0);
     saveLogs();
     const c = fmtTC(state.markTime, true).replace(/:/g, '');
     navigator.clipboard.writeText(c).catch(()=>{});
     mgpToast('已标记 ( ' + fmtTC(state.markTime) + ' )', true);
+    // 打点自动截图：M 打点立即保存
+    if (autoShot()) {
+      shotToBlob(b => saveShotBlob(b, state.markTime, '已标记 ( ' + fmtTC(state.markTime) + ' ) · 已截图'));
+    }
     clearTimeout(stateTimer);
     stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000);
   }
@@ -953,8 +1080,11 @@
     if (e.shiftKey) return;
 
     switch (e.key) {
-      case ',': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1/FPS); mgpToast('前一帧 ( ' + fmtTC(video.currentTime) + ' )'); break;
-      case '.': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/FPS); mgpToast('后一帧 ( ' + fmtTC(video.currentTime) + ' )'); break;
+      case ',': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1/FPS); mgpToast('前一帧 ( ' + fmtTC(dispTime()) + ' )'); break;
+      case '.': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/FPS); mgpToast('后一帧 ( ' + fmtTC(dispTime()) + ' )'); break;
+      // PageUp / PageDown：后退 / 前进 1 秒；preventDefault 阻止浏览器默认翻页滚动
+      case 'PageDown': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1); mgpToast('前进 1s ( ' + fmtTC(dispTime()) + ' )'); break;
+      case 'PageUp': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1); mgpToast('后退 1s ( ' + fmtTC(dispTime()) + ' )'); break;
       case 'i': case 'I': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); markIn(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { if (loggingActive()) { e.preventDefault(); markOut(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'm': case 'M': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); mark(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
@@ -1000,6 +1130,7 @@
       }
       // 换集后重置：出点去重标记与新分集无关；#mpp= 定位需对新分集重新生效
       lastLogOutTime = null;
+      pendingShot = null;
       hashSeekDone = false;
       loadState();
       loadLogs();
@@ -1049,7 +1180,7 @@
       video.currentTime = t;
       video.pause();
       resetSpeed();
-      try { mgpToast('已跳转 ' + fmtTC(t)); } catch (e) { }
+      try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { }
       return true;
     },
     removeLogs(selObj) {
@@ -1067,6 +1198,33 @@
       saveLogs();
       try { mgpToast('已清除 ' + removed + ' 条记录', true); } catch (e) { }
       return removed;
+    },
+    // 日志导入合并：按时间码去重后有序插入，返回新增条数（不弹 toast，反馈由面板显示）
+    importLogs(marks, inOut) {
+      let added = 0;
+      (Array.isArray(marks) ? marks : []).forEach(m => {
+        if (!m || !m.tc) return;
+        if (logs.marks.some(x => x.tc === m.tc)) return;
+        insertSorted(logs.marks, {
+          time: m.time != null ? m.time : 0,
+          tc: m.tc, color: m.color || null, note: m.note || null,
+          url: location.href, title: pageTitle()
+        }, x => x.time != null ? x.time : 0);
+        added++;
+      });
+      (Array.isArray(inOut) ? inOut : []).forEach(u => {
+        if (!u || !u.inTC || !u.outTC) return;
+        if (logs.inOut.some(x => x.inTC === u.inTC && x.outTC === u.outTC)) return;
+        insertSorted(logs.inOut, {
+          inTime: u.inTime != null ? u.inTime : 0,
+          inTC: u.inTC, outTime: u.outTime != null ? u.outTime : 0, outTC: u.outTC,
+          dur: u.dur != null ? u.dur : Math.max(0, (u.outTime || 0) - (u.inTime || 0)),
+          note: u.note || null, url: location.href, title: pageTitle()
+        }, x => x.inTime != null ? x.inTime : 0);
+        added++;
+      });
+      if (added) saveLogs();
+      return added;
     },
     setMarkColor(i, color) {
       if (!logs.marks[i]) return false;
@@ -1132,6 +1290,10 @@
         try { mgpToast('已清除所有记录', true); } catch (e) { }
         return true;
       } catch (e) { return false; }
+    },
+    // 网页全屏切换：进入返回 true，退出返回 false
+    toggleWebFs() {
+      return webFsActive ? exitWebFs() : enterWebFs();
     }
   };
 
