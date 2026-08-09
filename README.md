@@ -21,7 +21,7 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 4. 点击「加载已解压的扩展程序」（Edge 文案为「加载解压缩的扩展」），选择项目文件夹。
 5. 打开芒果TV视频播放页即可使用；建议点击浏览器右上角插件图标，将其固定到工具栏。
 
-> 也可通过 Edge 加载项商店搜索「芒着拉片」直接安装。
+> 也可通过 Edge 加载项商店直接安装：[芒着拉片 MG Player+](https://microsoftedge.microsoft.com/addons/detail/%E8%8A%92%E7%9D%80%E6%8B%89%E7%89%87-mg-player/alikcmgpkiphhhnddpelidmilahokmbm)
 
 ---
 
