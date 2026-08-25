@@ -321,7 +321,7 @@ const MPP = (() => {
   }
   function getSettings() {
     return chrome.storage.local.get(SETTINGS_KEY).then(s =>
-      Object.assign({ enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: false, titleFileName: false }, s[SETTINGS_KEY] || {}));
+      Object.assign({ enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, noteFileName: true, titleFileName: true }, s[SETTINGS_KEY] || {}));
   }
 
   // ─── 二次确认弹窗 ──────────────────────────
@@ -382,8 +382,6 @@ const MPP = (() => {
     els.togAvoid = $(cfg.togAvoid);
     els.togBar = $(cfg.togBar);
     els.togDanmu = $(cfg.togDanmu);
-    els.togNote = $(cfg.togNote);
-    els.togTitle = $(cfg.togTitle);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
     els.setRowAll = $(cfg.setRowAll);
@@ -438,6 +436,8 @@ const MPP = (() => {
     if (els.setRowAll) els.setRowAll.hidden = onDefault;
     // 时间码显示回避：未手动设置过时按站点默认（芒果TV开、其他站点关）
     if (els.togAvoid) els.togAvoid.checked = settings.avoidTimecode === undefined ? isMgtv(res && res.host) : settings.avoidTimecode !== false;
+    // 打点自动截图：未手动设置过时按站点默认（百度网盘开、其他站点关）
+    if (els.togShot) els.togShot.checked = settings.autoShot === undefined ? (res && res.host === 'pan.baidu.com') : settings.autoShot === true;
     if (els.err) {
       els.err.innerHTML = settings.logEnabled === false
         ? '日志记录已关闭<br>点击右上角设置按钮重新开启'
@@ -1333,45 +1333,18 @@ const MPP = (() => {
       }
     });
     getSettings().then(s => {
-      // 打点自动截图：未手动设置过时按站点默认（百度网盘开、其他站点关）
-      if (els.togShot) els.togShot.checked = s.autoShot === undefined ? (res && res.host === 'pan.baidu.com') : s.autoShot === true;
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
-      if (els.togNote) els.togNote.checked = s.noteFileName !== false;
-      if (els.togTitle) els.togTitle.checked = s.titleFileName !== false;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
-    if (els.togShot) els.togShot.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.autoShot = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
-    if (els.togAvoid) els.togAvoid.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.avoidTimecode = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
-    if (els.togBar) els.togBar.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.barEnabled = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
-    if (els.togDanmu) els.togDanmu.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.danmuBlock = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
-    if (els.togNote) els.togNote.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.noteFileName = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
-    if (els.togTitle) els.togTitle.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.titleFileName = e.target.checked;
-      await chrome.storage.local.set({ mpp_settings: s });
-    });
+    // 设置保存统一经 background 中转：面板（popup/侧边栏）关闭会中断未完成的
+    // storage 异步链，切换后立即关闭面板会导致保存丢失；service worker 不随面板关闭
+    const savePatch = patch => chrome.runtime.sendMessage({ type: 'saveSettings', patch }).catch(() => { });
+    if (els.togShot) els.togShot.addEventListener('change', e => savePatch({ autoShot: e.target.checked }));
+    if (els.togAvoid) els.togAvoid.addEventListener('change', e => savePatch({ avoidTimecode: e.target.checked }));
+    if (els.togBar) els.togBar.addEventListener('change', e => savePatch({ barEnabled: e.target.checked }));
+    if (els.togDanmu) els.togDanmu.addEventListener('change', e => savePatch({ danmuBlock: e.target.checked }));
     // 网页全屏按钮：视频铺满当前窗口（非浏览器全屏），ESC 退出；反馈提示统一显示在网页
     if (els.btnWebFs) els.btnWebFs.addEventListener('click', () => {
       execInPage(fnToggleWebFs).then(() => {
@@ -1422,11 +1395,10 @@ const MPP = (() => {
       await chrome.storage.local.set({ mpp_settings: s });
       load(true);
     });
-    if (els.togTheme) els.togTheme.addEventListener('change', async e => {
-      const s = await getSettings();
-      s.theme = e.target.checked ? 'light' : 'dark';
-      await chrome.storage.local.set({ mpp_settings: s });
-      applyTheme(s.theme);
+    if (els.togTheme) els.togTheme.addEventListener('change', e => {
+      const theme = e.target.checked ? 'light' : 'dark';
+      applyTheme(theme);   // 立即应用，视觉即时反馈
+      savePatch({ theme });
     });
     chrome.runtime.sendMessage({ type: 'pushSettings' }).catch(() => { });
   }

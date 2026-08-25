@@ -275,8 +275,10 @@
   let shadow, wrapper, video, videoContainer,
       recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
       toastTimer, stateTimer;
+  let recKeepTimer = null;   // captureStream(0) 兜底重绘定时器（暂停 / 无新帧时保持录制流）
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
+  let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
   let recStopTime = null;    // 本次录制的停止时间（独立于预设出点）
   let hashSeekDone = false;
 
@@ -301,6 +303,39 @@
     const s = window.__mgpSettings || {};
     if (s.logEnabled === false) return false;
     return hostOk();
+  }
+
+  // ─── 直播回退：本地缓存 600s + 禁用「落后直播边缘自动拉回」（方案 C 已验证）──
+  const LIVE_BACKBUFFER = 600;
+  let liveHlsSeen = null;   // 已注入配置的 hls 实例（切清晰度 / 播放器重建会被替换）
+  function isLivePage() { return !!(window.hhls) && /mgtv\.com$/.test(location.hostname); }
+  function applyLiveConfig() {
+    const h = window.hhls;
+    if (!h || !h.config || !isLivePage()) return;
+    if (h !== liveHlsSeen) {
+      // 实例重建（首次出现不提示）：旧缓存已清空，提示用户可重新回退
+      if (liveHlsSeen !== null) mgpToast('回退缓存已重建，可重新回退', true);
+      liveHlsSeen = h;
+    }
+    if (h.config.backBufferLength !== LIVE_BACKBUFFER) h.config.backBufferLength = LIVE_BACKBUFFER;
+    if (h.config.liveMaxLatencyDuration !== Infinity) h.config.liveMaxLatencyDuration = Infinity;
+  }
+  // 轮询：覆盖 hls 实例延迟出现与清晰度切换重建（window.hhls 被替换）
+  setInterval(applyLiveConfig, 500);
+
+  function seekableRange() {
+    if (!video || !video.seekable || video.seekable.length === 0) return null;
+    return { start: video.seekable.start(0), end: video.seekable.end(video.seekable.length - 1) };
+  }
+  // 回退 / 前进（直播）：clamp 到可回退范围
+  function seekRel(delta) {
+    if (!video) return;
+    const r = seekableRange();
+    if (!r) { mgpToast('暂无回退缓存'); return; }
+    const target = Math.min(r.end, Math.max(r.start, video.currentTime + delta));
+    if (Math.abs(target - video.currentTime) < 0.001) { mgpToast('已到最新画面'); return; }
+    video.currentTime = target;
+    mgpToast((delta < 0 ? '回退 ' : '前进 ') + Math.abs(delta) + 's ( ' + fmtTC(dispTime()) + ' )');
   }
 
   function getSeekableStart() {
@@ -719,8 +754,16 @@
     // 仅当“正好从入点开始”且存在有效出点时，播放到出点自动停止
     const hasRange = state.inPoint !== null && state.outPoint !== null && state.outPoint > state.inPoint;
     const atIn = hasRange && Math.abs(video.currentTime - state.inPoint) <= 1 / FPS;
+    // 从日志列表跳转到入点开始录制：当前播放位置命中某条片段记录的入点时，
+    // 以该记录的出点作为自动停止目标（页面打点状态可能未设置）
+    recStopTarget = null;
+    if (!atIn) {
+      const rec = logs.inOut.find(u => u.inTime != null && u.outTime != null && u.outTime > u.inTime
+        && Math.abs(u.inTime - video.currentTime) <= 1 / FPS);
+      if (rec) recStopTarget = rec.outTime;
+    }
     recordingInternal = true;
-    recAutoStop = atIn;
+    recAutoStop = atIn || recStopTarget != null;
     recStopTime = null;
     state.recordingStart = video.currentTime;
     state.tcMode = 'rec'; resetSpeed();
@@ -744,10 +787,9 @@
     recCtx = recCanvas.getContext('2d');
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
-    // 采集帧率取源帧率 2 倍（30~60 封顶）：captureStream 定时采样与视频帧绘制同频时相位随机，
-    // 采样点常落在两次绘制之间导致丢帧；加倍采样后每次绘制必被采到，输出顺滑不卡顿
-    const capFps = Math.min(60, Math.max(FPS * 2, 30));
-    recStream = recCanvas.captureStream(capFps);
+    // captureStream(0)：仅在有新帧绘制时采样，与 rVFC 绘制完全同步——
+    // 固定采样周期会产生重复帧或丢帧（编码器积压导致卡顿），帧驱动输出间隔均匀
+    recStream = recCanvas.captureStream(0);
 
     // Add audio track from video element
     try {
@@ -800,6 +842,13 @@
     recMediaRecorder.onstop = () => finishRecording();
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
+    // captureStream(0) 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧，
+    // 并周期性兜底重绘，避免视频暂停 / 无新帧时录制流中断卡在第一帧
+    paintRecFrame();
+    recKeepTimer = setInterval(() => {
+      if (!recordingInternal) return;
+      paintRecFrame();
+    }, 200);
 
     // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
     const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
@@ -836,7 +885,7 @@
       }
       lastWallClock = now;
       // 正好从入点开始录制：播放到出点自动停止
-      if (recAutoStop && state.outPoint !== null && video.currentTime >= state.outPoint) {
+      if (recAutoStop && (recStopTarget != null ? video.currentTime >= recStopTarget : (state.outPoint !== null && video.currentTime >= state.outPoint))) {
         stopRecording();
         return;
       }
@@ -847,7 +896,9 @@
   function stopRecording() {
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
+    if (recKeepTimer) { clearInterval(recKeepTimer); recKeepTimer = null; }
     video.removeEventListener('seeking', onSeekBlock, true);
+    recStopTarget = null;
     recStopTime = video ? video.currentTime : (state.recordingStart || 0);
     state.tcMode = 'ot';
     saveState();
@@ -960,8 +1011,25 @@
     if (webFsActive) return true;
     webFsSaved = {
       v: video, vStyle: video.getAttribute('style') || '',
-      w: wrapper, wStyle: wrapper ? wrapper.getAttribute('style') : ''
+      w: wrapper, wStyle: wrapper ? wrapper.getAttribute('style') : '',
+      hidden: []
     };
+    // 收集需隐藏的页面元素：除 video 及其祖先链、扩展控制栏外的所有元素（播放器 UI / 导航等全部隐藏）
+    const chain = [];
+    let el = video;
+    while (el && el !== document.body) { chain.unshift(el); el = el.parentElement; }
+    const hide = [];
+    [...document.body.children].forEach(c => { if (chain.indexOf(c) === -1) hide.push(c); });
+    chain.forEach((anc, i) => {
+      if (anc === video || anc === wrapper) return;
+      [...anc.children].forEach(c => {
+        if (c !== chain[i + 1] && c !== video && c !== wrapper) hide.push(c);
+      });
+    });
+    hide.forEach(t => {
+      webFsSaved.hidden.push({ t, orig: t.style.display });
+      t.style.display = 'none';
+    });
     video.style.cssText =
       'position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
       'width:100vw!important;height:100vh!important;object-fit:contain!important;' +
@@ -979,6 +1047,7 @@
     if (webFsSaved) {
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
       if (webFsSaved.w) webFsSaved.w.setAttribute('style', webFsSaved.wStyle);
+      (webFsSaved.hidden || []).forEach(h => { if (h.t) h.t.style.display = h.orig; });
     }
     webFsActive = false;
     webFsSaved = null;
@@ -1085,6 +1154,9 @@
       // PageUp / PageDown：后退 / 前进 1 秒；preventDefault 阻止浏览器默认翻页滚动
       case 'PageDown': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1); mgpToast('前进 1s ( ' + fmtTC(dispTime()) + ' )'); break;
       case 'PageUp': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1); mgpToast('后退 1s ( ' + fmtTC(dispTime()) + ' )'); break;
+      // 直播回退：← / → 回退 / 前进 30 秒
+      case 'ArrowLeft': if (isLivePage()) { e.preventDefault(); seekRel(-30); } break;
+      case 'ArrowRight': if (isLivePage()) { e.preventDefault(); seekRel(30); } break;
       case 'i': case 'I': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); markIn(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { if (loggingActive()) { e.preventDefault(); markOut(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'm': case 'M': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); mark(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;

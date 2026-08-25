@@ -21,8 +21,6 @@
     togAvoid: '#tog-avoid',
     togBar: '#tog-bar',
     togDanmu: '#tog-danmu',
-    togNote: '#tog-note',
-    togTitle: '#tog-title',
     togAll: '#tog-all',
     togTheme: '#tog-theme',
     setRowAll: '#set-row-all',

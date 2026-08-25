@@ -5,7 +5,7 @@
 
 const SETTINGS_KEY = 'mpp_settings';
 // v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关，另含截图录制文件名备注/标题开关；lastMode 记忆上次的面板显示模式
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: false, titleFileName: false, lastMode: 'sidebar' };
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, titleFileName: true, lastMode: 'sidebar' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
@@ -48,12 +48,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // 面板打开时请求同步一次设置到当前页
+// saveSettings：面板开关经后台保存（面板关闭后异步 set 会中断，由 service worker 完成）
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'pushSettings') {
     chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
       if (tabs[0]) pushSettings(tabs[0].id);
       sendResponse({ ok: true });
     });
+    return true;
+  }
+  if (msg && msg.type === 'saveSettings' && msg.patch && typeof msg.patch === 'object') {
+    getSettings().then(s => {
+      Object.assign(s, msg.patch);
+      return chrome.storage.local.set({ mpp_settings: s });
+    }).catch(() => { });
+    sendResponse({ ok: true });
     return true;
   }
 });
