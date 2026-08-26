@@ -607,7 +607,9 @@
         }
         fpToTime(e);   // 普通拖动：播放点跟随指针，画面同步跳转
       });
-      document.addEventListener('pointerup', () => {
+      // 松开退出：window 级多重监听（pointerup / pointercancel / mouseup），
+      // 覆盖指针捕获、拖出窗口、系统中断等 document 级监听可能漏收的场景；handler 幂等
+      const endDrag = () => {
         if (!fsDragState) return;
         clearTimeout(fsDragState.timer);
         const wasExtended = fsDragState.extended;
@@ -635,7 +637,10 @@
           fsExitAnim = false;
           syncFsProgress();
         }
-      });
+      };
+      window.addEventListener('pointerup', endDrag);
+      window.addEventListener('pointercancel', endDrag);
+      window.addEventListener('mouseup', endDrag);
     }
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
     videoContainer.addEventListener('mousemove', onBarHover);
