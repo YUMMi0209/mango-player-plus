@@ -3,6 +3,7 @@
  */
 (function () {
   let FPS = 25;
+  window.__mgpFps = FPS;
   const BTN = '36px';
   const MARK_COLORS = { red: '#e74c3c', orange: '#ff7a1a', blue: '#3498db', green: '#2ecc71', gray: '#9aa0a6' };
 
@@ -31,6 +32,8 @@
     if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
     return location.origin + location.pathname;
   }
+  // 暴露统一 key 解析：面板注入脚本优先使用，避免 URL 结构正则在各处重复维护
+  window.__mgpVkey = videoKey;
 
   function readStateMap() {
     let raw = null;
@@ -406,7 +409,8 @@
   // 因此时间码必须以 mediaTime 为准才能与画面内嵌时间码一致
   let lastFrameMediaTime = null;
   // 持续校准帧率：掉帧会让单帧间隔翻倍，取滑动窗口中位数抗噪；
-  // 网络波动/丢帧不影响最终稳定值，23.976/29.97 等非整数帧率会归到最近的 5 的倍数
+  // 非整数帧率（23.976 / 29.97 / 59.94）四舍五入到整数（24 / 30 / 60），
+  // 不再归整到 5 的倍数（否则 24fps 会被误判为 25fps 导致时间码逐帧漂移）
   function detectFrameRate(v) {
     if (!v.requestVideoFrameCallback) return;
     let lastMedia = 0;
@@ -422,8 +426,12 @@
           if (intervals.length > 60) intervals.shift();
           const sorted = intervals.slice().sort((a, b) => a - b);
           const m = sorted[Math.floor(sorted.length / 2)];
-          const detected = Math.round(1 / m / 5) * 5;
-          if (detected >= 20 && detected <= 120 && detected !== FPS) { FPS = detected; lastTCFrame = -1; }
+          const detected = Math.round(1 / m);
+          if (detected >= 20 && detected <= 120 && detected !== FPS) {
+            FPS = detected; lastTCFrame = -1;
+            // 暴露校准帧率：日志导入按同一帧率换算时间码（避免导出/导入帧率不一致导致定位错位）
+            window.__mgpFps = FPS;
+          }
         }
       }
       lastMedia = mt;
@@ -641,16 +649,25 @@
           syncFsProgress();
         }
       };
+      // 先注销旧监听再注册：换集 / 开关控制栏多次注入不累积（窗口级监听器泄漏防护）
+      if (activeEndDrag) {
+        window.removeEventListener('pointerup', activeEndDrag);
+        window.removeEventListener('pointercancel', activeEndDrag);
+        window.removeEventListener('mouseup', activeEndDrag);
+        window.removeEventListener('blur', activeEndDrag);
+      }
+      activeEndDrag = endDrag;
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
       window.addEventListener('mouseup', endDrag);
-      // 全局兜底（仅注册一次）：窗口失焦退出；微调中 3 秒无指针活动强制退出
+      // 窗口失焦退出（微调中）
+      window.addEventListener('blur', endDrag);
+      // 全局兜底（仅注册一次）：微调中 3 秒无指针活动强制退出
       // （覆盖窗口外松手且指针静止、pointerup 完全丢失的场景）
       if (!window.__mppFsWatch) {
         window.__mppFsWatch = true;
-        window.addEventListener('blur', endDrag);
         setInterval(() => {
-          if (fsDragState && fsDragState.extended && performance.now() - (fsDragState.lastAct || 0) > 3000) endDrag();
+          if (fsDragState && fsDragState.extended && performance.now() - (fsDragState.lastAct || 0) > 3000) activeEndDrag && activeEndDrag();
         }, 500);
       }
     }
@@ -904,7 +921,7 @@
     const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
     return clean ? clean.slice(0, 30) + '_' : '';
   }
-  // 标题进入文件名（可开关）：取 "_" 或 "-" 前的节目名，如「乘风2026」
+  // 标题进入文件名（可开关）：取完整网页标题清洗非法字符并截断 24 字
   function titleForFile() {
     const s = window.__mgpSettings || {};
     if (s.titleFileName === false) return '';
@@ -912,6 +929,15 @@
     if (!t) return '';
     const clean = String(t).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
     return clean ? clean.slice(0, 24) + '_' : '';
+  }
+  // 打点记录标题：优先取面板重命名过的自定义标题（mpp_titles custom），否则网页标题
+  function titleForLog() {
+    try {
+      const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
+      const e = titles[videoKey()];
+      if (e && e.custom === true && String(e.title || '').trim()) return String(e.title).trim();
+    } catch (e) { }
+    return pageTitle();
   }
 
   function captureScreenshot() {
@@ -959,8 +985,9 @@
   function onSeekBlock(e) {
     if (!recordingInternal || !video) return;
     e.preventDefault(); e.stopPropagation();
-    // 扩展自身回跳入点触发的 seek 放行，其余 seek 一律锁回期望时间
-    if (Math.abs(video.currentTime - lastExpectedTime) > 0.01) {
+    // 扩展自身回跳入点触发的 seek 放行，其余 seek 一律锁回期望时间；
+    // 阈值 100ms：播放器缓冲 / 切清晰度 / 网络抖动导致的正常时间回跳不误锁
+    if (Math.abs(video.currentTime - lastExpectedTime) > 0.1) {
       video.currentTime = lastExpectedTime;
       mgpToast('录制中无法跳转', true);
     }
@@ -1192,7 +1219,7 @@
         outTime, outTC: fmtTC(outTime),
         dur: Math.max(0, outTime - state.inPoint),
         url: location.href,
-        title: pageTitle()
+        title: titleForLog()
       }, u => u.inTime != null ? u.inTime : 0);
       lastLogOutTime = outTime;
       saveLogs();
@@ -1238,6 +1265,7 @@
   let webFsSaved = null;
   let fsDragState = null;   // 进度条拖动状态：{ anchor, timer, extended, range, moved, startX }
   let fsExitAnim = false;   // 退出微调动画中：暂停进度条 value 回写
+  let activeEndDrag = null; // 当前进度条退出处理（换集/重建时先注销旧监听，防泄漏）
   function enterWebFs() {
     // 使用独立视频引用：视频控制关闭后控制栏被移除（video 变量置空），
     // 此时回退到页面当前视频元素，网页全屏仍可用
@@ -1378,7 +1406,7 @@
     if (!video || recordingInternal) return;
     state.markTime = video.currentTime;
     state.tcMode = 'mk'; saveState();
-    insertSorted(logs.marks, { time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: pageTitle() }, m => m.time != null ? m.time : 0);
+    insertSorted(logs.marks, { time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
     saveLogs();
     const c = fmtTC(state.markTime, true).replace(/:/g, '');
     navigator.clipboard.writeText(c).catch(()=>{});
@@ -1477,6 +1505,10 @@
       lastLogOutTime = null;
       pendingShot = null;
       hashSeekDone = false;
+      // 清理旧分集的 #mpp= hash：防止用旧分集定位参数误 seek 新分集
+      if (location.hash) {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { }
+      }
       loadState();
       loadLogs();
       syncBar();
@@ -1553,7 +1585,7 @@
         insertSorted(logs.marks, {
           time: m.time != null ? m.time : 0,
           tc: m.tc, color: m.color || null, note: m.note || null,
-          url: location.href, title: pageTitle()
+          url: location.href, title: titleForLog()
         }, x => x.time != null ? x.time : 0);
         added++;
       });
@@ -1564,7 +1596,7 @@
           inTime: u.inTime != null ? u.inTime : 0,
           inTC: u.inTC, outTime: u.outTime != null ? u.outTime : 0, outTC: u.outTC,
           dur: u.dur != null ? u.dur : Math.max(0, (u.outTime || 0) - (u.inTime || 0)),
-          note: u.note || null, url: location.href, title: pageTitle()
+          note: u.note || null, url: location.href, title: titleForLog()
         }, x => x.inTime != null ? x.inTime : 0);
         added++;
       });

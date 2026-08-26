@@ -49,6 +49,7 @@ const MPP = (() => {
 
   function fnGetLogs() {
     function vkey() {
+      if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
       const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
       if (m) return 'id:' + m[1] + '_' + m[2];
       const m1 = location.pathname.match(/(\d+)\.html$/);
@@ -134,6 +135,7 @@ const MPP = (() => {
   }
   function fnSetMarkColor(idx, color) {
     function vkey() {
+      if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
       const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
       if (m) return 'id:' + m[1] + '_' + m[2];
       const m1 = location.pathname.match(/(\d+)\.html$/);
@@ -178,6 +180,7 @@ const MPP = (() => {
       try { return window.__mgpAPI.setTitle(t) === true; } catch (e) { }
     }
     function vkey() {
+      if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
       const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
       if (m) return 'id:' + m[1] + '_' + m[2];
       const m1 = location.pathname.match(/(\d+)\.html$/);
@@ -223,6 +226,7 @@ const MPP = (() => {
   // v2.0 历史：按 videoKey 批量清除；若包含当前视频则同时重置页面端状态
   function fnRemoveHistory(keys) {
     function vkey() {
+      if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
       const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
       if (m) return 'id:' + m[1] + '_' + m[2];
       const m1 = location.pathname.match(/(\d+)\.html$/);
@@ -537,7 +541,9 @@ const MPP = (() => {
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.mk.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + (i + 1) + '</span>' +
-        '<span class="tc mk">' + m.tc + '</span>' +
+        // esc() 转义：tc 来自页面 localStorage（mpp_logs），恶意站点页面脚本可注入任意内容，
+        // 未转义会在扩展面板上下文执行（存储型 XSS → 扩展权限提升）
+        '<span class="tc mk">' + esc(m.tc) + '</span>' +
         '<span class="mk-colors">' + MARK_COLORS.map(([name, v]) =>
           '<span class="mc-dot' + (m.color === v ? ' on' : '') + '" data-c="' + v + '" data-n="' + name + '" style="--dc:' + v + '" title="设为' + name + '色"></span>'
         ).join('') + '</span>' +
@@ -556,9 +562,10 @@ const MPP = (() => {
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.io.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + (i + 1) + '</span>' +
-        '<span class="tc in">' + u.inTC + '</span>' +
+        // esc() 转义：时间码字段来自页面 localStorage，防存储型 XSS
+        '<span class="tc in">' + esc(u.inTC) + '</span>' +
         '<span class="sep">&rarr;</span>' +
-        '<span class="tc out">' + u.outTC + '</span>' +
+        '<span class="tc out">' + esc(u.outTC) + '</span>' +
         '<span class="dur">' + fmtDur(u.dur) + 's</span>' +
         noteLineHTML(!!u.note);
       list.appendChild(row);
@@ -937,7 +944,9 @@ const MPP = (() => {
     chrome.action.setPopup({ popup: 'popup.html' }).catch(() => { });
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => { });
     saveLastMode('popup');
-    return chrome.action.openPopup().catch(() => { });
+    // 手势窗口内直接调用 openPopup（不 await 异步链，避免丢失手势）；
+    // 失败时给出提示而非静默
+    return chrome.action.openPopup().catch(() => { panelToast('请再次点击浏览器右上角插件图标'); });
   }
   function bindModeMenu() {
     if (!els.btnMode || !els.modeMenu) return;
@@ -1084,14 +1093,19 @@ const MPP = (() => {
       return u.origin + u.pathname;
     } catch (e) { return null; }
   }
-  // 时间码 → 秒（帧号按 25fps 估算；链接含 #mpp= 时用精确值）
-  function tcToSec(tc) {
+  // 时间码 → 秒（帧号按页面校准帧率 fps 换算，与导出时一致；链接含 #mpp= 时用精确值）
+  function tcToSec(tc, fps) {
+    const f = fps || 25;
     const p = String(tc || '').split(':').map(Number);
     if (p.length < 2 || p.some(isNaN)) return null;
     if (p.length === 2) return p[0] * 60 + p[1];
-    if (p.length === 3) return p[0] * 60 + p[1] + p[2] / 25;
-    if (p.length === 4) return p[0] * 3600 + p[1] * 60 + p[2] + p[3] / 25;
+    if (p.length === 3) return p[0] * 60 + p[1] + p[2] / f;
+    if (p.length === 4) return p[0] * 3600 + p[1] * 60 + p[2] + p[3] / f;
     return null;
+  }
+  // 页面校准帧率（control-bar 暴露；导出/导入按同一帧率换算）
+  function fnGetFps() {
+    try { return window.__mgpFps || 25; } catch (e) { return 25; }
   }
   function timeFromUrl(url) {
     const m = String(url || '').match(/mpp=([\d.]+)/);
@@ -1124,6 +1138,9 @@ const MPP = (() => {
       panelToast('Excel 中没有可导入的记录');
       return;
     }
+    // 页面校准帧率：时间码换算与导出时保持一致（FPS≠25 时避免秒数偏移）
+    let importFps = 25;
+    try { importFps = (await execInPage(fnGetFps)) || 25; } catch (e) { }
     const groups = {};
     recs.forEach(r => {
       const key = keyFromUrl(r.url) || 'unknown';
@@ -1137,12 +1154,12 @@ const MPP = (() => {
     if (pageRecs.length) {
       try {
         const mk = pageRecs.filter(r => r.kind === 'marks').map(r => ({
-          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc),
+          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc, importFps),
           tc: r.tc, color: r.color, note: r.note
         }));
         const io = pageRecs.filter(r => r.kind === 'inOut').map(r => ({
-          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC),
-          inTC: r.inTC, outTime: tcToSec(r.outTC), outTC: r.outTC, dur: r.dur, note: r.note
+          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC, importFps),
+          inTC: r.inTC, outTime: tcToSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
         }));
         pageAdded = (await execInPage(fnImportLogs, [mk, io])) || 0;
       } catch (e) { }
@@ -1161,14 +1178,14 @@ const MPP = (() => {
       rs.forEach(r => {
         if (r.kind === 'marks') {
           if (mkTcs.has(r.tc)) return;
-          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc), tc: r.tc, color: r.color, note: r.note });
+          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc, importFps), tc: r.tc, color: r.color, note: r.note });
           mkTcs.add(r.tc); impAdded++;
         } else {
           const k2 = r.inTC + '|' + r.outTC;
           if (ioTcs.has(k2)) return;
           entry.inOut.push({
-            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC),
-            inTC: r.inTC, outTime: tcToSec(r.outTC), outTC: r.outTC, dur: r.dur, note: r.note
+            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC, importFps),
+            inTC: r.inTC, outTime: tcToSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
           });
           ioTcs.add(k2); impAdded++;
         }

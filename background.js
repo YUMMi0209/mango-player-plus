@@ -37,9 +37,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   pushSettings(tabId);
 });
 
-// 设置变化时，即时推送到所有已打开的网页（含独立窗口/侧边栏场景）
+// 设置变化时，即时推送到所有已打开的网页（含独立窗口/侧边栏场景）；
+// activeHosts 变化时同步动态注册/注销授权站点的 content scripts
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+  const s = changes[SETTINGS_KEY].newValue || {};
+  syncActiveScripts().catch(() => { });
   chrome.tabs.query({}).then(tabs => {
     tabs.forEach(t => {
       if (t.id != null && t.url && /^https?:/.test(t.url)) pushSettings(t.id);
@@ -67,6 +70,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// 「应用于当前网页」授权站点：动态注册 content scripts（静态注入仅限默认白名单站点，
+// 避免 <all_urls> 全站注入的性能与安全暴露面）
+const ACTIVE_SCRIPTS_ID = 'mpp-active';
+const ACTIVE_BRIDGE_ID = 'mpp-active-bridge';
+async function syncActiveScripts() {
+  const s = await getSettings();
+  const hosts = Array.isArray(s.activeHosts) ? s.activeHosts.filter(h => /^[a-z0-9.-]+$/i.test(h)) : [];
+  try {
+    if (hosts.length) {
+      const matches = hosts.map(h => 'https://' + h + '/*');
+      await chrome.scripting.registerContentScripts([
+        {
+          id: ACTIVE_SCRIPTS_ID,
+          matches, js: ['content/content.js', 'content/control-bar.js'],
+          runAt: 'document_idle', world: 'MAIN'
+        },
+        {
+          id: ACTIVE_BRIDGE_ID,
+          matches, js: ['content/bridge.js'],
+          runAt: 'document_idle', world: 'ISOLATED'
+        }
+      ]).catch(() => { });
+    } else {
+      await chrome.scripting.unregisterContentScripts({ ids: [ACTIVE_SCRIPTS_ID, ACTIVE_BRIDGE_ID] }).catch(() => { });
+    }
+  } catch (e) { }
+}
+
 // 按记忆的显示模式设置图标点击行为：
 //   popup   → 保留 popup，点击弹出面板
 //   sidebar → 清空 popup + panelBehavior 接管点击（浏览器原生打开侧边栏，
@@ -78,8 +109,8 @@ function applyLastMode(lastMode) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: lastMode === 'sidebar' }).catch(() => { });
 }
 
-chrome.runtime.onInstalled.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
-chrome.runtime.onStartup.addListener(() => getSettings().then(s => applyLastMode(s.lastMode)));
+chrome.runtime.onInstalled.addListener(() => { getSettings().then(s => applyLastMode(s.lastMode)); syncActiveScripts().catch(() => { }); });
+chrome.runtime.onStartup.addListener(() => { getSettings().then(s => applyLastMode(s.lastMode)); syncActiveScripts().catch(() => { }); });
 
 chrome.action.onClicked.addListener(tab => {
   // 仅 window 模式会走到（popup 模式有 popup；sidebar 模式被 panelBehavior 接管）

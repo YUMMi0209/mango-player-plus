@@ -7,13 +7,21 @@
   "permissions": ["scripting", "sidePanel", "storage", "activeTab", "windows"],
   "host_permissions": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
   "optional_host_permissions": ["<all_urls>"],
-  "content_scripts": [{
-    "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "<all_urls>"],
-    "js": ["content/content.js", "content/control-bar.js"],
-    "run_at": "document_idle",
-    "world": "MAIN"
-  }],
-"action": {
+  "content_scripts": [
+    {
+      "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
+      "js": ["content/content.js", "content/control-bar.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
+      "js": ["content/bridge.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
     "default_title": "芒着拉片 | MG Player+",
     "default_popup": "popup.html"
   },
