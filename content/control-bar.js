@@ -775,13 +775,10 @@
     if (old) old.remove();
     const box = document.createElement('div');
     box.id = 'mgp-seek';
-    box.innerHTML =
-      '<input id="mgp-seek-in" spellcheck="false" placeholder="输入时间码，任意格式均可">' +
-      '<button id="mgp-seek-go" type="button">跳转</button>';
+    box.innerHTML = '<input id="mgp-seek-in" spellcheck="false" placeholder="输入时间码，按 Enter 跳转">';
     tcEl.appendChild(box);
     tcEl.classList.add('seek-open');
     const input = box.querySelector('#mgp-seek-in');
-    const go = box.querySelector('#mgp-seek-go');
     const close = () => {
       box.remove();
       tcEl.classList.remove('seek-open');
@@ -803,7 +800,6 @@
     input.addEventListener('blur', () => setTimeout(() => {
       if (box.isConnected) close();
     }, 150));
-    go.addEventListener('click', jump);
     input.focus();
   }
 
