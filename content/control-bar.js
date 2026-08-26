@@ -4,6 +4,8 @@
 (function () {
   let FPS = 25;
   window.__mgpFps = FPS;
+  // 录制 remux（fMP4 → 经典 MP4）：IIFE 启动时捕获引用，防止页面脚本事后篡改 window.MPGRemux
+  const MPGRemuxRef = (typeof window !== 'undefined' && window.MPGRemux) ? window.MPGRemux : null;
   const BTN = '36px';
   const MARK_COLORS = { red: '#e74c3c', orange: '#ff7a1a', blue: '#3498db', green: '#2ecc71', gray: '#9aa0a6' };
 
@@ -1178,15 +1180,37 @@
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
     mgpHideToast();
     if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; return; }
-    const ext = /^video\/mp4/.test(mimeType) ? 'mp4' : 'webm';
-    const blob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
+    const isMp4 = /^video\/mp4/.test(mimeType);
+    const ext = isMp4 ? 'mp4' : 'webm';
     // 从入点开始录制时用入点备注，否则用出点时刻的备注
     const recNote = noteFileName(state.recordingStart || 0) || (recStopTime != null ? noteFileName(recStopTime) : '');
-    downloadBlob(blob, 'REC_' + titleForFile() + recNote + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.' + ext);
+    const name = 'REC_' + titleForFile() + recNote + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.' + ext;
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
-    mgpToast('录制结束 — '+sec+'s', true);
+    // 原始文件快照：arrayBuffer 转换期间 recChunks 可能被下一次录制覆盖，回退时用快照
+    const rawBlob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
+    const saveAndToast = blob => {
+      downloadBlob(blob, name);
+      mgpToast('录制结束 — ' + sec + 's', true);
+    };
+    // MediaRecorder 输出的 MP4 是 fragmented MP4（moov 前置 + moof/mdat 分片），
+    // 部分剪辑软件（达芬奇旧版 / 会声会影 / Edius 等）无法读取。录制结束后
+    // 经 remux.js 重封装为经典 MP4（ftyp | mdat | moov，无 moof）；失败则回退原始文件。
+    if (isMp4 && MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
+      rawBlob.arrayBuffer().then(buf => {
+        try {
+          const out = MPGRemuxRef.remuxToClassic(new Uint8Array(buf));
+          saveAndToast(new Blob([out], { type: 'video/mp4' }));
+        } catch (e) {
+          saveAndToast(rawBlob);
+        }
+      }).catch(() => {
+        saveAndToast(rawBlob);
+      });
+    } else {
+      saveAndToast(rawBlob);
+    }
     recChunks = [];
   }
 
