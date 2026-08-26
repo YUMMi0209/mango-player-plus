@@ -12,7 +12,7 @@
 Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
 1. 获取代码（任选其一）：
-   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v3.3.zip` 并解压；
+   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v2.3.zip` 并解压；
    - 或 `git clone https://github.com/YUMMi0209/mango-player-plus.git` 克隆仓库。
 2. 打开扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
@@ -393,5 +393,5 @@ LOG_标题_时间码_mmddhhmmss.xlsx            （日志导出）
 
 ---
 
-芒着拉片 | MG Player+ v3.3  
+芒着拉片 | MG Player+ v2.3  
 YUMMi
