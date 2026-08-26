@@ -205,6 +205,59 @@
 #mgp-tc.tc-hidden{opacity:0;pointer-events:none}
 #mgp-tc:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
 #mgp-tc-frames{color:#ff5f00;font-size:14px;opacity:.85}
+/* 网页全屏悬浮进度条：仅全屏时显示，底部居中，可拖动调整播放位置 */
+/* 进度条容器：定位与拉长动画在容器上；input 占满容器，轨道视觉仅 4px。
+   长度左右各缩短 8px（背景槽与进度条等宽，间距通过缩短进度条实现） */
+#mgp-fs-wrap{
+  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+  width:calc(min(72vw,680px) - 16px);height:16px;z-index:2147483647;
+  display:none;pointer-events:none;
+  transition:width .25s ease;
+}
+:host(.fs-on) #mgp-fs-wrap{display:block}
+/* 深色背景槽：让进度条在明亮画面中也清晰可见（置于最底层，轨道显示在槽上方） */
+#mgp-fs-wrap::before{
+  content:'';position:absolute;top:50%;left:0;right:0;height:32px;transform:translateY(-50%);
+  background:rgba(0,0,0,.55);border-radius:16px;border:1px solid rgba(255,255,255,.12);
+  z-index:0;
+}
+/* 自绘轨道：绝对定位垂直居中（不受浏览器 input track 布局差异影响），左右与 input 对齐（各 16px 空隙） */
+#mgp-fs-track{
+  position:absolute;top:50%;left:16px;right:16px;height:4px;transform:translateY(-50%);
+  border-radius:2px;z-index:0;pointer-events:none;
+  background:linear-gradient(to right, #ff5f00 0%, #ff5f00 var(--fill), rgba(255,255,255,.22) var(--fill));
+}
+#mgp-fs-progress{
+  position:relative;z-index:1;display:block;width:calc(100% - 32px);height:16px;pointer-events:auto;
+  -webkit-appearance:none;appearance:none;cursor:pointer;
+  background:transparent;outline:none;margin:0 auto;padding:0;--fill:0%;
+}
+/* 拖动时播放点上方的时间码气泡 */
+#mgp-fs-tip{
+  position:absolute;bottom:calc(100% + 8px);left:0;transform:translateX(-50%);
+  background:rgba(0,0,0,.85);color:#fff;padding:3px 8px;border-radius:4px;
+  font-size:12px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+  letter-spacing:.5px;border:1px solid rgba(255,255,255,.15);white-space:nowrap;
+  display:none;pointer-events:none;z-index:2147483647;
+}
+/* input 自带轨道透明化：轨道视觉由 #mgp-fs-track 绘制 */
+#mgp-fs-progress::-webkit-slider-runnable-track{
+  height:4px;border-radius:2px;background:transparent;
+}
+#mgp-fs-progress::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#ff5f00;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);
+  margin-top:-5px;
+}
+#mgp-fs-progress::-moz-range-track{
+  height:4px;border-radius:2px;background:transparent;
+}
+#mgp-fs-progress::-moz-range-progress{
+  height:4px;border-radius:2px;background:transparent;
+}
+#mgp-fs-progress::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;background:#ff5f00;border:2px solid #fff;cursor:pointer;
+}
 #mgp-tc-badge{
   font-size:11px;font-weight:700;padding:2px 6px;border-radius:2px;
   letter-spacing:.5px;
@@ -263,6 +316,11 @@
     <span id="mgp-tc-text">00:00:00<span id="mgp-tc-frames">:00</span></span>
   </span>
 </div>
+<div id="mgp-fs-wrap">
+  <div id="mgp-fs-track"></div>
+  <input id="mgp-fs-progress" type="range" min="0" max="0" value="0" step="0.01">
+  <span id="mgp-fs-tip"></span>
+</div>
 <button id="mgp-btn-ss" class="mgp-side-btn" data-tip="截图 (S)">
   <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
 </button>
@@ -273,9 +331,8 @@
 `;
 
   let shadow, wrapper, video, videoContainer,
-      recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
+      recMediaRecorder, recChunks, recStream, recRaf,
       toastTimer, stateTimer;
-  let recKeepTimer = null;   // captureStream(0) 兜底重绘定时器（暂停 / 无新帧时保持录制流）
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -377,6 +434,11 @@
   function dispTime() {
     return lastFrameMediaTime != null ? lastFrameMediaTime : (video ? video.currentTime : 0);
   }
+  // 跳转目标对齐到帧起点（+ 浮点 epsilon）：直接 seek 到帧边界间的连续值会渲染
+  // mediaTime ≤ 目标 的最近帧，导致显示比标记时间码早一帧
+  function alignToFrame(t) {
+    return Math.round(t * FPS) / FPS + 1e-4;
+  }
 
   function inject(v) {
     if (wrapper) remove();
@@ -421,14 +483,26 @@
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     const bar = qs('#mgp-bar');
     const tc = qs('#mgp-tc');
-    // 网页全屏：时间码固定 96px，鼠标离开画面不回落
-    if (webFsActive) { if (tc) tc.style.transform = 'translateY(88px)'; }
+    // 网页全屏：时间码保持当前位置，鼠标离开画面不回落
+    if (webFsActive) { if (tc) moveTCDown(); }
     else if (tc) tc.style.transform = '';
     if (bar && !recordingInternal) bar.classList.remove('show-btns');
   }
 
   function bindEvents() {
-    qs('#mgp-tc').addEventListener('click', onTC);
+    // 单击延迟执行复制（250ms），双击时间码则取消复制并切换网页全屏——两者不冲突
+    let tcClickTimer = null;
+    qs('#mgp-tc').addEventListener('click', () => {
+      if (tcClickTimer) clearTimeout(tcClickTimer);
+      tcClickTimer = setTimeout(() => { tcClickTimer = null; onTC(); }, 250);
+    });
+    qs('#mgp-tc').addEventListener('dblclick', e => {
+      if (tcClickTimer) { clearTimeout(tcClickTimer); tcClickTimer = null; }
+      e.preventDefault();
+      e.stopPropagation();
+      if (webFsActive) exitWebFs();
+      else enterWebFs();
+    });
     qs('#mgp-tc').addEventListener('contextmenu', e => {
       e.preventDefault();
       e.stopPropagation();
@@ -436,6 +510,132 @@
     });
     qs('#mgp-btn-ss').addEventListener('click', captureScreenshot);
     qs('#mgp-btn-rec').addEventListener('click', toggleRecording);
+    // 网页全屏进度条：拖动实时同步跳转；按住不动 1 秒拉长进度条（撑满左右 1% 边距，±30s 精细调整），松开恢复
+    // 鼠标拖动为手动实现（Chromium 自定义 appearance 的 range 鼠标原生拖动失效，触屏正常）
+    const fp = qs('#mgp-fs-progress');
+    if (fp) {
+      const fpWrap = qs('#mgp-fs-wrap');
+      const tip = qs('#mgp-fs-tip');
+      const showTip = () => {
+        if (!tip) return;
+        const v = parseFloat(fp.value);
+        if (isNaN(v)) return;
+        const ratio = (parseFloat(fp.max) > parseFloat(fp.min)) ? (v - parseFloat(fp.min)) / (parseFloat(fp.max) - parseFloat(fp.min)) : 0;
+        tip.style.left = (ratio * 100) + '%';
+        // 气泡时间码只精确到时分秒（不显示帧号），避免与顶部帧级时间码的渲染帧差异
+        tip.textContent = fmtTC(v, false);
+        tip.style.display = 'block';
+      };
+      const fpToTime = e => {
+        if (!video || !webFsActive) return;
+        const rect = (fpWrap || fp).getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const v = parseFloat(fp.min) + ratio * (parseFloat(fp.max) - parseFloat(fp.min));
+        if (isNaN(v) || !isFinite(v)) return;
+        if (Math.abs(parseFloat(fp.value) - v) > 0.001) fp.value = v;
+        video.currentTime = v;
+        showTip();
+      };
+      // 微调手势：分段线性映射（锚定进入微调时的鼠标位置与播放头位置）——
+      // 鼠标不动则播放头不动（从中间位置开始移动，不跳变）；
+      // 鼠标移到画面最左侧 → 播放头到进度条最左侧，最右侧同理；
+      // 屏幕有限时也能到达两端（进入微调时鼠标位置即为两段映射的锚点）
+      const fpGesture = e => {
+        if (!video || !webFsActive || !fsDragState || !fsDragState.extended) return;
+        const lo = parseFloat(fp.min), hi = parseFloat(fp.max);
+        if (!(hi > lo)) return;
+        const x = e.clientX, W = window.innerWidth, ent = fsDragState.startX;
+        const a = fsDragState.anchor;
+        let v;
+        if (x <= ent) {
+          v = ent > 0 ? lo + (x / ent) * (a - lo) : a;
+        } else {
+          v = W > ent ? a + ((x - ent) / (W - ent)) * (hi - a) : a;
+        }
+        v = Math.max(lo, Math.min(hi, v));
+        if (Math.abs(parseFloat(fp.value) - v) > 0.001) fp.value = v;
+        video.currentTime = v;
+        showTip();
+      };
+      fp.addEventListener('input', () => {
+        if (!video || !webFsActive) return;
+        const v = parseFloat(fp.value);
+        if (!isNaN(v) && isFinite(v)) video.currentTime = v;
+      });
+      fp.addEventListener('pointerdown', e => {
+        if (!video || !webFsActive) return;
+        const r = seekableRange();
+        if (!r || r.end <= r.start) return;
+        if (fsDragState) clearTimeout(fsDragState.timer);
+        fsDragState = { anchor: video.currentTime, timer: null, extended: false, range: r, moved: false, startX: e.clientX };
+        // 按住即定位到指针处并进入拖动
+        fpToTime(e);
+        try { if (fp.setPointerCapture) fp.setPointerCapture(e.pointerId); } catch (err) { }
+        // 静止按住 1 秒触发拉长（拖动中指针移动则取消）
+        fsDragState.timer = setTimeout(() => {
+          if (!fsDragState || fsDragState.moved) return;
+          fsDragState.extended = true;
+          const a = fsDragState.anchor, rr = fsDragState.range;
+          const lo = Math.max(rr.start, a - 30), hi = Math.min(rr.end, a + 30);
+          if (hi > lo) { fp.min = lo; fp.max = hi; }
+          // 进度条拉长到与两侧截图/录制按钮对齐（容器宽度变化，带 transition 动画）
+          if (fpWrap) fpWrap.style.width = 'calc(100% - 2%)';
+          // 播放头从当前位置动画移动到进度条中间（anchor），再开始微调
+          const from = parseFloat(fp.value);
+          const t0 = performance.now();
+          (function anim(now) {
+            const p = Math.min(1, (now - t0) / 250);
+            const eased = 1 - Math.pow(1 - p, 3);
+            const v = from + (a - from) * eased;
+            if (!isNaN(v) && isFinite(v)) { fp.value = v; if (video) video.currentTime = v; }
+            if (p < 1) requestAnimationFrame(anim);
+          })(performance.now());
+        }, 1000);
+      });
+      fp.addEventListener('pointermove', e => {
+        if (!fsDragState) return;
+        if (fsDragState.extended) { fpGesture(e); return; }
+        // 位移超过 5px 才视为拖动（取消拉长计时）；微动（人手抖动）不影响「静止按住 1 秒」触发
+        if (Math.abs(e.clientX - fsDragState.startX) > 5) {
+          if (!fsDragState.moved) {
+            fsDragState.moved = true;
+            clearTimeout(fsDragState.timer);
+            fsDragState.timer = null;
+          }
+        }
+        fpToTime(e);   // 普通拖动：播放点跟随指针，画面同步跳转
+      });
+      document.addEventListener('pointerup', () => {
+        if (!fsDragState) return;
+        clearTimeout(fsDragState.timer);
+        const wasExtended = fsDragState.extended;
+        // 立即清空拖动状态：残留的 pointermove 不再触发定位 / 显示气泡（气泡松开即消失）
+        fsDragState = null;
+        if (tip) tip.style.display = 'none';
+        if (fpWrap) fpWrap.style.width = '';   // 宽度收回（transition 动画）
+        // 退出动画期间阻止 syncFsProgress 回写 value，播放头总是动画回到实际播放位置
+        fsExitAnim = true;
+        const r = seekableRange();
+        if (r && r.end > r.start) { fp.min = r.start; fp.max = r.end; }
+        const from = parseFloat(fp.value);
+        const to = video ? video.currentTime : from;
+        // 播放头始终动画移动（进入与退出微调、普通拖动松开均生效）
+        if (Math.abs(from - to) > 0.005 || wasExtended) {
+          const t0 = performance.now();
+          (function anim(now) {
+            const p = Math.min(1, (now - t0) / 250);
+            const eased = 1 - Math.pow(1 - p, 3);
+            const v = from + (to - from) * eased;
+            if (!isNaN(v) && isFinite(v)) fp.value = v;
+            if (p < 1) { requestAnimationFrame(anim); } else { fsExitAnim = false; syncFsProgress(); }
+          })(performance.now());
+        } else {
+          fsExitAnim = false;
+          syncFsProgress();
+        }
+      });
+    }
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
     videoContainer.addEventListener('mousemove', onBarHover);
     videoContainer.addEventListener('mouseleave', onBarMouseLeave);
@@ -468,8 +668,12 @@
   function moveTCDown() {
     const tc = qs('#mgp-tc');
     if (!tc || !videoContainer) return;
-    // 网页全屏：时间码固定距顶部 96px（8px 默认位置 + 88px），不受回避开关影响
-    if (webFsActive) { tc.style.transform = 'translateY(88px)'; return; }
+    // 网页全屏：时间码位置参考浏览器全屏（从默认 8px 下移窗口宽 0.5%），不受回避开关影响
+    if (webFsActive) {
+      const r = rectForUI();
+      tc.style.transform = 'translateY(' + (r.width * 0.005) + 'px)';
+      return;
+    }
     if (!avoidTimecodeOn()) { tc.style.transform = ''; return; }
     const r = rectForUI();
     if (r.width <= 0 || r.height <= 0) return;
@@ -580,7 +784,7 @@
       const t = parseTCInput(input.value);
       if (t == null) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
       if (!video) return;
-      try { video.currentTime = Math.max(0, Math.min(t, video.duration || t)); } catch (e) { }
+      try { video.currentTime = Math.max(0, Math.min(alignToFrame(t), video.duration || t)); } catch (e) { }
       mgpToast('已跳转 ' + fmtTC(dispTime()));
       close();
     };
@@ -655,6 +859,7 @@
     const p = fmtTC(dt, true).split(':');
     if (p.length === 4) txt.innerHTML = p.slice(0,3).join(':') + '<span id="mgp-tc-frames">:' + p[3] + '</span>';
     badge.textContent = bl; badge.className = bc;
+    syncFsProgress();
     if (state.tcMode === 'mk') {
       const c = markColorFor(state.markTime);
       if (c) { badge.style.background = c; badge.style.color = badgeTextColor(c); }
@@ -782,21 +987,17 @@
     if (video.paused) video.play().catch(()=>{});
     video.addEventListener('seeking', onSeekBlock, true);
 
-    recCanvas = document.createElement('canvas');
-    recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
-    recCtx = recCanvas.getContext('2d');
-    // 立即绘制首帧，避免录制开头输出空白帧
-    paintRecFrame();
-    // captureStream(0)：仅在有新帧绘制时采样，与 rVFC 绘制完全同步——
-    // 固定采样周期会产生重复帧或丢帧（编码器积压导致卡顿），帧驱动输出间隔均匀
-    recStream = recCanvas.captureStream(0);
-
-    // Add audio track from video element
+    // 直接捕获 video 元素源流（含音视频轨道）：源帧率直出、画质无损；
+    // 不依赖 canvas 转绘（rAF / rVFC / 定时器在标签页切后台时被节流，导致录制卡在第一帧）
     try {
-      const videoStream = video.captureStream();
-      const audioTracks = videoStream.getAudioTracks();
-      if (audioTracks.length > 0) recStream.addTrack(audioTracks[0]);
-    } catch (e) { /* audio capture may not be supported */ }
+      recStream = video.captureStream();
+      if (!recStream.getVideoTracks().length) throw new Error('no-video-track');
+    } catch (e) {
+      recordingInternal = false;
+      recAutoStop = false;
+      mgpToast('无法采集视频流', true);
+      return;
+    }
 
     const mt = (() => {
       const candidates = [
@@ -842,39 +1043,7 @@
     recMediaRecorder.onstop = () => finishRecording();
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // captureStream(0) 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧，
-    // 并周期性兜底重绘，避免视频暂停 / 无新帧时录制流中断卡在第一帧
-    paintRecFrame();
-    recKeepTimer = setInterval(() => {
-      if (!recordingInternal) return;
-      paintRecFrame();
-    }, 200);
 
-    // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
-    const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
-    let lastMedia = -1;
-    function paintRecFrame() {
-      try {
-        if (video.readyState >= 2 && video.videoWidth > 0) {
-          recCtx.drawImage(video, 0, 0, recCanvas.width, recCanvas.height);
-        }
-      } catch (e) { /* protected content or hidden video */ }
-    }
-    if (useFrameCb) {
-      (function frameDraw() {
-        if (!recordingInternal) return;
-        video.requestVideoFrameCallback((now, meta) => {
-          const mt = meta && meta.mediaTime != null ? meta.mediaTime : -1;
-          if (mt !== lastMedia) { lastMedia = mt; paintRecFrame(); }
-          frameDraw();
-        });
-      })();
-    } else {
-      (function rafDraw() {
-        if (!recordingInternal) return;
-        recRaf = requestAnimationFrame(() => { paintRecFrame(); rafDraw(); });
-      })();
-    }
     // 独立 rAF 轻量 tick：持续维护录制期望时间（跳转锁定），暂停时也保持时钟新鲜
     (function tickExpected() {
       if (!recordingInternal) return;
@@ -896,7 +1065,6 @@
   function stopRecording() {
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
-    if (recKeepTimer) { clearInterval(recKeepTimer); recKeepTimer = null; }
     video.removeEventListener('seeking', onSeekBlock, true);
     recStopTarget = null;
     recStopTime = video ? video.currentTime : (state.recordingStart || 0);
@@ -915,7 +1083,7 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
-    recMediaRecorder = null; recCanvas = null; recCtx = null;
+    recMediaRecorder = null;
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
@@ -1006,38 +1174,48 @@
   // ─── 网页全屏：视频铺满当前窗口（非浏览器全屏），ESC 退出 ──
   let webFsActive = false;
   let webFsSaved = null;
+  let fsDragState = null;   // 进度条拖动状态：{ anchor, timer, extended, range, moved, startX }
+  let fsExitAnim = false;   // 退出微调动画中：暂停进度条 value 回写
   function enterWebFs() {
-    if (!video || !video.videoWidth) { mgpToast('无画面'); return false; }
+    // 使用独立视频引用：视频控制关闭后控制栏被移除（video 变量置空），
+    // 此时回退到页面当前视频元素，网页全屏仍可用
+    const v = video || window.__mgp_video || document.querySelector('video');
+    if (!v || !v.videoWidth) { mgpToast('无画面'); return false; }
     if (webFsActive) return true;
     webFsSaved = {
-      v: video, vStyle: video.getAttribute('style') || '',
+      v: v, vStyle: v.getAttribute('style') || '',
       w: wrapper, wStyle: wrapper ? wrapper.getAttribute('style') : '',
       hidden: []
     };
-    // 收集需隐藏的页面元素：除 video 及其祖先链、扩展控制栏外的所有元素（播放器 UI / 导航等全部隐藏）
-    const chain = [];
-    let el = video;
-    while (el && el !== document.body) { chain.unshift(el); el = el.parentElement; }
-    const hide = [];
-    [...document.body.children].forEach(c => { if (chain.indexOf(c) === -1) hide.push(c); });
-    chain.forEach((anc, i) => {
-      if (anc === video || anc === wrapper) return;
-      [...anc.children].forEach(c => {
-        if (c !== chain[i + 1] && c !== video && c !== wrapper) hide.push(c);
-      });
+    // 隐藏除视频与扩展控制栏外的所有页面元素：遍历整棵 DOM 树，
+    // 含视频祖先链内的兄弟与任意嵌套层级的非视频元素（播放器 UI / 标题悬浮层 / 导航等）
+    const hideTree = root => {
+      const stack = [root];
+      while (stack.length) {
+        const el = stack.pop();
+        if (!el || el.nodeType !== 1) continue;
+        // 扩展控制栏、Toast 提示不隐藏（全屏中 Toast 正常显示）
+        if (el === v || el === wrapper || el.id === 'mgp-toast-ext') continue;
+        if (el.contains(v)) { [...el.children].forEach(c => stack.push(c)); continue; }
+        webFsSaved.hidden.push({ t: el, orig: el.style.display });
+        el.style.display = 'none';
+      }
+    };
+    hideTree(document.body);
+    // 兜底：全屏期间动态插入的非视频元素（如播放器标题悬浮层）自动隐藏
+    webFsSaved.observer = new MutationObserver(muts => {
+      muts.forEach(m => (m.addedNodes || []).forEach(n => { if (n.nodeType === 1) hideTree(n); }));
     });
-    hide.forEach(t => {
-      webFsSaved.hidden.push({ t, orig: t.style.display });
-      t.style.display = 'none';
-    });
-    video.style.cssText =
+    webFsSaved.observer.observe(document.body, { childList: true, subtree: true });
+    v.style.cssText =
       'position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
       'width:100vw!important;height:100vh!important;object-fit:contain!important;' +
       'background:#000!important;z-index:2147483646!important;margin:0!important;' +
       'max-width:none!important;max-height:none!important;';
-    if (wrapper) wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;';
+    if (wrapper) { wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;'; wrapper.classList.add('fs-on'); }
     webFsActive = true;
     moveTCDown();
+    syncFsProgress();
     mgpToast('网页全屏（ESC 退出）', true);
     return true;
   }
@@ -1046,19 +1224,52 @@
     if (!webFsActive) return false;
     if (webFsSaved) {
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
-      if (webFsSaved.w) webFsSaved.w.setAttribute('style', webFsSaved.wStyle);
+      if (webFsSaved.w) { webFsSaved.w.setAttribute('style', webFsSaved.wStyle); webFsSaved.w.classList.remove('fs-on'); }
       (webFsSaved.hidden || []).forEach(h => { if (h.t) h.t.style.display = h.orig; });
     }
     webFsActive = false;
     webFsSaved = null;
+    if (fsDragState) { clearTimeout(fsDragState.timer); fsDragState = null; }
     const tc = qs('#mgp-tc');
     if (tc) tc.style.transform = '';
     mgpToast('已退出网页全屏', true);
     return false;
   }
+  // 网页全屏悬浮进度条：按可回退/播放范围同步位置与已播放填充
+  // 拖动中不回写 value（thumb 跟随鼠标，画面实时 seek）；长按拉长后保持 ±30s 范围
+  function syncFsProgress() {
+    const p = qs('#mgp-fs-progress');
+    const trackEl = qs('#mgp-fs-track');
+    if (!p || !trackEl || !video || !webFsActive) return;
+    const setFill = pct => trackEl.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
+    if (fsDragState && fsDragState.extended) {
+      const v = parseFloat(p.value);
+      const pct = p.max > p.min ? ((v - p.min) / (p.max - p.min)) * 100 : 0;
+      setFill(pct);
+      return;
+    }
+    const r = seekableRange();
+    if (!r || r.end <= r.start) return;
+    const ct = Math.max(r.start, Math.min(r.end, video.currentTime));
+    // 非拖动状态才回写范围与值（拖动中 value 由用户控制，保证实时同步；退出动画期间同样不回写）
+    if (!fsDragState && !fsExitAnim) {
+      if (p.min !== r.start) p.min = r.start;
+      if (p.max !== r.end) p.max = r.end;
+      if (Math.abs(p.value - ct) > 0.001) p.value = ct;
+    }
+    setFill(((ct - r.start) / (r.end - r.start)) * 100);
+  }
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && webFsActive) exitWebFs();
   });
+  // 网页全屏退出：双击视频画面或 ESC（document 级常驻监听，控制栏关闭时同样生效；
+  // capture 阶段拦截，覆盖播放器自身的双击全屏操作）
+  document.addEventListener('dblclick', e => {
+    if (!webFsActive) return;
+    if (e && e.target && e.target.tagName !== 'VIDEO') return;
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    exitWebFs();
+  }, true);
 
   function remove() {
     // 录制中移除控制栏（关闭控制栏 / 换集重建）：必须停止录制，否则 R 键失效后将无法停止
@@ -1249,7 +1460,7 @@
     getLogs() { return JSON.parse(JSON.stringify(logs)); },
     jumpTo(t) {
       if (!video) return false;
-      video.currentTime = t;
+      video.currentTime = alignToFrame(t);
       video.pause();
       resetSpeed();
       try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { }
