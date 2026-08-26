@@ -564,47 +564,50 @@
         const v = parseFloat(fp.value);
         if (!isNaN(v) && isFinite(v)) video.currentTime = v;
       });
+      // 拉长（进入微调）：任意操作后静止 1 秒触发（含先拖动调整再停住）；
+      // 微调基准取触发时刻的播放位置（anchor）
+      const extendFn = () => {
+        if (!fsDragState || fsDragState.extended) return;
+        fsDragState.extended = true;
+        const a = video ? video.currentTime : fsDragState.anchor;
+        fsDragState.anchor = a;
+        const rr = fsDragState.range;
+        const lo = Math.max(rr.start, a - 30), hi = Math.min(rr.end, a + 30);
+        if (hi > lo) { fp.min = lo; fp.max = hi; }
+        // 进度条拉长到与两侧截图/录制按钮对齐（容器宽度变化，带 transition 动画）
+        if (fpWrap) fpWrap.style.width = 'calc(100% - 2%)';
+        // 播放头从当前位置动画移动到进度条中间（anchor），再开始微调
+        const from = parseFloat(fp.value);
+        const t0 = performance.now();
+        (function anim(now) {
+          const p = Math.min(1, (now - t0) / 250);
+          const eased = 1 - Math.pow(1 - p, 3);
+          const v = from + (a - from) * eased;
+          if (!isNaN(v) && isFinite(v)) { fp.value = v; if (video) video.currentTime = v; }
+          if (p < 1) requestAnimationFrame(anim);
+        })(performance.now());
+      };
       fp.addEventListener('pointerdown', e => {
         if (!video || !webFsActive) return;
         const r = seekableRange();
         if (!r || r.end <= r.start) return;
         if (fsDragState) clearTimeout(fsDragState.timer);
-        fsDragState = { anchor: video.currentTime, timer: null, extended: false, range: r, moved: false, startX: e.clientX };
+        fsDragState = { anchor: video.currentTime, timer: null, extended: false, range: r, startX: e.clientX, lastAct: performance.now() };
         // 按住即定位到指针处并进入拖动
         fpToTime(e);
         try { if (fp.setPointerCapture) fp.setPointerCapture(e.pointerId); } catch (err) { }
-        // 静止按住 1 秒触发拉长（拖动中指针移动则取消）
-        fsDragState.timer = setTimeout(() => {
-          if (!fsDragState || fsDragState.moved) return;
-          fsDragState.extended = true;
-          const a = fsDragState.anchor, rr = fsDragState.range;
-          const lo = Math.max(rr.start, a - 30), hi = Math.min(rr.end, a + 30);
-          if (hi > lo) { fp.min = lo; fp.max = hi; }
-          // 进度条拉长到与两侧截图/录制按钮对齐（容器宽度变化，带 transition 动画）
-          if (fpWrap) fpWrap.style.width = 'calc(100% - 2%)';
-          // 播放头从当前位置动画移动到进度条中间（anchor），再开始微调
-          const from = parseFloat(fp.value);
-          const t0 = performance.now();
-          (function anim(now) {
-            const p = Math.min(1, (now - t0) / 250);
-            const eased = 1 - Math.pow(1 - p, 3);
-            const v = from + (a - from) * eased;
-            if (!isNaN(v) && isFinite(v)) { fp.value = v; if (video) video.currentTime = v; }
-            if (p < 1) requestAnimationFrame(anim);
-          })(performance.now());
-        }, 1000);
+        // 静止 1 秒触发拉长（任何指针移动都会重置计时——先拖动再停住同样触发）
+        fsDragState.timer = setTimeout(extendFn, 1000);
       });
       fp.addEventListener('pointermove', e => {
         if (!fsDragState) return;
+        fsDragState.lastAct = performance.now();
+        // 松手兜底：鼠标已松开（残余 move 的 buttons=0，窗口外松手等场景无 pointerup）立即退出
+        if (e.buttons === 0) { endDrag(); return; }
         if (fsDragState.extended) { fpGesture(e); return; }
-        // 位移超过 5px 才视为拖动（取消拉长计时）；微动（人手抖动）不影响「静止按住 1 秒」触发
-        if (Math.abs(e.clientX - fsDragState.startX) > 5) {
-          if (!fsDragState.moved) {
-            fsDragState.moved = true;
-            clearTimeout(fsDragState.timer);
-            fsDragState.timer = null;
-          }
-        }
+        // 重置拉长计时：拖动中持续移动不触发；停住 1 秒后触发微调
+        clearTimeout(fsDragState.timer);
+        fsDragState.timer = setTimeout(extendFn, 1000);
         fpToTime(e);   // 普通拖动：播放点跟随指针，画面同步跳转
       });
       // 松开退出：window 级多重监听（pointerup / pointercancel / mouseup），
@@ -641,6 +644,15 @@
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
       window.addEventListener('mouseup', endDrag);
+      // 全局兜底（仅注册一次）：窗口失焦退出；微调中 3 秒无指针活动强制退出
+      // （覆盖窗口外松手且指针静止、pointerup 完全丢失的场景）
+      if (!window.__mppFsWatch) {
+        window.__mppFsWatch = true;
+        window.addEventListener('blur', endDrag);
+        setInterval(() => {
+          if (fsDragState && fsDragState.extended && performance.now() - (fsDragState.lastAct || 0) > 3000) endDrag();
+        }, 500);
+      }
     }
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
     videoContainer.addEventListener('mousemove', onBarHover);
