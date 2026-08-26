@@ -331,8 +331,9 @@
 `;
 
   let shadow, wrapper, video, videoContainer,
-      recMediaRecorder, recChunks, recStream, recRaf,
+      recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
       toastTimer, stateTimer;
+  let recKeepTimer = null;   // captureStream 兜底重绘定时器（暂停 / 无新帧时保持录制流）
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -987,22 +988,37 @@
     if (video.paused) video.play().catch(()=>{});
     video.addEventListener('seeking', onSeekBlock, true);
 
-    // 直接捕获 video 元素源流（含音视频轨道）：源帧率直出、画质无损；
-    // 不依赖 canvas 转绘（rAF / rVFC / 定时器在标签页切后台时被节流，导致录制卡在第一帧）
+    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rVFC 按视频帧节奏绘制。
+    // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
+    recCanvas = document.createElement('canvas');
+    recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
+    recCtx = recCanvas.getContext('2d');
+    // 立即绘制首帧，避免录制开头输出空白帧
+    paintRecFrame();
+    // 采集帧率取源帧率 2 倍（30~60 封顶）：captureStream 定时采样与视频帧绘制同频时相位随机，
+    // 采样点常落在两次绘制之间导致丢帧；加倍采样后每次绘制必被采到，输出顺滑不卡顿
+    const capFps = Math.min(60, Math.max(FPS * 2, 30));
+    recStream = recCanvas.captureStream(capFps);
+    // 音频：从 video 元素音轨拼入
     try {
-      recStream = video.captureStream();
-      if (!recStream.getVideoTracks().length) throw new Error('no-video-track');
-    } catch (e) {
+      const videoStream = video.captureStream();
+      const audioTracks = videoStream.getAudioTracks();
+      if (audioTracks.length > 0) recStream.addTrack(audioTracks[0]);
+    } catch (e) { /* audio capture may not be supported */ }
+    if (!recStream.getVideoTracks().length) {
       recordingInternal = false;
       recAutoStop = false;
       mgpToast('无法采集视频流', true);
       return;
     }
 
+    // 优先 MP4 + H.264/AAC（剪辑软件兼容性最好）；WebM 仅作回退
     const mt = (() => {
       const candidates = [
         'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-        'video/mp4;codecs=avc1.42E01E,opus',
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
+        'video/mp4;codecs=avc1.42E01E',
+        'video/mp4',
         'video/webm;codecs=vp9,opus',
         'video/webm;codecs=vp8,opus',
         'video/webm'
@@ -1043,7 +1059,39 @@
     recMediaRecorder.onstop = () => finishRecording();
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
+    // captureStream 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧，
+    // 并周期性兜底重绘，避免视频暂停 / 无新帧时录制流中断卡在第一帧
+    paintRecFrame();
+    recKeepTimer = setInterval(() => {
+      if (!recordingInternal) return;
+      paintRecFrame();
+    }, 200);
 
+    // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
+    const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
+    let lastMedia = -1;
+    function paintRecFrame() {
+      try {
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          recCtx.drawImage(video, 0, 0, recCanvas.width, recCanvas.height);
+        }
+      } catch (e) { /* protected content or hidden video */ }
+    }
+    if (useFrameCb) {
+      (function frameDraw() {
+        if (!recordingInternal) return;
+        video.requestVideoFrameCallback((now, meta) => {
+          const mt = meta && meta.mediaTime != null ? meta.mediaTime : -1;
+          if (mt !== lastMedia) { lastMedia = mt; paintRecFrame(); }
+          frameDraw();
+        });
+      })();
+    } else {
+      (function rafDraw() {
+        if (!recordingInternal) return;
+        recRaf = requestAnimationFrame(() => { paintRecFrame(); rafDraw(); });
+      })();
+    }
     // 独立 rAF 轻量 tick：持续维护录制期望时间（跳转锁定），暂停时也保持时钟新鲜
     (function tickExpected() {
       if (!recordingInternal) return;
@@ -1065,6 +1113,7 @@
   function stopRecording() {
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
+    if (recKeepTimer) { clearInterval(recKeepTimer); recKeepTimer = null; }
     video.removeEventListener('seeking', onSeekBlock, true);
     recStopTarget = null;
     recStopTime = video ? video.currentTime : (state.recordingStart || 0);
@@ -1083,7 +1132,7 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
-    recMediaRecorder = null;
+    recMediaRecorder = null; recCanvas = null; recCtx = null;
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
