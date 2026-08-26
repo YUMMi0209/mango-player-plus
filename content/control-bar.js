@@ -343,6 +343,9 @@
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
   let recStopTime = null;    // 本次录制的停止时间（独立于预设出点）
+  let recPaused = false;     // 页面切后台：MediaRecorder 已暂停（画中画保持录制未开启时）
+  let pipActive = false;     // 画中画保持录制：录制期间 PiP 窗口激活（页面后台时视频仍渲染）
+  let recPacer = null;       // 时间戳自控器（MediaStreamTrackProcessor → Generator，CFR 输出）
   let hashSeekDone = false;
 
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
@@ -995,6 +998,96 @@
     }
   }
 
+  // 画中画保持录制开关（设置面板「画中画保持录制」）：开启后录制时自动进入画中画，
+  // 页面切到后台时视频在 PiP 窗口中继续渲染（rVFC 不中断），录制画面不冻结
+  function pipRecordEnabled() {
+    const s = window.__mgpSettings || {};
+    return s.pipRecord === true;
+  }
+  // 录制画面是否仍在渲染（PiP 窗口激活时后台页面也继续渲染视频）
+  function pipOn() {
+    return pipActive || (video != null && document.pictureInPictureElement === video);
+  }
+
+  // ─── 时间戳自控（CFR 输出）────────────────────
+  // canvas.captureStream 的帧到达时刻抖动（渲染节拍 + 采样量化）导致 MediaRecorder
+  // 输出 VFR（可变帧率）。此处用 MediaStreamTrackProcessor 读帧，按固定帧率网格
+  // 重打时间戳（重复帧丢弃、缺帧用上一帧补），经 MediaStreamTrackGenerator 输出，
+  // MediaRecorder 按输入帧 timestamp 打样本时间戳 → 输出恒定帧率。
+  // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
+  function startFramePacer(stream) {
+    if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
+    try {
+      const vTrack = stream.getVideoTracks()[0];
+      if (!vTrack) return null;
+      const processor = new MediaStreamTrackProcessor({ track: vTrack });
+      const generator = new MediaStreamTrackGenerator({ kind: 'video' });
+      const outStream = new MediaStream();
+      outStream.addTrack(generator);
+      // 音频是连续采样，无需规整，原样转发（pause 时随 MediaRecorder 一并暂停）
+      stream.getAudioTracks().forEach(t => outStream.addTrack(t));
+      const reader = processor.readable.getReader();
+      const writer = generator.writable.getWriter();
+      const frameDurUs = Math.max(1000, Math.round(1e6 / FPS)); // 目标帧间隔（微秒）
+      let idx = 0;          // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
+      let lastInTs = null;  // 上一输入帧原始时间戳（判定重复 / 补帧）
+      let lastFrame = null; // 最近写入的帧（补帧用）
+      let stopped = false;
+      (async () => {
+        try {
+          while (!stopped) {
+            const { value: f, done } = await reader.read();
+            if (done) break;
+            if (!f || recPaused) { if (f) f.close(); continue; } // 暂停期间丢弃输入帧
+            const inTs = f.timestamp;
+            if (lastInTs === null) {
+              // 首帧 / 暂停恢复后的新基准：时间戳从当前 idx 继续（不补暂停期空洞）。
+              // timestamp 为只读属性，需构造新帧重打时间戳（共享底层数据，零拷贝）
+              const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
+              f.close();
+              await writer.write(out);
+              if (lastFrame) lastFrame.close();
+              lastFrame = out;
+              lastInTs = inTs;
+              idx++;
+              continue;
+            }
+            const gap = inTs - lastInTs;
+            if (gap < 0) { f.close(); continue; }              // 乱序帧丢弃
+            if (gap < frameDurUs / 2) { f.close(); continue; } // 重复 / 过快帧丢弃
+            // 中间缺帧：用上一帧内容补，保证输出时长精确
+            const missing = Math.min(Math.round(gap / frameDurUs) - 1, 900); // 上限防异常输入
+            for (let i = 0; i < missing; i++) {
+              await writer.write(new VideoFrame(lastFrame, { timestamp: idx * frameDurUs }));
+              idx++;
+            }
+            const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
+            f.close();
+            await writer.write(out);
+            if (lastFrame) lastFrame.close();
+            lastFrame = out;
+            lastInTs = inTs;
+            idx++;
+          }
+        } catch (e) { /* reader 取消 / 轨道停止 */ }
+        try { if (lastFrame) lastFrame.close(); } catch (e) { }
+        try { await writer.close(); } catch (e) { }
+      })();
+      return {
+        stream: outStream,
+        // 暂停恢复：丢弃旧输入基准，避免把暂停期空洞补成重复帧
+        resetBase() { lastInTs = null; },
+        stop() {
+          stopped = true;
+          try { reader.cancel(); } catch (e) { }
+          try { generator.stop(); } catch (e) { }
+        }
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
   function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
@@ -1029,6 +1122,10 @@
     mgpToast(atIn ? '从入点录制 → 到出点自动停止' : '录制开始', true);
     if (video.paused) video.play().catch(()=>{});
     video.addEventListener('seeking', onSeekBlock, true);
+    // 画中画保持录制（需用户手势）：页面切后台后视频在 PiP 窗口继续渲染，录制画面不冻结
+    if (pipRecordEnabled() && typeof video.requestPictureInPicture === 'function') {
+      video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
+    }
 
     // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rVFC 按视频帧节奏绘制。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
@@ -1091,11 +1188,29 @@
       return 0;
     })();
     const videoBits = srcBits > 0 ? Math.max(srcBits, tierBits) : tierBits;
-    recMediaRecorder = new MediaRecorder(recStream, {
-      mimeType: mt,
-      videoBitsPerSecond: videoBits,
-      audioBitsPerSecond: 128000
-    });
+    // 时间戳自控（CFR）：浏览器支持时接管视频轨，按固定帧率网格输出；不支持时回退直连
+    recPacer = startFramePacer(recStream);
+    const mediaStream = recPacer ? recPacer.stream : recStream;
+    try {
+      recMediaRecorder = new MediaRecorder(mediaStream, {
+        mimeType: mt,
+        videoBitsPerSecond: videoBits,
+        audioBitsPerSecond: 128000
+      });
+    } catch (e) {
+      // 构造失败（编码器不支持等）：清理本次录制资源并恢复 UI，避免泄漏与状态卡死
+      recordingInternal = false; recAutoStop = false;
+      if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
+      if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
+      if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+      if (recPacer) { recPacer.stop(); recPacer = null; }
+      recCanvas = null; recCtx = null; pendingShot = null;
+      if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
+      if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
+      if (bar) bar.classList.remove('recording');
+      mgpToast('无法开始录制：编码器不支持', true);
+      return;
+    }
     recChunks = [];
     recMediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
     recMediaRecorder.onstop = () => finishRecording();
@@ -1139,6 +1254,7 @@
       if (!recordingInternal) return;
       const now = performance.now() / 1000;
       const elapsed = now - lastWallClock;
+      if (recPaused) { lastWallClock = now; recRaf = requestAnimationFrame(tickExpected); return; } // 暂停中不累加期望时间
       if (!video.paused && video.readyState >= 2) {
         lastExpectedTime += elapsed * video.playbackRate;
       }
@@ -1157,6 +1273,12 @@
     if (recRaf) cancelAnimationFrame(recRaf);
     if (recKeepTimer) { clearInterval(recKeepTimer); recKeepTimer = null; }
     video.removeEventListener('seeking', onSeekBlock, true);
+    // 录制结束：退出画中画（若录制期间进入），恢复页面内视频显示
+    if (pipOn()) {
+      pipActive = false;
+      document.exitPictureInPicture().catch(() => { });
+    }
+    recPaused = false;
     recStopTarget = null;
     recStopTime = video ? video.currentTime : (state.recordingStart || 0);
     state.tcMode = 'ot';
@@ -1174,6 +1296,7 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
+    if (recPacer) { recPacer.stop(); recPacer = null; }
     recMediaRecorder = null; recCanvas = null; recCtx = null;
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
@@ -1492,6 +1615,34 @@
 
   window.addEventListener('mgp-video-found', syncBar);
   window.addEventListener('mgp-settings', syncBar);
+
+  // ─── 后台录制保护 ─────────────────────────────
+  // 页面切到后台：渲染流水线被浏览器节流（rVFC/rAF 停、定时器 ≥1s），canvas 不再更新，
+  // 继续录制只会得到冻结画面 + 正常声音。切后台时暂停 MediaRecorder（音视频整段不写入），
+  // 回前台恢复，前后音画保持同步；「画中画保持录制」开启时视频在 PiP 窗口继续渲染，不暂停。
+  document.addEventListener('visibilitychange', () => {
+    if (!recordingInternal || !recMediaRecorder) return;
+    if (document.hidden && !pipOn() && recMediaRecorder.state === 'recording') {
+      recMediaRecorder.pause();
+      recPaused = true;
+      // 重同步录制期望时间与时钟：暂停期间视频仍在播放（声音正常），恢复后避免 seek 锁误判
+      lastExpectedTime = video ? video.currentTime : lastExpectedTime;
+      lastWallClock = performance.now() / 1000;
+      mgpToast('已暂停录制（页面切到后台）', true);
+    } else if (!document.hidden && recMediaRecorder.state === 'paused') {
+      recMediaRecorder.resume();
+      recPaused = false;
+      lastExpectedTime = video ? video.currentTime : lastExpectedTime;
+      lastWallClock = performance.now() / 1000;
+      // 丢弃暂停前的输入帧基准：恢复后不把后台时段补成重复帧
+      if (recPacer) recPacer.resetBase();
+      mgpToast('已恢复录制', true);
+    }
+  });
+  // 用户在画中画窗口点关闭：后台录制保护失效，之后再切后台走暂停逻辑
+  document.addEventListener('leavepictureinpicture', e => {
+    if (e.target === video) pipActive = false;
+  });
 
   // 全屏切换：进入时时间码下移并启动无操作计时，退出时回到原位并停止计时
   document.addEventListener('fullscreenchange', () => {

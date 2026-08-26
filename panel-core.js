@@ -384,6 +384,7 @@ const MPP = (() => {
     els.modeMenu = $(cfg.modeMenu);
     els.togShot = $(cfg.togShot);
     els.togAvoid = $(cfg.togAvoid);
+    els.togPip = $(cfg.togPip);
     els.togBar = $(cfg.togBar);
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
@@ -1352,6 +1353,7 @@ const MPP = (() => {
     getSettings().then(s => {
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
+      if (els.togPip) els.togPip.checked = s.pipRecord === true;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
@@ -1360,6 +1362,7 @@ const MPP = (() => {
     const savePatch = patch => chrome.runtime.sendMessage({ type: 'saveSettings', patch }).catch(() => { });
     if (els.togShot) els.togShot.addEventListener('change', e => savePatch({ autoShot: e.target.checked }));
     if (els.togAvoid) els.togAvoid.addEventListener('change', e => savePatch({ avoidTimecode: e.target.checked }));
+    if (els.togPip) els.togPip.addEventListener('change', e => savePatch({ pipRecord: e.target.checked }));
     if (els.togBar) els.togBar.addEventListener('change', e => savePatch({ barEnabled: e.target.checked }));
     if (els.togDanmu) els.togDanmu.addEventListener('change', e => savePatch({ danmuBlock: e.target.checked }));
     // 网页全屏按钮：视频铺满当前窗口（非浏览器全屏），ESC 退出；反馈提示统一显示在网页

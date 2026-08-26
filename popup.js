@@ -21,6 +21,7 @@ MPP.init({
   modeMenu: '#mode-menu',
   togShot: '#tog-shot',
   togAvoid: '#tog-avoid',
+  togPip: '#tog-pip',
   togBar: '#tog-bar',
   togDanmu: '#tog-danmu',
   togAll: '#tog-all',
