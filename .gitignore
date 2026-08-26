@@ -1,2 +1,5 @@
 # 内部素材（showcase 演示页、认证笔记）不上传
 Material/
+
+# 会话配置不上传
+.claude/
