@@ -338,7 +338,11 @@
   let shadow, wrapper, video, videoContainer,
       recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
       toastTimer, stateTimer;
-  let recKeepTimer = null;   // captureStream 兜底重绘定时器（暂停 / 无新帧时保持录制流）
+  let recPaintTimer = null;      // 固定节拍重绘定时器（~60fps）：rVFC 失效时画面仍持续更新，防录制卡首帧
+  let recDrawOk = 0, recDrawFail = 0;   // 绘制成功 / 连续失败计数（自愈判定 + 诊断）
+  let recVideoAdopted = false;   // 录制中 video 引用是否被重新定位过
+  let recAdoptPending = 0;      // 上次尝试重定位 video 的时间戳（0 = 未在重试；失败后每 2s 重试一次）
+  let recDiag = null, recDiagTimer = null;  // 录制诊断数据（停止 / 结束时 console 输出）
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -1054,7 +1058,10 @@
             }
             const gap = inTs - lastInTs;
             if (gap < 0) { f.close(); continue; }              // 乱序帧丢弃
-            if (gap < frameDurUs / 2) { f.close(); continue; } // 重复 / 过快帧丢弃
+            // 过快帧丢弃阈值放宽到 frameDurUs 的 35%：capFps = 2×FPS 时输入间隔恰为
+            // frameDurUs/2，临界值在采样抖动（±1ms）下会把正常帧误判为重复帧丢弃，
+            // 极端情况下持续误丢导致录制只有首帧画面
+            if (gap < frameDurUs * 0.35) { f.close(); continue; } // 重复 / 过快帧丢弃
             // 中间缺帧：用上一帧内容补，保证输出时长精确
             const missing = Math.min(Math.round(gap / frameDurUs) - 1, 900); // 上限防异常输入
             for (let i = 0; i < missing; i++) {
@@ -1132,6 +1139,10 @@
     recCanvas = document.createElement('canvas');
     recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
     recCtx = recCanvas.getContext('2d');
+    // 画布挂入文档（移出视口不可见）：部分 Chromium 版本对不在文档中的 canvas
+    // captureStream 采样会停止产帧，导致录制只有首帧画面
+    recCanvas.style.cssText = 'position:fixed;left:-99999px;top:0;pointer-events:none;';
+    document.body.appendChild(recCanvas);
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
     // 采集帧率取源帧率 2 倍（30~60 封顶）：captureStream 定时采样与视频帧绘制同频时相位随机，
@@ -1204,6 +1215,7 @@
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
       if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
       if (recPacer) { recPacer.stop(); recPacer = null; }
+      if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
       recCanvas = null; recCtx = null; pendingShot = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
       if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
@@ -1216,23 +1228,93 @@
     recMediaRecorder.onstop = () => finishRecording();
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // captureStream 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧，
-    // 并周期性兜底重绘，避免视频暂停 / 无新帧时录制流中断卡在第一帧
+    // captureStream 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧。
+    // 固定节拍重绘（~16ms，前台近似 60fps）不依赖 rVFC——部分播放器 / 场景下
+    // rVFC 回调不触发或掉链（换集、播放器重建、渲染被接管），仅靠 rVFC 驱动时
+    // canvas 停止更新，录制输出就只有首帧画面（声音正常）。定时重绘 + rVFC 双驱动，
+    // 只要 drawImage 可用画面必然持续更新（绘制幂等，重复绘制同一帧无害）
     paintRecFrame();
-    recKeepTimer = setInterval(() => {
+    recPaintTimer = setInterval(() => {
       if (!recordingInternal) return;
       paintRecFrame();
-    }, 200);
+    }, 16);
+
+    // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「只有第一帧」类问题
+    recDiag = {
+      fps: FPS,
+      capFps,
+      frameDurUs: Math.max(1000, Math.round(1e6 / FPS)),
+      pacerOn: !!recPacer,
+      mimeType: mt,
+      canvasInDom: !!recCanvas.parentElement,
+      draws: 0, drawFails: 0, adopted: false
+    };
+    recDiagTimer = setInterval(() => {
+      if (!recordingInternal) return;
+      recDiag.draws = recDrawOk;
+      recDiag.drawFails = recDrawFail;
+      recDiag.adopted = recVideoAdopted;
+      recDiag.currentTime = video ? video.currentTime : -1;
+    }, 500);
 
     // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
     const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
     let lastMedia = -1;
+    // 录制绘制：先校验 video 引用健康度（播放器重建 / 切清晰度 / 元素被移除时自动重定位），
+    // 再 drawImage 转绘。绘制连续失败（画面源不可用）时止损停止，避免产出「只有第一帧」的废片
     function paintRecFrame() {
+      if (!recordingInternal) return;
+      // 引用失效检测：video 不在文档 / 无媒体数据 / 尺寸丢失 → 尝试重定位当前播放器 video；
+      // 重定位失败后每 2 秒重试一次（播放器重建期间新 video 可能延迟就绪）
+      if (!video || !video.isConnected || video.readyState === 0 || video.videoWidth === 0) {
+        if (!recAdoptPending || performance.now() - recAdoptPending > 2000) {
+          recAdoptPending = performance.now();
+          const cand = (window.__mgp_video && window.__mgp_video !== video && window.__mgp_video.isConnected && window.__mgp_video.videoWidth > 0)
+            ? window.__mgp_video
+            : ([...document.querySelectorAll('video')].find(x => x !== video && x.isConnected && x.videoWidth > 0 && x.readyState >= 2) || null);
+          if (cand) {
+            adoptRecVideo(cand);
+            recVideoAdopted = true;
+            try { mgpToast('录制已跟随新的视频源', true); } catch (e) { }
+          }
+        }
+      } else {
+        recAdoptPending = 0;
+      }
+      let ok = false;
       try {
-        if (video.readyState >= 2 && video.videoWidth > 0) {
+        if (recCtx && video && video.isConnected && video.readyState >= 2 && video.videoWidth > 0) {
           recCtx.drawImage(video, 0, 0, recCanvas.width, recCanvas.height);
+          ok = true;
         }
       } catch (e) { /* protected content or hidden video */ }
+      if (ok) { recDrawOk++; recDrawFail = 0; }
+      else {
+        recDrawFail++;
+        // 连续 ~3s 无法绘制（16ms × 180）：画面源已不可用且重定位未成功，止损停止
+        if (recDrawFail >= 180) {
+          try { mgpToast('视频画面源已失效，录制已停止', true); } catch (e) { }
+          stopRecording();
+        }
+      }
+    }
+    // 录制中 video 元素被播放器重建 / 替换：把绘制与跳转锁定切换到新 video 引用
+    function adoptRecVideo(nv) {
+      if (video && video !== nv) {
+        video.removeEventListener('ended', onVideoEnded);
+        video.removeEventListener('seeking', onSeekBlock, true);
+      }
+      video = nv;
+      video.addEventListener('ended', onVideoEnded);
+      video.addEventListener('seeking', onSeekBlock, true);
+      // 重同步跳转锁定基准；分辨率变化后画布同步（canvas 尺寸重置会清空画布，仅在尺寸变化时重置）
+      lastExpectedTime = video.currentTime;
+      lastWallClock = performance.now() / 1000;
+      if (recCanvas && video.videoWidth > 0 &&
+          (recCanvas.width !== video.videoWidth || recCanvas.height !== video.videoHeight)) {
+        recCanvas.width = video.videoWidth;
+        recCanvas.height = video.videoHeight;
+      }
     }
     if (useFrameCb) {
       (function frameDraw() {
@@ -1271,7 +1353,14 @@
   function stopRecording() {
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
-    if (recKeepTimer) { clearInterval(recKeepTimer); recKeepTimer = null; }
+    if (recPaintTimer) { clearInterval(recPaintTimer); recPaintTimer = null; }
+    if (recDiagTimer) { clearInterval(recDiagTimer); recDiagTimer = null; }
+    try {
+      if (recDiag) {
+        recDiag.draws = recDrawOk; recDiag.drawFails = recDrawFail; recDiag.adopted = recVideoAdopted;
+        console.info('[MGP-REC] stopped', JSON.stringify(recDiag));
+      }
+    } catch (e) { }
     video.removeEventListener('seeking', onSeekBlock, true);
     // 录制结束：退出画中画（若录制期间进入），恢复页面内视频显示
     if (pipOn()) {
@@ -1297,7 +1386,16 @@
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
     if (recPacer) { recPacer.stop(); recPacer = null; }
+    if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
     recMediaRecorder = null; recCanvas = null; recCtx = null;
+    try {
+      if (recDiag) {
+        recDiag.draws = recDrawOk; recDiag.drawFails = recDrawFail; recDiag.adopted = recVideoAdopted;
+        recDiag.chunks = recChunks.length;
+        recDiag.duration = Math.max(0, recStopTime - (state.recordingStart || 0));
+        console.info('[MGP-REC] saved', JSON.stringify(recDiag));
+      }
+    } catch (e) { }
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
@@ -1393,6 +1491,10 @@
       toastEl = document.createElement('div');
       toastEl.id = 'mgp-toast-ext';
       toastEl.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:2147483647;padding:8px 20px;background:rgba(0,0,0,.85);color:#fff;border:1px solid #ff5f00;border-radius:4px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .3s;font-family:"PingFang SC","Microsoft YaHei",sans-serif;';
+      document.body.appendChild(toastEl);
+    } else if (toastEl.parentElement) {
+      // 重新挂到 body 末尾：标注窗口等后插入的 fixed 元素 z-index 与 toast 相同（2147483647）
+      // 时，层叠顺序由 DOM 顺序决定——toast 必须始终位于最上层（标注弹窗之上）
       document.body.appendChild(toastEl);
     }
     clearTimeout(toastTimer);
@@ -1497,6 +1599,7 @@
     setFill(((ct - r.start) / (r.end - r.start)) * 100);
   }
   document.addEventListener('keydown', e => {
+    if (annHost) return;   // 标注窗口打开期间：Esc 由标注窗口接管
     if (e.key === 'Escape' && webFsActive) exitWebFs();
   });
   // 网页全屏退出：双击视频画面或 ESC（document 级常驻监听，控制栏关闭时同样生效；
@@ -1580,6 +1683,7 @@
   function jumpOut() { if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = state.outPoint; video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
   document.addEventListener('keydown', e => {
+    if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     if (!hostOk()) return;
     if (!video) return;
@@ -1594,6 +1698,8 @@
     if (e.shiftKey && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); jumpIn(); return; }
     if (e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); jumpOut(); return; }
     if (e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); if (state.markTime !== null) { video.currentTime = state.markTime; video.pause(); resetSpeed(); state.tcMode = 'mk'; mgpToast('标记点 ( ' + fmtTC(state.markTime) + ' )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); } return; }
+    // Shift+S：截图并在标注窗口中标注（红框 / 白边红字文本），Enter 保存 / Esc 取消
+    if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); openAnnotate(); return; }
     if (e.shiftKey) return;
 
     switch (e.key) {
@@ -1611,6 +1717,371 @@
       case 'r': case 'R': e.preventDefault(); toggleRecording(); break;
       case 's': case 'S': e.preventDefault(); captureScreenshot(); break;
     }
+  });
+
+  // ─── Shift+S 标注截图：截图 → 弹窗标注（主题色矩形 / 白边主题色文本）→ Enter 保存 / Esc 取消 ──
+  const ANN_THEME = '#ff5f00';   // 标注主题色：与插件强调色一致（红框红字，白边不变）
+  let annHost = null;      // 标注窗口宿主（light DOM 遮罩，shadow 内承载 UI）
+  let annSource = null;    // 截图原图 canvas（标注重绘底图，不被修改）
+  let annCanvas = null;    // 标注画布（显示 + 标注绘制）
+  let annCtx = null;
+  let annScale = 1;        // 原始像素 → 显示像素（坐标换算）
+  let annAnnots = [];      // [{type:'rect',x,y,w,h},{type:'text',x,y,text,fs}]
+  let annDrag = null;      // 拖拽画框预览 {x0,y0,x1,y1}（原始坐标）
+  let annDragged = false;  // 本次拖拽是否超过阈值（区分「画框」与「点击加文本」）
+  let annTextInput = null; // 文本输入框（shadow 内）
+  let annPendingText = null; // 待确认文本标注位置 {x,y,fs}
+  let annFileName = '';
+  let annShowTC = false;   // 是否在截图右上角嵌入当前画面时间码（设置记忆，默认关）
+  let annTC = '';          // 嵌入的时间码文本（进入标注时捕获，HH:MM:SS:FF）
+  let annWinKey = null;
+
+  // 标注窗口打开期间的全局键盘接管（capture 阶段，优先于主快捷键与网页全屏 Esc）
+  annWinKey = e => {
+    if (!annHost) return;
+    const sr = annHost && annHost.shadowRoot;
+    // 焦点在文本输入框：由输入框自身处理（Enter 确认文本 / Esc 取消输入 / C、Z 为普通字符输入）
+    if (sr && sr.activeElement === annTextInput) return;
+    const k = e.key && e.key.toLowerCase();
+    // Z（或 Ctrl+Z / Cmd+Z）：撤销上一条标注——不按 Ctrl 也可触发
+    if (k === 'z') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (annAnnots.length) {
+        annAnnots.pop();
+        annRedraw();
+        try { mgpToast('已撤销标注', true); } catch (err) { }
+      }
+      return;
+    }
+    // C（或 Ctrl+C / Cmd+C）：复制带标注的截图到剪贴板——不按 Ctrl 也可触发
+    if (k === 'c') {
+      e.preventDefault();
+      e.stopPropagation();
+      annCopyToClipboard().then(ok => {
+        try { mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true); } catch (err) { }
+      });
+      return;
+    }
+    if (e.key !== 'Enter' && e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Enter') annClose(true);
+    else annClose(false);
+  };
+  document.addEventListener('keydown', annWinKey, true);
+
+  // 复制指定 PNG blob 到剪贴板（供 Ctrl+C 与保存时复用）
+  function annCopyBlob(b) {
+    return new Promise(resolve => {
+      if (!b || typeof ClipboardItem === 'undefined') { resolve(false); return; }
+      try {
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': b })])
+          .then(() => resolve(true))
+          .catch(() => resolve(false));
+      } catch (e) { resolve(false); }
+    });
+  }
+  // 复制带标注的截图到剪贴板（PNG）
+  function annCopyToClipboard() {
+    return new Promise(resolve => {
+      if (!annCanvas || !annSource) { resolve(false); return; }
+      try {
+        annCanvas.toBlob(b => annCopyBlob(b).then(resolve), 'image/png');
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  function annPos(e) {
+    const r = annCanvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(annCanvas.width, (e.clientX - r.left) / annScale)),
+      y: Math.max(0, Math.min(annCanvas.height, (e.clientY - r.top) / annScale))
+    };
+  }
+
+  // 重绘：底图 + 已确认标注 + 拖拽预览框 + 可选时间码
+  function annRedraw() {
+    if (!annCtx || !annSource) return;
+    const ctx = annCtx, c = annCanvas;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(annSource, 0, 0);
+    const lw = Math.max(3, Math.round(c.width / 300));   // 矩形线宽随分辨率
+    for (const a of annAnnots) {
+      if (a.type === 'rect') {
+        // 白边包裹主题色框：先画白色粗边框，再叠主题色边框
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = lw * 2.6;
+        ctx.strokeRect(a.x, a.y, a.w, a.h);
+        ctx.strokeStyle = ANN_THEME;
+        ctx.lineWidth = lw;
+        ctx.strokeRect(a.x, a.y, a.w, a.h);
+      } else if (a.type === 'text') {
+        ctx.font = 'bold ' + a.fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+        ctx.lineWidth = Math.max(3, Math.round(a.fs / 6));
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeText(a.text, a.x, a.y);
+        ctx.fillStyle = ANN_THEME;
+        ctx.fillText(a.text, a.x, a.y);
+      }
+    }
+    if (annDrag) {
+      const x = Math.min(annDrag.x0, annDrag.x1), y = Math.min(annDrag.y0, annDrag.y1);
+      const w = Math.abs(annDrag.x1 - annDrag.x0), h = Math.abs(annDrag.y1 - annDrag.y0);
+      // 预览：白边虚线 + 主题色虚线（确认后同样白边包裹）
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = lw * 2.6;
+      ctx.setLineDash([8, 6]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = ANN_THEME;
+      ctx.lineWidth = lw;
+      ctx.setLineDash([8, 6]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+    }
+    // 嵌入时间码（开关开启时）：右上角，白边主题色粗体，与文本标注同风格
+    if (annShowTC && annTC) {
+      const tcFs = Math.max(20, Math.round(c.width / 60));
+      ctx.font = 'bold ' + tcFs + 'px "JetBrains Mono","Cascadia Code","Consolas",monospace';
+      ctx.lineWidth = Math.max(3, Math.round(tcFs / 6));
+      const tw = ctx.measureText(annTC).width;
+      const tx = c.width - 16 - tw, ty = 16 + tcFs;
+      ctx.strokeStyle = '#ffffff';
+      ctx.strokeText(annTC, tx, ty);
+      ctx.fillStyle = ANN_THEME;
+      ctx.fillText(annTC, tx, ty);
+    }
+  }
+
+  // 确认文本标注：绘制到截图并关闭输入框
+  function annCommitText() {
+    if (!annPendingText || !annTextInput) return;
+    const t = annTextInput.value.trim();
+    const p = annPendingText;
+    annPendingText = null;
+    if (t) {
+      annAnnots.push({ type: 'text', x: p.x, y: p.y, text: t, fs: p.fs });
+      annRedraw();
+    }
+    annTextInput.hidden = true;
+  }
+  function annCancelText() {
+    annPendingText = null;
+    if (annTextInput) annTextInput.hidden = true;
+  }
+
+  // 保存（下载带标注的 PNG，同时自动复制到剪贴板）或取消（关闭窗口）
+  function annClose(save) {
+    if (save && annCanvas && annSource) {
+      try {
+        annCanvas.toBlob(b => {
+          if (!b) { mgpToast('保存失败', true); return; }
+          downloadBlob(b, annFileName);
+          // 保存的同时自动复制截图：直接复用本回调生成的 blob。
+          // 注意不能调用 annCopyToClipboard()——toBlob 异步回调执行时窗口已关闭，
+          // annCanvas/annSource 已被下方清理置空，空检查会直接判失败
+          annCopyBlob(b).then(ok => {
+            try { mgpToast(ok ? '标注截图已保存 · 已复制' : '标注截图已保存（复制失败）', true); } catch (err) { }
+          });
+        }, 'image/png');
+      } catch (e) { mgpToast('保存失败: 内容保护', true); }
+    }
+    if (annHost && annHost.parentElement) annHost.parentElement.removeChild(annHost);
+    annHost = null; annSource = null; annCanvas = null; annCtx = null;
+    annAnnots = []; annDrag = null; annPendingText = null; annTextInput = null; annFileName = '';
+  }
+
+  function openAnnotate() {
+    if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
+    if (annHost) { mgpToast('标注窗口已打开'); return; }
+    if (recordingInternal) { mgpToast('录制中无法标注截图'); return; }
+    // 进入标注：暂停视频，保证标注画面与截图一致（画面停留在暂停帧）
+    if (!video.paused) video.pause();
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    let ctx2;
+    try {
+      ctx2 = c.getContext('2d');
+      ctx2.drawImage(video, 0, 0);
+      ctx2.getImageData(0, 0, 1, 1);   // 提前验证画布可读取（受保护内容会在此抛错）
+    } catch (e) { mgpToast('截图失败: 内容保护'); return; }
+    annSource = c;
+    // 嵌入时间码：读取设置（background 推送的完整设置），进入时捕获当前画面时间码
+    const s = window.__mgpSettings || {};
+    annShowTC = s.annotateTimecode === true;
+    annTC = fmtTC(dispTime(), true);
+    // 命名与直接截图（S 键）完全一致：SCS_标题_备注_时间码_时间.png
+    annFileName = 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png';
+    annBuild();
+  }
+
+  function annBuild() {
+    const mask = document.createElement('div');
+    mask.id = 'mgp-ann-mask';
+    mask.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+    document.body.appendChild(mask);
+    annHost = mask;
+    const sr = mask.attachShadow({ mode: 'open' });
+    const style = document.createElement('style');
+    // 亮/暗色主题由 CSS 变量驱动：annApplyTheme 按设置「亮色模式」切换 :host(.light)
+    style.textContent = `
+:host{all:initial;--ann-bg:rgba(24,24,30,.97);--ann-brd:rgba(255,255,255,.14);--ann-line:rgba(255,255,255,.1);--ann-text:#eee;--ann-muted:#9aa0a6;--ann-ghost:rgba(255,255,255,.25);--ann-ghost-hover:rgba(255,255,255,.08)}
+:host(.light){--ann-bg:rgba(250,250,252,.98);--ann-brd:rgba(0,0,0,.18);--ann-line:rgba(0,0,0,.08);--ann-text:#1a1a20;--ann-muted:#6a6a72;--ann-ghost:rgba(0,0,0,.28);--ann-ghost-hover:rgba(0,0,0,.06)}
+.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border:1px solid var(--ann-brd);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);max-width:92vw;max-height:92vh;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ann-text);font-size:13px}
+.ann-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ann-line)}
+.ann-title{font-weight:700;font-size:14px}
+.ann-tip{color:var(--ann-muted);font-size:12px}
+.ann-grow{flex:1}
+.ann-btn{background:#ff5f00;border:none;color:#fff;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit}
+.ann-btn:hover{background:#ff6a1a}
+.ann-btn.ghost{background:transparent;border:1px solid var(--ann-ghost);color:var(--ann-text)}
+.ann-btn.ghost:hover{background:var(--ann-ghost-hover)}
+.ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto}
+#ann-canvas{cursor:crosshair;border-radius:4px;box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
+.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.ann-switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-right:2px}
+.ann-sw-label{font-size:12px;color:var(--ann-muted);white-space:nowrap}
+.ann-switch input{display:none}
+.ann-sw-track{width:28px;height:16px;border-radius:8px;background:rgba(255,255,255,.18);position:relative;transition:background .15s;flex-shrink:0}
+:host(.light) .ann-sw-track{background:rgba(0,0,0,.16)}
+.ann-sw-track::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.ann-switch input:checked + .ann-sw-track{background:#ff5f00}
+.ann-switch input:checked + .ann-sw-track::after{transform:translateX(12px)}
+`;
+    sr.appendChild(style);
+    const win = document.createElement('div');
+    win.className = 'ann-win';
+    win.innerHTML =
+      '<div class="ann-head">' +
+        '<span class="ann-title">标注截图</span>' +
+        '<span class="ann-tip">拖拽画框 · 点击加字 · Ctrl+C 复制 · Ctrl+Z 撤销</span>' +
+        '<span class="ann-grow"></span>' +
+        '<label class="ann-switch" title="在截图右上角嵌入当前画面时间码">' +
+          '<span class="ann-sw-label">嵌入时间码</span>' +
+          '<input type="checkbox" id="ann-tc">' +
+          '<span class="ann-sw-track"></span>' +
+        '</label>' +
+        '<button type="button" class="ann-btn ghost" id="ann-cancel">取消 (Esc)</button>' +
+        '<button type="button" class="ann-btn" id="ann-save">保存 (Enter)</button>' +
+      '</div>' +
+      '<div class="ann-body">' +
+        '<canvas id="ann-canvas"></canvas>' +
+        '<input id="ann-text" class="ann-text" spellcheck="false" placeholder="输入标注文字，Enter 确认" hidden>' +
+      '</div>';
+    sr.appendChild(win);
+    // 亮/暗色主题：初始应用 + 设置「亮色模式」切换时实时生效
+    annApplyTheme();
+    // 嵌入时间码开关：初始状态读设置（默认关闭），切换后立即重绘并持久化记忆
+    const tcBox = sr.querySelector('#ann-tc');
+    tcBox.checked = annShowTC;
+    tcBox.addEventListener('change', () => {
+      annShowTC = tcBox.checked;
+      annRedraw();
+      // 经隔离世界桥保存设置（MAIN world 无法直接写 chrome.storage），
+      // 后台收到后推送到所有页面，重启后依旧生效
+      try {
+        window.postMessage({ __mgp: 'settings', patch: { annotateTimecode: annShowTC } }, '*');
+      } catch (e) { }
+    });
+    // 点击窗口外（遮罩空白处）→ 取消；窗口内点击不处理（composedPath 区分 shadow 内外）
+    mask.addEventListener('click', e => {
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path[0] === mask) annClose(false);
+    });
+
+    const canvas = sr.querySelector('#ann-canvas');
+    annCanvas = canvas;   // 必须赋值给全局引用：annRedraw / annPos / annClose 均依赖它
+    canvas.width = annSource.width;
+    canvas.height = annSource.height;
+    // 按可用空间等比缩放显示（原始像素不缩放，坐标按 scale 换算）
+    const maxW = Math.min(window.innerWidth * 0.9 - 48, 1280);
+    const maxH = window.innerHeight * 0.9 - 100;
+    annScale = Math.min(maxW / canvas.width, maxH / canvas.height);
+    annScale = Math.max(0.1, Math.min(annScale, 2));
+    canvas.style.width = Math.round(canvas.width * annScale) + 'px';
+    canvas.style.height = Math.round(canvas.height * annScale) + 'px';
+    annCtx = canvas.getContext('2d');
+    annAnnots = [];
+    annRedraw();
+
+    const inp = sr.querySelector('#ann-text');
+    annTextInput = inp;
+
+    // 拖拽画框 / 点击加文本：pointer 事件 + 指针捕获（拖出画布也不丢失 mouseup）
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (annPendingText) annCommitText();   // 先提交上一个未确认的文本
+      const p = annPos(e);
+      annDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+      annDragged = false;
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!annDrag) return;
+      const p = annPos(e);
+      annDrag.x1 = p.x; annDrag.y1 = p.y;
+      if (!annDragged && (Math.abs(annDrag.x1 - annDrag.x0) > 4 || Math.abs(annDrag.y1 - annDrag.y0) > 4)) annDragged = true;
+      annRedraw();
+    });
+    canvas.addEventListener('pointerup', e => {
+      if (!annDrag) return;
+      const p = annPos(e);
+      annDrag.x1 = p.x; annDrag.y1 = p.y;
+      const d = annDrag;
+      annDrag = null;
+      annRedraw();
+      try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
+      if (annDragged) {
+        // 拖拽 → 确认红色矩形标注
+        const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
+        const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+        if (w > 2 && h > 2) {
+          annAnnots.push({ type: 'rect', x, y, w, h });
+          annRedraw();
+        }
+      } else {
+        // 点击 → 在该位置打开文本标注输入框
+        annPendingText = { x: p.x, y: p.y, fs: Math.max(18, Math.round(annSource.width / 50)) };
+        inp.value = '';
+        inp.style.left = Math.round(p.x * annScale + 10) + 'px';
+        inp.style.top = Math.round(p.y * annScale + 10) + 'px';
+        inp.style.fontSize = Math.max(13, Math.round(annPendingText.fs * annScale * 0.6)) + 'px';
+        inp.hidden = false;
+        inp.focus();
+      }
+    });
+    // 文本输入：Enter 确认标注 / Esc 取消输入；失焦确认（点保存按钮时文本先落定）
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.isComposing) return;   // 中文输入法组词中不拦截
+      if (e.key === 'Enter') { e.preventDefault(); annCommitText(); }
+      else if (e.key === 'Escape') { e.preventDefault(); annCancelText(); }
+    });
+    inp.addEventListener('blur', () => { if (annPendingText) annCommitText(); });
+    sr.querySelector('#ann-save').addEventListener('click', () => annClose(true));
+    sr.querySelector('#ann-cancel').addEventListener('click', () => annClose(false));
+  }
+
+  // 标注窗口亮 / 暗色：随设置「亮色模式」开关切换；设置变化时 background 推送设置
+  // 触发页面 mgp-settings 事件 → 窗口打开期间实时切换主题
+  function annApplyTheme() {
+    const s = window.__mgpSettings || {};
+    const light = s.theme === 'light';
+    if (annHost) {
+      annHost.classList.toggle('light', light);
+      annHost.style.background = light ? 'rgba(30,30,40,.35)' : 'rgba(0,0,0,.6)';
+    }
+  }
+  window.addEventListener('mgp-settings', () => {
+    if (!annHost) return;
+    annApplyTheme();
+    // 设置推送（含外部变更的嵌入时间码开关）→ 同步窗口开关状态并重绘
+    const s = window.__mgpSettings || {};
+    annShowTC = s.annotateTimecode === true;
+    const tb = annHost.shadowRoot && annHost.shadowRoot.querySelector('#ann-tc');
+    if (tb) tb.checked = annShowTC;
+    annRedraw();
   });
 
   window.addEventListener('mgp-video-found', syncBar);

@@ -16,24 +16,38 @@
   window.addEventListener('message', e => {
     if (e.source !== window) return;
     const d = e.data;
-    if (!d || d.__mgp !== 'history' || !d.key) return;
+    if (!d || !d.__mgp) return;
     // 站点白名单校验（授权列表读扩展存储）
     chrome.storage.local.get('mpp_settings').then(({ mpp_settings }) => {
       const hosts = mpp_settings && Array.isArray(mpp_settings.activeHosts) ? mpp_settings.activeHosts : [];
       if (!defHostOk() && !activeHostOk(hosts)) return;
-      // 字段值校验：类型与长度限制，防伪造脏数据
-      const key = String(d.key || '').slice(0, 300);
-      if (!key) return;
-      const title = String(d.title || '').slice(0, 200);
-      const url = String(d.url || '').slice(0, 2000);
-      const marks = Number.isFinite(d.marks) ? Math.max(0, Math.min(9999, Math.floor(d.marks))) : 0;
-      const inOut = Number.isFinite(d.inOut) ? Math.max(0, Math.min(9999, Math.floor(d.inOut))) : 0;
-      chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
-        const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
-        if (marks + inOut > 0) map[key] = { title, url, marks, inOut };
-        else delete map[key];
-        chrome.storage.local.set({ mpp_history: map }).catch(() => { });
-      }).catch(() => { });
+      if (d.__mgp === 'history') {
+        if (!d.key) return;
+        // 字段值校验：类型与长度限制，防伪造脏数据
+        const key = String(d.key || '').slice(0, 300);
+        if (!key) return;
+        const title = String(d.title || '').slice(0, 200);
+        const url = String(d.url || '').slice(0, 2000);
+        const marks = Number.isFinite(d.marks) ? Math.max(0, Math.min(9999, Math.floor(d.marks))) : 0;
+        const inOut = Number.isFinite(d.inOut) ? Math.max(0, Math.min(9999, Math.floor(d.inOut))) : 0;
+        chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
+          const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
+          if (marks + inOut > 0) map[key] = { title, url, marks, inOut };
+          else delete map[key];
+          chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+        }).catch(() => { });
+      } else if (d.__mgp === 'settings' && d.patch && typeof d.patch === 'object') {
+        // 页面端（标注截图嵌入时间码开关等）经桥保存设置：
+        // 仅接受白名单字段并强制布尔化，防页面脚本伪造设置污染扩展存储
+        const ALLOWED = ['annotateTimecode'];
+        const patch = {};
+        ALLOWED.forEach(k => {
+          if (k in d.patch) patch[k] = d.patch[k] === true;
+        });
+        if (!Object.keys(patch).length) return;
+        const s = Object.assign({}, mpp_settings || {}, patch);
+        chrome.storage.local.set({ mpp_settings: s }).catch(() => { });
+      }
     }).catch(() => { });
   });
 })();
