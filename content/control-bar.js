@@ -338,8 +338,11 @@
   let shadow, wrapper, video, videoContainer,
       recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
       toastTimer, stateTimer;
-  let recPaintTimer = null;      // 固定节拍重绘定时器（~60fps）：rVFC 失效时画面仍持续更新，防录制卡首帧
+  let recPaintTimer = null;      // 固定节拍重绘定时器（已弃用：setInterval 间隔会被渲染节拍
+                                 // 对齐，低间隔下实际触发频率骤降，与采样同频导致采旧帧）
+  let recPaintRaf = 0;           // 绘制循环 rAF id（rAF 驱动绘制，前台不节流）
   let recDrawOk = 0, recDrawFail = 0;   // 绘制成功 / 连续失败计数（自愈判定 + 诊断）
+  let recDrawFailAt = 0;        // 连续绘制失败起始时间（时间戳止损，rAF 帧率随显示器变化）
   let recVideoAdopted = false;   // 录制中 video 引用是否被重新定位过
   let recAdoptPending = 0;      // 上次尝试重定位 video 的时间戳（0 = 未在重试；失败后每 2s 重试一次）
   let recDiag = null, recDiagTimer = null;  // 录制诊断数据（停止 / 结束时 console 输出）
@@ -1298,14 +1301,18 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // 固定节拍重绘（间隔 = 采样间隔的一半，即 2× 采样帧率）：captureStream 仅在
-    // canvas 有新绘制时产生帧，绘制频率高于采样频率保证每次采样必采到新内容
-    // （采样与绘制同频时相位随机可能漏帧），且不产生无谓的更高频绘制
+    // 绘制驱动：requestAnimationFrame（浏览器渲染节拍，前台不节流）。
+    // 关键修复：此前用 setInterval 绘制，其触发时刻被对齐到渲染节拍（~16.7ms 网格），
+    // 20ms 间隔实际只触发 ~25 次/秒——与采样帧率（capFps=25）同频，采样常落在两次
+    // 绘制之间采到旧帧，画面停滞（表现为帧率低、一卡一卡，且 pacerDrops=0 无迹可寻）。
+    // rAF 每帧绘制（60/120Hz），采样间隔内必有多次绘制，每次采样必采到最新画面
     paintRecFrame();
-    recPaintTimer = setInterval(() => {
+    const recRafLoop = () => {
       if (!recordingInternal) return;
       paintRecFrame();
-    }, Math.max(4, Math.round(500 / capFps)));
+      recPaintRaf = requestAnimationFrame(recRafLoop);
+    };
+    recPaintRaf = requestAnimationFrame(recRafLoop);
 
     // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「画面卡住」类问题
     recDiag = {
@@ -1436,11 +1443,12 @@
           ok = true;
         }
       } catch (e) { /* protected content or hidden video */ }
-      if (ok) { recDrawOk++; recDrawFail = 0; }
+      if (ok) { recDrawOk++; recDrawFail = 0; recDrawFailAt = 0; }
       else {
+        if (!recDrawFailAt) recDrawFailAt = performance.now();
         recDrawFail++;
-        // 连续 ~3s 无法绘制（绘制间隔 × 次数）：画面源已不可用且重定位未成功，止损停止
-        if (recDrawFail * Math.max(4, Math.round(500 / capFps)) >= 3000) {
+        // 连续 ~3s 无法绘制（按时间戳判断，适配 rAF 帧率）：画面源已不可用且重定位未成功，止损停止
+        if (performance.now() - recDrawFailAt > 3000) {
           try { mgpToast('视频画面源已失效，录制已停止', true); } catch (e) { }
           stopRecording();
         }
@@ -1486,6 +1494,7 @@
   function stopRecording() {
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
+    if (recPaintRaf) cancelAnimationFrame(recPaintRaf);
     if (recPaintTimer) { clearInterval(recPaintTimer); recPaintTimer = null; }
     if (recDiagTimer) { clearInterval(recDiagTimer); recDiagTimer = null; }
     if (recFreezeTimer) { clearInterval(recFreezeTimer); recFreezeTimer = null; }
