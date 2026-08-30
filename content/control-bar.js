@@ -1232,17 +1232,23 @@
       return;
     }
 
-    // 优先 MP4 + H.264/AAC（剪辑软件兼容性最好）；WebM 仅作回退
+    // 录制编码（设置面板「录制编码」）：mp4 = H.264（软编最快，默认）；
+    // vp8 / vp9 供无硬件加速环境尝试（注意 VP8/VP9 软编通常比 H.264 更慢）
+    const codecPref = (window.__mgpSettings || {}).recCodec || 'mp4';
     const mt = (() => {
-      const candidates = [
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
-        'video/mp4;codecs=avc1.42E01E',
-        'video/mp4',
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm'
-      ];
+      const candidates = codecPref === 'vp8'
+        ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+        : codecPref === 'vp9'
+          ? ['video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4']
+          : [
+              'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+              'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
+              'video/mp4;codecs=avc1.42E01E',
+              'video/mp4',
+              'video/webm;codecs=vp9,opus',
+              'video/webm;codecs=vp8,opus',
+              'video/webm'
+            ];
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();

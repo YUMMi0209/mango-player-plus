@@ -77,6 +77,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .set-row:hover{background:var(--row)}
 .set-lbl{display:flex;flex-direction:column;gap:2px;min-width:0}
 .set-label{display:inline-flex;align-items:center;font-size:12px;color:var(--text);white-space:nowrap}
+.set-select{height:22px;padding:0 4px;font-size:11px;color:var(--text);background:var(--row);border:1px solid var(--card-brd);border-radius:5px;outline:none;cursor:pointer;font-family:inherit;flex-shrink:0;max-width:130px}
+.set-select:focus{border-color:var(--orange)}
 .set-tag{display:inline-flex;align-items:center;height:15px;padding:0 5px;margin-left:auto;font-size:10px;line-height:1;color:var(--orange);border:1px solid var(--orange);border-radius:8px;background:var(--orange-dk);white-space:nowrap;flex-shrink:0}
 .switch{position:relative;width:34px;height:19px;flex-shrink:0}
 .switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}

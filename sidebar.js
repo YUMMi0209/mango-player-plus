@@ -20,6 +20,7 @@
     togShot: '#tog-shot',
     togAvoid: '#tog-avoid',
     togPip: '#tog-pip',
+    selCodec: '#sel-codec',
     togBar: '#tog-bar',
     togDanmu: '#tog-danmu',
     togAll: '#tog-all',
