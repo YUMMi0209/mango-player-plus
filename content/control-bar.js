@@ -353,7 +353,7 @@
   let recStopTime = null;    // 本次录制的停止时间（独立于预设出点）
   let recPaused = false;     // 页面切后台：MediaRecorder 已暂停（画中画保持录制未开启时）
   let pipActive = false;     // 画中画保持录制：录制期间 PiP 窗口激活（页面后台时视频仍渲染）
-  let recPacer = null;       // 已弃用：时间戳自控链路（CFR）在编码积压时冻结视频轨，录制改为直连
+  let recPacer = null;       // CFR 时间戳自控器：最新帧 + 标准帧率节拍输出（输入输出解耦，背压丢拍不挂起）
   let hashSeekDone = false;
 
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
@@ -1082,6 +1082,77 @@
     return best;
   }
 
+  // CFR 时间戳自控（强制标准帧率）：
+  // canvas.captureStream(fps) 的 fps 只是目标提示，实际输出帧率取决于 canvas 绘制
+  // 频率，无法单独保证标准帧率。MediaRecorder 按帧时间戳封装——只要视频帧时间戳
+  // 严格落在标准帧率网格（如 25fps → 40ms 一拍），输出文件即标准帧率。
+  // 架构：输入侧持续读取 captureStream 只保留最新帧（丢弃中间帧，读取循环永不阻塞）；
+  // 输出侧按标准帧率节拍把最新帧写入 generator（时间戳 = idx × frameDurUs）。
+  // 输入输出完全解耦：编码器背压只导致"丢一拍"，不会挂起循环。
+  // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
+  function startFramePacer(stream) {
+    if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
+    try {
+      const vTrack = stream.getVideoTracks()[0];
+      if (!vTrack) return null;
+      const processor = new MediaStreamTrackProcessor({ track: vTrack });
+      const generator = new MediaStreamTrackGenerator({ kind: 'video' });
+      const outStream = new MediaStream();
+      outStream.addTrack(generator);
+      // 音频是连续采样，无需规整，原样转发（pause 时随 MediaRecorder 一并暂停）
+      stream.getAudioTracks().forEach(t => outStream.addTrack(t));
+      const reader = processor.readable.getReader();
+      const writer = generator.writable.getWriter();
+      const frameDurUs = Math.round(1e6 / normRecFps(FPS)); // 标准帧率网格（微秒）
+      let idx = 0;            // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
+      let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
+      let drops = 0;          // 背压丢拍计数（诊断）
+      let stopped = false;
+      let tickTimer = null;
+      // 输入侧：持续读取，只保留最新帧（canvas 2× 采样节奏，读取远快于输出节拍）
+      (async () => {
+        try {
+          while (!stopped) {
+            const { value: f, done } = await reader.read();
+            if (done) break;
+            if (!f) continue;
+            if (recPaused) { f.close(); continue; }   // 暂停期间丢弃输入帧
+            if (latest) latest.close();
+            latest = f;
+          }
+        } catch (e) { /* reader 取消 / 轨道停止 */ }
+      })();
+      // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍
+      const tickMs = Math.max(4, Math.round(frameDurUs / 1000));
+      tickTimer = setInterval(() => {
+        if (stopped || recPaused) return;
+        if (!latest) return;
+        const out = new VideoFrame(latest, { timestamp: idx * frameDurUs });
+        idx++;
+        // 背压：generator 队列满（编码器消费不及时）时丢这一拍，绝不挂起
+        if (writer.desiredSize != null && writer.desiredSize < 1) {
+          drops++;
+          try { out.close(); } catch (e) { }
+          return;
+        }
+        writer.write(out).catch(() => { try { out.close(); } catch (e) { } });
+      }, tickMs);
+      return {
+        stream: outStream,
+        dropCount() { return drops; },
+        stop() {
+          stopped = true;
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+          try { reader.cancel(); } catch (e) { }
+          try { generator.stop(); } catch (e) { }
+          try { if (latest) latest.close(); } catch (e) { }
+        }
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
   function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
@@ -1168,10 +1239,11 @@
       : recPx >= 1920 * 1080 ? 12000000
       : recPx >= 1280 * 720 ? 8000000
       : 5000000;
-    // 直连 captureStream → MediaRecorder：不再经过 MediaStreamTrackProcessor /
-    // Generator 时间戳自控链路（该链路在编码积压时写队列挂起 / 丢帧导致视频轨
-    // 时间戳停滞，表现为画面定格；VFR 输出对播放器完全可播）
-    const mediaStream = recStream;
+    // CFR 时间戳自控：按标准帧率网格重打时间戳，强制输出文件为标准帧率
+    // （captureStream 直连输出帧率随绘制节奏浮动，无法保证标准帧率）；
+    // 输入输出解耦 + 背压丢拍，不会像旧实现那样挂起冻结视频轨
+    recPacer = startFramePacer(recStream);
+    const mediaStream = recPacer ? recPacer.stream : recStream;
     try {
       recMediaRecorder = new MediaRecorder(mediaStream, {
         mimeType: mt,
@@ -1184,6 +1256,7 @@
       if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
       if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+      if (recPacer) { recPacer.stop(); recPacer = null; }
       if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
       recCanvas = null; recCtx = null; pendingShot = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
@@ -1218,6 +1291,7 @@
     recDiag = {
       fps: FPS,
       capFps,
+      pacerOn: !!recPacer,
       mimeType: mt,
       videoBits,
       audioVia,
@@ -1229,6 +1303,7 @@
       recDiag.draws = recDrawOk;
       recDiag.drawFails = recDrawFail;
       recDiag.adopted = recVideoAdopted;
+      recDiag.pacerDrops = recPacer && typeof recPacer.dropCount === 'function' ? recPacer.dropCount() : -1;
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
@@ -1379,6 +1454,7 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
+    if (recPacer) { recPacer.stop(); recPacer = null; }
     if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
     recMediaRecorder = null; recCanvas = null; recCtx = null;
     try {
