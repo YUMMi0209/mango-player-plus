@@ -353,7 +353,7 @@
   let recStopTime = null;    // 本次录制的停止时间（独立于预设出点）
   let recPaused = false;     // 页面切后台：MediaRecorder 已暂停（画中画保持录制未开启时）
   let pipActive = false;     // 画中画保持录制：录制期间 PiP 窗口激活（页面后台时视频仍渲染）
-  let recPacer = null;       // 时间戳自控器（MediaStreamTrackProcessor → Generator，CFR 输出）
+  let recPacer = null;       // 已弃用：时间戳自控链路（CFR）在编码积压时冻结视频轨，录制改为直连
   let hashSeekDone = false;
 
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
@@ -1006,15 +1006,14 @@
   // ─── Recording (improved quality) ───────────
   let lastExpectedTime = 0, lastWallClock = 0;
 
+  // 录制中 seek：不再锁回（锁回会与播放器自身的校正 seek 形成拉锯，导致画面卡住），
+  // 而是把录制时间基准重同步到 seek 后的位置（录制时长仍按 MediaRecorder 计算，
+  // 不受影响）；recAutoStop 判断用视频时间，seek 后同步更新停止目标
   function onSeekBlock(e) {
     if (!recordingInternal || !video) return;
     e.preventDefault(); e.stopPropagation();
-    // 扩展自身回跳入点触发的 seek 放行，其余 seek 一律锁回期望时间；
-    // 阈值 100ms：播放器缓冲 / 切清晰度 / 网络抖动导致的正常时间回跳不误锁
-    if (Math.abs(video.currentTime - lastExpectedTime) > 0.1) {
-      video.currentTime = lastExpectedTime;
-      mgpToast('录制中无法跳转', true);
-    }
+    lastExpectedTime = video.currentTime;
+    lastWallClock = performance.now() / 1000;
   }
 
   // 画中画保持录制开关（设置面板「画中画保持录制」）：开启后录制时自动进入画中画，
@@ -1060,113 +1059,16 @@
       }
       if (recAudioCtx.state === 'suspended') recAudioCtx.resume().catch(() => { });
       const t = entry.dest.stream.getAudioTracks()[0];
-      if (t) return t;
+      if (t) return { track: t, via: 'audiocontext' };
     } catch (e) { /* 回退下方方案 */ }
     try {
       const vs = v.captureStream();
       const t = vs.getAudioTracks()[0];
-      if (t) return t;
+      if (t) return { track: t, via: 'capturestream' };
     } catch (e) { }
     return null;
   }
 
-  function startFramePacer(stream) {
-    if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
-    try {
-      const vTrack = stream.getVideoTracks()[0];
-      if (!vTrack) return null;
-      const processor = new MediaStreamTrackProcessor({ track: vTrack });
-      const generator = new MediaStreamTrackGenerator({ kind: 'video' });
-      const outStream = new MediaStream();
-      outStream.addTrack(generator);
-      // 音频是连续采样，无需规整，原样转发（pause 时随 MediaRecorder 一并暂停）
-      stream.getAudioTracks().forEach(t => outStream.addTrack(t));
-      const reader = processor.readable.getReader();
-      const writer = generator.writable.getWriter();
-      const frameDurUs = Math.max(1000, Math.round(1e6 / FPS)); // 目标帧间隔（微秒）
-      let idx = 0;          // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
-      let lastInTs = null;  // 上一输入帧原始时间戳（判定重复 / 补帧）
-      let lastFrame = null; // 最近写入的帧（补帧用）
-      let pacerDrops = 0;   // 背压丢弃帧数（诊断）
-      let stopped = false;
-      // 背压防护写入：MediaRecorder 编码器消费不及时（H.264 编码积压 / GPU 编码慢）时，
-      // generator writable 队列写满，write() 会永久挂起 → 整个 pacer 循环卡死 →
-      // 视频轨从此冻结（画面定格 / 首帧后无画面，音频轨独立不受影响）。
-      // desiredSize < 1 表示队列已满：丢弃该帧保持循环，宁可跳帧不可冻结。
-      const pacerWrite = async vf => {
-        if (writer.desiredSize != null && writer.desiredSize < 1) {
-          pacerDrops++;
-          try { vf.close(); } catch (e) { }
-          return false;
-        }
-        try {
-          await writer.write(vf);
-          return true;
-        } catch (e) {
-          pacerDrops++;
-          try { vf.close(); } catch (e2) { }
-          return false;
-        }
-      };
-      (async () => {
-        try {
-          while (!stopped) {
-            const { value: f, done } = await reader.read();
-            if (done) break;
-            if (!f || recPaused) { if (f) f.close(); continue; } // 暂停期间丢弃输入帧
-            const inTs = f.timestamp;
-            if (lastInTs === null) {
-              // 首帧 / 暂停恢复后的新基准：时间戳从当前 idx 继续（不补暂停期空洞）。
-              // timestamp 为只读属性，需构造新帧重打时间戳（共享底层数据，零拷贝）
-              const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
-              f.close();
-              if (!(await pacerWrite(out))) continue;  // 背压写失败：不推进基准，下帧重试
-              if (lastFrame) lastFrame.close();
-              lastFrame = out;
-              lastInTs = inTs;
-              idx++;
-              continue;
-            }
-            const gap = inTs - lastInTs;
-            if (gap < 0) { f.close(); continue; }              // 乱序帧丢弃
-            // 过快帧丢弃阈值放宽到 frameDurUs 的 35%：capFps = 2×FPS 时输入间隔恰为
-            // frameDurUs/2，临界值在采样抖动（±1ms）下会把正常帧误判为重复帧丢弃，
-            // 极端情况下持续误丢导致录制只有首帧画面
-            if (gap < frameDurUs * 0.35) { f.close(); continue; } // 重复 / 过快帧丢弃
-            // 中间缺帧：用上一帧内容补，保证输出时长精确
-            const missing = Math.min(Math.round(gap / frameDurUs) - 1, 900); // 上限防异常输入
-            for (let i = 0; i < missing; i++) {
-              const dup = new VideoFrame(lastFrame, { timestamp: idx * frameDurUs });
-              if (!(await pacerWrite(dup))) break;  // 背压：停止补帧
-              idx++;
-            }
-            const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
-            f.close();
-            if (!(await pacerWrite(out))) continue;  // 背压写失败：不推进基准
-            if (lastFrame) lastFrame.close();
-            lastFrame = out;
-            lastInTs = inTs;
-            idx++;
-          }
-        } catch (e) { /* reader 取消 / 轨道停止 */ }
-        try { if (lastFrame) lastFrame.close(); } catch (e) { }
-        try { await writer.close(); } catch (e) { }
-      })();
-      return {
-        stream: outStream,
-        // 暂停恢复：丢弃旧输入基准，避免把暂停期空洞补成重复帧
-        resetBase() { lastInTs = null; },
-        dropCount() { return pacerDrops; },
-        stop() {
-          stopped = true;
-          try { reader.cancel(); } catch (e) { }
-          try { generator.stop(); } catch (e) { }
-        }
-      };
-    } catch (e) {
-      return null;
-    }
-  }
 
   function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
@@ -1207,7 +1109,7 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rVFC 按视频帧节奏绘制。
+    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + 定时重绘。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
     recCanvas = document.createElement('canvas');
     recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
@@ -1218,13 +1120,15 @@
     document.body.appendChild(recCanvas);
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
-    // 采集帧率取源帧率 2 倍（30~60 封顶）：captureStream 定时采样与视频帧绘制同频时相位随机，
-    // 采样点常落在两次绘制之间导致丢帧；加倍采样后每次绘制必被采到，输出顺滑不卡顿
-    const capFps = Math.min(60, Math.max(FPS * 2, 30));
+    // 采集帧率 = 视频帧率（20~60 封顶）：绘制由 16ms 定时器驱动（≈60fps），
+    // 采样间隔内必有多次绘制，不会漏帧；不再 2×FPS 加倍采样——过高的输入帧率
+    // 会给 H.264 编码器造成积压（软编环境），积压传导到录制链路表现为画面卡住
+    const capFps = Math.min(60, Math.max(20, FPS));
     recStream = recCanvas.captureStream(capFps);
     // 音频：AudioContext 捕获优先（避免 video.captureStream() 影响渲染），失败回退
-    const audioTrack = getRecAudioTrack(video);
-    if (audioTrack) recStream.addTrack(audioTrack);
+    const audioRes = getRecAudioTrack(video);
+    const audioVia = audioRes ? audioRes.via : 'none';
+    if (audioRes && audioRes.track) recStream.addTrack(audioRes.track);
     if (!recStream.getVideoTracks().length) {
       recordingInternal = false;
       recAutoStop = false;
@@ -1246,32 +1150,17 @@
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();
-    // 尽量贴近视频原始码率：直链播放时用资源加载统计估算源码率（以分辨率档位为下限），
-    // 分片流（HLS/DASH）估算不到时退回分辨率档位。MediaRecorder 必然重编码，只能逼近原码率。
+    // 目标码率：按分辨率档位取值（比源码率档位更低，避免高码率在软编环境积压）。
+    // MediaRecorder 必然重编码，低码率换编码余量，画面连续优先于极限画质
     const recPx = video.videoWidth * video.videoHeight;
-    const tierBits = recPx >= 3840 * 2160 ? 50000000
-      : recPx >= 1920 * 1080 ? 20000000
-      : recPx >= 1280 * 720 ? 12000000
-      : 8000000;
-    const srcBits = (() => {
-      try {
-        const url = video.currentSrc || video.src || '';
-        const dur = video.duration;
-        if (!url || !(dur > 0)) return 0;
-        const entries = performance.getEntriesByType('resource') || [];
-        for (const e of entries) {
-          if ((e.name === url) && e.transferSize > 0) {
-            const bps = Math.round((e.transferSize * 8) / dur);
-            if (bps > 0) return bps;
-          }
-        }
-      } catch (e) { }
-      return 0;
-    })();
-    const videoBits = srcBits > 0 ? Math.max(srcBits, tierBits) : tierBits;
-    // 时间戳自控（CFR）：浏览器支持时接管视频轨，按固定帧率网格输出；不支持时回退直连
-    recPacer = startFramePacer(recStream);
-    const mediaStream = recPacer ? recPacer.stream : recStream;
+    const videoBits = recPx >= 3840 * 2160 ? 30000000
+      : recPx >= 1920 * 1080 ? 12000000
+      : recPx >= 1280 * 720 ? 8000000
+      : 5000000;
+    // 直连 captureStream → MediaRecorder：不再经过 MediaStreamTrackProcessor /
+    // Generator 时间戳自控链路（该链路在编码积压时写队列挂起 / 丢帧导致视频轨
+    // 时间戳停滞，表现为画面定格；VFR 输出对播放器完全可播）
+    const mediaStream = recStream;
     try {
       recMediaRecorder = new MediaRecorder(mediaStream, {
         mimeType: mt,
@@ -1284,7 +1173,6 @@
       if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
       if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
-      if (recPacer) { recPacer.stop(); recPacer = null; }
       if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
       recCanvas = null; recCtx = null; pendingShot = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
@@ -1306,24 +1194,21 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // captureStream 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧。
-    // 固定节拍重绘（~16ms，前台近似 60fps）不依赖 rVFC——部分播放器 / 场景下
-    // rVFC 回调不触发或掉链（换集、播放器重建、渲染被接管），仅靠 rVFC 驱动时
-    // canvas 停止更新，录制输出就只有首帧画面（声音正常）。定时重绘 + rVFC 双驱动，
-    // 只要 drawImage 可用画面必然持续更新（绘制幂等，重复绘制同一帧无害）
+    // 固定节拍重绘（~16ms，前台近似 60fps）：captureStream 仅在 canvas 有新绘制时
+    // 产生帧，只要 drawImage 可用画面必然持续更新（绘制幂等，重复绘制同一帧无害）
     paintRecFrame();
     recPaintTimer = setInterval(() => {
       if (!recordingInternal) return;
       paintRecFrame();
     }, 16);
 
-    // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「只有第一帧」类问题
+    // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「画面卡住」类问题
     recDiag = {
       fps: FPS,
       capFps,
-      frameDurUs: Math.max(1000, Math.round(1e6 / FPS)),
-      pacerOn: !!recPacer,
       mimeType: mt,
+      videoBits,
+      audioVia,
       canvasInDom: !!recCanvas.parentElement,
       draws: 0, drawFails: 0, adopted: false
     };
@@ -1332,7 +1217,6 @@
       recDiag.draws = recDrawOk;
       recDiag.drawFails = recDrawFail;
       recDiag.adopted = recVideoAdopted;
-      recDiag.pacerDrops = recPacer && typeof recPacer.dropCount === 'function' ? recPacer.dropCount() : -1;
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
@@ -1369,9 +1253,9 @@
       recLastCT = ct;
     }, 2000);
 
-    // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
-    const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
-    let lastMedia = -1;
+    // Render：16ms 定时重绘已在上面启动（captureStream 只在 canvas 有新绘制时产帧），
+    // 不再叠加 rVFC / rAF 绘制链——多驱动无收益且增加不确定性
+
     // 录制绘制：先校验 video 引用健康度（播放器重建 / 切清晰度 / 元素被移除时自动重定位），
     // 再 drawImage 转绘。绘制连续失败（画面源不可用）时止损停止，避免产出「只有第一帧」的废片
     function paintRecFrame() {
@@ -1428,21 +1312,6 @@
         recCanvas.height = video.videoHeight;
       }
     }
-    if (useFrameCb) {
-      (function frameDraw() {
-        if (!recordingInternal) return;
-        video.requestVideoFrameCallback((now, meta) => {
-          const mt = meta && meta.mediaTime != null ? meta.mediaTime : -1;
-          if (mt !== lastMedia) { lastMedia = mt; paintRecFrame(); }
-          frameDraw();
-        });
-      })();
-    } else {
-      (function rafDraw() {
-        if (!recordingInternal) return;
-        recRaf = requestAnimationFrame(() => { paintRecFrame(); rafDraw(); });
-      })();
-    }
     // 独立 rAF 轻量 tick：持续维护录制期望时间（跳转锁定），暂停时也保持时钟新鲜
     (function tickExpected() {
       if (!recordingInternal) return;
@@ -1498,7 +1367,6 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
-    if (recPacer) { recPacer.stop(); recPacer = null; }
     if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
     recMediaRecorder = null; recCanvas = null; recCtx = null;
     try {
@@ -2220,8 +2088,6 @@
       recPaused = false;
       lastExpectedTime = video ? video.currentTime : lastExpectedTime;
       lastWallClock = performance.now() / 1000;
-      // 丢弃暂停前的输入帧基准：恢复后不把后台时段补成重复帧
-      if (recPacer) recPacer.resetBase();
       // AudioContext 音频捕获：页面后台期间可能被自动挂起，回前台恢复
       if (recAudioCtx && recAudioCtx.state === 'suspended') recAudioCtx.resume().catch(() => { });
       mgpToast('已恢复录制', true);
