@@ -1209,10 +1209,18 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + 定时重绘。
+    // 录制设置（面板「录制编码」）：1080p-h264 / 720p-h264 / 1080p-vp8 / 720p-vp8
+    // 分辨率档限制 canvas 输出尺寸（源分辨率低于档位时不放大）；编码档决定 mimeType
+    const recPref = (window.__mgpSettings || {}).recCodec || '1080p-h264';
+    const recMaxW = recPref.indexOf('720p') === 0 ? 1280 : 1920;
+    const recMaxH = recPref.indexOf('720p') === 0 ? 720 : 1080;
+    const recWantVp8 = recPref.indexOf('vp8') !== -1;
+
+    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rAF 重绘。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
     recCanvas = document.createElement('canvas');
-    recCanvas.width = video.videoWidth; recCanvas.height = video.videoHeight;
+    recCanvas.width = Math.min(video.videoWidth, recMaxW);
+    recCanvas.height = Math.min(video.videoHeight, recMaxH);
     recCtx = recCanvas.getContext('2d');
     // 画布挂入文档（移出视口不可见）：部分 Chromium 版本对不在文档中的 canvas
     // captureStream 采样会停止产帧，导致录制只有首帧画面
@@ -1235,29 +1243,24 @@
       return;
     }
 
-    // 录制编码（设置面板「录制编码」）：mp4 = H.264（软编最快，默认）；
-    // vp8 / vp9 供无硬件加速环境尝试（注意 VP8/VP9 软编通常比 H.264 更慢）
-    const codecPref = (window.__mgpSettings || {}).recCodec || 'mp4';
+    // 编码档：VP8（WebM）或 H.264（MP4，软编最快，默认）；VP8 供无硬件加速环境尝试
     const mt = (() => {
-      const candidates = codecPref === 'vp8'
+      const candidates = recWantVp8
         ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-        : codecPref === 'vp9'
-          ? ['video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4']
-          : [
-              'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-              'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
-              'video/mp4;codecs=avc1.42E01E',
-              'video/mp4',
-              'video/webm;codecs=vp9,opus',
-              'video/webm;codecs=vp8,opus',
-              'video/webm'
-            ];
+        : [
+            'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+            'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
+            'video/mp4;codecs=avc1.42E01E',
+            'video/mp4',
+            'video/webm;codecs=vp8,opus',
+            'video/webm'
+          ];
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();
-    // 目标码率：按分辨率档位取值（偏保守）。H.264 软编环境高码率是编码积压的
-    // 主要来源之一，码率越低编码越快；配合自动降级保证帧率稳定
-    const recPx = video.videoWidth * video.videoHeight;
+    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。H.264 软编环境高码率
+    // 是编码积压的主要来源之一，码率越低编码越快；配合自动降级保证帧率稳定
+    const recPx = recCanvas.width * recCanvas.height;
     const videoBits = recPx >= 3840 * 2160 ? 20000000
       : recPx >= 1920 * 1080 ? 8000000
       : recPx >= 1280 * 720 ? 6000000
