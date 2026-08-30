@@ -949,7 +949,8 @@
     return pageTitle();
   }
 
-  function captureScreenshot() {
+  // 截图：copyOnly=true 仅复制到剪贴板（C 键）；false 下载 PNG 并复制（S 键）
+  function captureScreenshot(copyOnly) {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
     const c = document.createElement('canvas');
     c.width = video.videoWidth; c.height = video.videoHeight;
@@ -957,8 +958,18 @@
       c.getContext('2d').drawImage(video, 0, 0);
       c.toBlob(b => {
         if (!b) { mgpToast('截图失败'); return; }
-        downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
-        mgpToast('截图保存');
+        if (copyOnly) {
+          // C 键：截图复制（不下载），与标注窗口内的复制行为一致
+          annCopyBlob(b).then(ok => {
+            mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true);
+          });
+        } else {
+          downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
+          // S 键：下载并复制
+          annCopyBlob(b).then(ok => {
+            mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
+          });
+        }
       }, 'image/png');
     } catch(e) { mgpToast('截图失败: 内容保护'); }
   }
@@ -1036,7 +1047,27 @@
       let idx = 0;          // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
       let lastInTs = null;  // 上一输入帧原始时间戳（判定重复 / 补帧）
       let lastFrame = null; // 最近写入的帧（补帧用）
+      let pacerDrops = 0;   // 背压丢弃帧数（诊断）
       let stopped = false;
+      // 背压防护写入：MediaRecorder 编码器消费不及时（H.264 编码积压 / GPU 编码慢）时，
+      // generator writable 队列写满，write() 会永久挂起 → 整个 pacer 循环卡死 →
+      // 视频轨从此冻结（画面定格 / 首帧后无画面，音频轨独立不受影响）。
+      // desiredSize < 1 表示队列已满：丢弃该帧保持循环，宁可跳帧不可冻结。
+      const pacerWrite = async vf => {
+        if (writer.desiredSize != null && writer.desiredSize < 1) {
+          pacerDrops++;
+          try { vf.close(); } catch (e) { }
+          return false;
+        }
+        try {
+          await writer.write(vf);
+          return true;
+        } catch (e) {
+          pacerDrops++;
+          try { vf.close(); } catch (e2) { }
+          return false;
+        }
+      };
       (async () => {
         try {
           while (!stopped) {
@@ -1049,7 +1080,7 @@
               // timestamp 为只读属性，需构造新帧重打时间戳（共享底层数据，零拷贝）
               const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
               f.close();
-              await writer.write(out);
+              if (!(await pacerWrite(out))) continue;  // 背压写失败：不推进基准，下帧重试
               if (lastFrame) lastFrame.close();
               lastFrame = out;
               lastInTs = inTs;
@@ -1065,12 +1096,13 @@
             // 中间缺帧：用上一帧内容补，保证输出时长精确
             const missing = Math.min(Math.round(gap / frameDurUs) - 1, 900); // 上限防异常输入
             for (let i = 0; i < missing; i++) {
-              await writer.write(new VideoFrame(lastFrame, { timestamp: idx * frameDurUs }));
+              const dup = new VideoFrame(lastFrame, { timestamp: idx * frameDurUs });
+              if (!(await pacerWrite(dup))) break;  // 背压：停止补帧
               idx++;
             }
             const out = new VideoFrame(f, { timestamp: idx * frameDurUs });
             f.close();
-            await writer.write(out);
+            if (!(await pacerWrite(out))) continue;  // 背压写失败：不推进基准
             if (lastFrame) lastFrame.close();
             lastFrame = out;
             lastInTs = inTs;
@@ -1084,6 +1116,7 @@
         stream: outStream,
         // 暂停恢复：丢弃旧输入基准，避免把暂停期空洞补成重复帧
         resetBase() { lastInTs = null; },
+        dropCount() { return pacerDrops; },
         stop() {
           stopped = true;
           try { reader.cancel(); } catch (e) { }
@@ -1226,6 +1259,14 @@
     recChunks = [];
     recMediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
     recMediaRecorder.onstop = () => finishRecording();
+    // 编码器错误（H.264 硬件编码失败 / 资源耗尽等）监听：MediaRecorder 会静默停止
+    // 消费视频轨导致画面定格，这里主动停止录制并提示，避免产出残缺文件
+    recMediaRecorder.onerror = () => {
+      if (recordingInternal) {
+        try { mgpToast('录制出错（编码器异常），已停止', true); } catch (e) { }
+        stopRecording();
+      }
+    };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
     // captureStream 仅在 canvas 有新绘制时产生帧：启动后立即补绘一帧发出首帧。
@@ -1254,6 +1295,7 @@
       recDiag.draws = recDrawOk;
       recDiag.drawFails = recDrawFail;
       recDiag.adopted = recVideoAdopted;
+      recDiag.pacerDrops = recPacer && typeof recPacer.dropCount === 'function' ? recPacer.dropCount() : -1;
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
@@ -1715,7 +1757,9 @@
       case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { if (loggingActive()) { e.preventDefault(); markOut(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'm': case 'M': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); mark(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'r': case 'R': e.preventDefault(); toggleRecording(); break;
-      case 's': case 'S': e.preventDefault(); captureScreenshot(); break;
+      case 's': case 'S': e.preventDefault(); captureScreenshot(false); break;
+      // C：截图并复制到剪贴板（不下载，与标注窗口内 C 行为一致）
+      case 'c': case 'C': e.preventDefault(); captureScreenshot(true); break;
     }
   });
 
@@ -1840,9 +1884,9 @@
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
-    // 嵌入时间码（开关开启时）：右上角，白边主题色粗体，与文本标注同风格
+    // 嵌入时间码（开关开启时）：右上角，白边主题色粗体，与文本标注同风格（字号为标注文本的两倍）
     if (annShowTC && annTC) {
-      const tcFs = Math.max(20, Math.round(c.width / 60));
+      const tcFs = Math.max(40, Math.round(c.width / 30));
       ctx.font = 'bold ' + tcFs + 'px "JetBrains Mono","Cascadia Code","Consolas",monospace';
       ctx.lineWidth = Math.max(3, Math.round(tcFs / 6));
       const tw = ctx.measureText(annTC).width;
