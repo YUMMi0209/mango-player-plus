@@ -343,6 +343,10 @@
   let recVideoAdopted = false;   // 录制中 video 引用是否被重新定位过
   let recAdoptPending = 0;      // 上次尝试重定位 video 的时间戳（0 = 未在重试；失败后每 2s 重试一次）
   let recDiag = null, recDiagTimer = null;  // 录制诊断数据（停止 / 结束时 console 输出）
+  let recFreezeTimer = null;   // 画面活性检测定时器（视频在播但画布内容不变 → 冻结止损）
+  let recLastHash = null;      // 上次画布采样哈希
+  let recFreezeCount = 0;      // 连续无变化计数
+  let recLastCT = -1;          // 上次采样时 video.currentTime
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -1030,6 +1034,42 @@
   // 重打时间戳（重复帧丢弃、缺帧用上一帧补），经 MediaStreamTrackGenerator 输出，
   // MediaRecorder 按输入帧 timestamp 打样本时间戳 → 输出恒定帧率。
   // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
+  // ─── 录制音频捕获 ─────────────────────────────
+  // 优先 AudioContext（MediaElementSource）：video.captureStream() 会让 video 进入
+  // 捕获模式，在部分播放器（芒果TV）上渲染被接管，后续 drawImage(video) 画不出新帧，
+  // 表现为录制画面冻结（首帧后定格）而声音正常。AudioContext 只路由音频，不影响渲染；
+  // 播放器已占用 MediaElementSource 等失败场景回退 video.captureStream() 取音频轨。
+  let recAudioCtx = null;
+  const recAudioSrcMap = new WeakMap();   // video 元素 → { source, dest }（每元素仅可创建一次）
+  function getRecAudioTrack(v) {
+    try {
+      if (!recAudioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) throw new Error('no-audio-context');
+        recAudioCtx = new AC();
+      }
+      let entry = recAudioSrcMap.get(v);
+      if (!entry) {
+        const source = recAudioCtx.createMediaElementSource(v);
+        // MediaElementSource 会重路由 video 音频：必须接回扬声器保持正常出声
+        source.connect(recAudioCtx.destination);
+        const dest = recAudioCtx.createMediaStreamDestination();
+        source.connect(dest);
+        entry = { source, dest };
+        recAudioSrcMap.set(v, entry);
+      }
+      if (recAudioCtx.state === 'suspended') recAudioCtx.resume().catch(() => { });
+      const t = entry.dest.stream.getAudioTracks()[0];
+      if (t) return t;
+    } catch (e) { /* 回退下方方案 */ }
+    try {
+      const vs = v.captureStream();
+      const t = vs.getAudioTracks()[0];
+      if (t) return t;
+    } catch (e) { }
+    return null;
+  }
+
   function startFramePacer(stream) {
     if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
     try {
@@ -1182,12 +1222,9 @@
     // 采样点常落在两次绘制之间导致丢帧；加倍采样后每次绘制必被采到，输出顺滑不卡顿
     const capFps = Math.min(60, Math.max(FPS * 2, 30));
     recStream = recCanvas.captureStream(capFps);
-    // 音频：从 video 元素音轨拼入
-    try {
-      const videoStream = video.captureStream();
-      const audioTracks = videoStream.getAudioTracks();
-      if (audioTracks.length > 0) recStream.addTrack(audioTracks[0]);
-    } catch (e) { /* audio capture may not be supported */ }
+    // 音频：AudioContext 捕获优先（避免 video.captureStream() 影响渲染），失败回退
+    const audioTrack = getRecAudioTrack(video);
+    if (audioTrack) recStream.addTrack(audioTrack);
     if (!recStream.getVideoTracks().length) {
       recordingInternal = false;
       recAutoStop = false;
@@ -1299,6 +1336,39 @@
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
+    // 画面活性检测：视频在播放（currentTime 前进）但 canvas 内容持续无变化 →
+    // 绘制已失效（drawImage 冻结 / video 渲染被接管），自动停止录制避免产出
+    // "画面定格"的废片。每 2s 采样画布 4 行像素哈希（分散采样防局部变化漏判）
+    recLastHash = null; recFreezeCount = 0; recLastCT = -1;
+    recFreezeTimer = setInterval(() => {
+      if (!recordingInternal) return;
+      if (!recCtx || !recCanvas || !video) { recLastCT = video ? video.currentTime : -1; return; }
+      if (video.paused || video.readyState < 2) { recLastCT = video.currentTime; return; }
+      let h = 0;
+      try {
+        const w = recCanvas.width, hh = recCanvas.height;
+        const ys = [0, Math.floor(hh * 0.25), Math.floor(hh * 0.5), Math.floor(hh * 0.75)];
+        for (const y of ys) {
+          const d = recCtx.getImageData(0, y, Math.min(w, 320), 1).data;
+          for (let i = 0; i < d.length; i += 16) h = (h * 31 + d[i]) | 0;
+        }
+      } catch (e) { recLastCT = video.currentTime; return; }   // 画布 tainted：无法采样，跳过
+      const ct = video.currentTime;
+      if (recLastHash !== null && h === recLastHash && ct > recLastCT) {
+        recFreezeCount++;
+        if (recFreezeCount >= 4) {   // ~8 秒无变化 → 冻结，止损停止
+          recDiag.freeze = recFreezeCount;
+          try { mgpToast('录制画面已冻结，录制已停止', true); } catch (e) { }
+          stopRecording();
+          return;
+        }
+      } else {
+        recFreezeCount = 0;
+      }
+      recLastHash = h;
+      recLastCT = ct;
+    }, 2000);
+
     // Render loop：按视频帧节奏绘制（requestVideoFrameCallback），输出帧率与源一致、顺滑不卡顿
     const useFrameCb = typeof video.requestVideoFrameCallback === 'function';
     let lastMedia = -1;
@@ -1397,6 +1467,7 @@
     if (recRaf) cancelAnimationFrame(recRaf);
     if (recPaintTimer) { clearInterval(recPaintTimer); recPaintTimer = null; }
     if (recDiagTimer) { clearInterval(recDiagTimer); recDiagTimer = null; }
+    if (recFreezeTimer) { clearInterval(recFreezeTimer); recFreezeTimer = null; }
     try {
       if (recDiag) {
         recDiag.draws = recDrawOk; recDiag.drawFails = recDrawFail; recDiag.adopted = recVideoAdopted;
@@ -2151,6 +2222,8 @@
       lastWallClock = performance.now() / 1000;
       // 丢弃暂停前的输入帧基准：恢复后不把后台时段补成重复帧
       if (recPacer) recPacer.resetBase();
+      // AudioContext 音频捕获：页面后台期间可能被自动挂起，回前台恢复
+      if (recAudioCtx && recAudioCtx.state === 'suspended') recAudioCtx.resume().catch(() => { });
       mgpToast('已恢复录制', true);
     }
   });

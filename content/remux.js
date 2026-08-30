@@ -18,6 +18,10 @@
   // ─── 二进制工具 ───────────────────────────────
   function rdU16(b, p) { return (b[p] << 8) | b[p + 1]; }
   function rdU32(b, p) { return ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0; }
+  // int32 有符号读取：trun 的 data_offset 与 sample_cts 均为有符号 32 位整数
+  // （data_offset 可为负——样本数据位于 moof 之前；cts 可为负——B 帧 PTS 早于 DTS），
+  // 按无符号读取会把负值变成巨大正数，导致样本数据偏移错乱、文件在对应位置损坏
+  function rdS32(b, p) { return rdU32(b, p) | 0; }
   function rdU64(b, p) { return rdU32(b, p) * 4294967296 + rdU32(b, p + 4); }
   function wrU32(arr, p, v) {
     arr[p] = (v >>> 24) & 255; arr[p + 1] = (v >>> 16) & 255;
@@ -78,7 +82,7 @@
     const flags = rdU32(bytes, d) & 0xFFFFFF;
     const r = { count: rdU32(bytes, d + 4) };
     let p = d + 8;
-    if (flags & TRUN_DATA_OFFSET) { r.dataOffset = rdU32(bytes, p); p += 4; }
+    if (flags & TRUN_DATA_OFFSET) { r.dataOffset = rdS32(bytes, p); p += 4; }
     if (flags & TRUN_FIRST_SAMPLE_FLAGS) { r.firstSampleFlags = rdU32(bytes, p); p += 4; }
     // 新版 ISO 14496-12（2015+）trun 语法：每样本一组字段，按 flags 置位顺序交错存放。
     // Chromium 的 MediaRecorder 即按此布局输出（旧版"数组各自连续"的布局已废弃）。
@@ -87,7 +91,7 @@
       if (flags & TRUN_SAMPLE_DURATION) { dur.push(rdU32(bytes, p)); p += 4; }
       if (flags & TRUN_SAMPLE_SIZE) { size.push(rdU32(bytes, p)); p += 4; }
       if (flags & TRUN_SAMPLE_FLAGS) { sampleFlags.push(rdU32(bytes, p)); p += 4; }
-      if (flags & TRUN_SAMPLE_CTS) { cts.push(rdU32(bytes, p)); p += 4; }
+      if (flags & TRUN_SAMPLE_CTS) { cts.push(rdS32(bytes, p)); p += 4; }
     }
     if (dur.length) r.durations = dur;
     if (size.length) r.sizes = size;
