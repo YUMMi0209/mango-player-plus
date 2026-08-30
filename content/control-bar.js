@@ -1301,15 +1301,17 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // 绘制驱动：requestAnimationFrame（浏览器渲染节拍，前台不节流）。
-    // 关键修复：此前用 setInterval 绘制，其触发时刻被对齐到渲染节拍（~16.7ms 网格），
-    // 20ms 间隔实际只触发 ~25 次/秒——与采样帧率（capFps=25）同频，采样常落在两次
-    // 绘制之间采到旧帧，画面停滞（表现为帧率低、一卡一卡，且 pacerDrops=0 无迹可寻）。
-    // rAF 每帧绘制（60/120Hz），采样间隔内必有多次绘制，每次采样必采到最新画面
+    // 绘制驱动：requestAnimationFrame。capFps ≤ 25 时每 2 帧绘制一次（30fps）：
+    // 采样间隔（40ms）内必有绘制（33ms 间隔），每次采样必采到最近画面（内容最多
+    // 延迟一帧，无卡顿），而全尺寸 drawImage 是主线程重负载——1080p 每帧拷贝约
+    // 8MB 像素，60fps 绘制（500MB/s）会拖垮主线程节拍导致卡顿，减半后显著改善；
+    // capFps ≥ 30 时保持每帧绘制（30fps 采样需高于 30fps 绘制，避免同频采旧帧）
+    const paintEvery = capFps <= 25 ? 2 : 1;
+    let paintFrameCount = 0;
     paintRecFrame();
     const recRafLoop = () => {
       if (!recordingInternal) return;
-      paintRecFrame();
+      if (++paintFrameCount % paintEvery === 0) paintRecFrame();
       recPaintRaf = requestAnimationFrame(recRafLoop);
     };
     recPaintRaf = requestAnimationFrame(recRafLoop);
