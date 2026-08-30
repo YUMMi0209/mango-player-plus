@@ -1070,6 +1070,18 @@
   }
 
 
+  // 录制采集帧率归一化：取最接近的标准档位（25 / 30 / 50 / 60），
+  // 保证输出文件为标准帧率（剪辑软件友好）；时间码仍按真实校准帧率换算，不受影响
+  function normRecFps(f) {
+    const n = Math.max(20, Math.min(60, Math.round(f || 25)));
+    let best = 25, bd = Infinity;
+    for (const s of [60, 50, 30, 25]) {
+      const d = Math.abs(s - n);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
   function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
@@ -1120,10 +1132,9 @@
     document.body.appendChild(recCanvas);
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
-    // 采集帧率 = 视频帧率（20~60 封顶）：绘制由 16ms 定时器驱动（≈60fps），
-    // 采样间隔内必有多次绘制，不会漏帧；不再 2×FPS 加倍采样——过高的输入帧率
-    // 会给 H.264 编码器造成积压（软编环境），积压传导到录制链路表现为画面卡住
-    const capFps = Math.min(60, Math.max(20, FPS));
+    // 采集帧率 = 最接近的标准档位（25/30/50/60）：输出标准帧率文件；
+    // 绘制由采样间隔一半的定时器驱动（采样间隔内必有新绘制，不会漏帧）
+    const capFps = normRecFps(FPS);
     recStream = recCanvas.captureStream(capFps);
     // 音频：AudioContext 捕获优先（避免 video.captureStream() 影响渲染），失败回退
     const audioRes = getRecAudioTrack(video);
@@ -1194,13 +1205,14 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // 固定节拍重绘（~16ms，前台近似 60fps）：captureStream 仅在 canvas 有新绘制时
-    // 产生帧，只要 drawImage 可用画面必然持续更新（绘制幂等，重复绘制同一帧无害）
+    // 固定节拍重绘（间隔 = 采样间隔的一半，即 2× 采样帧率）：captureStream 仅在
+    // canvas 有新绘制时产生帧，绘制频率高于采样频率保证每次采样必采到新内容
+    // （采样与绘制同频时相位随机可能漏帧），且不产生无谓的更高频绘制
     paintRecFrame();
     recPaintTimer = setInterval(() => {
       if (!recordingInternal) return;
       paintRecFrame();
-    }, 16);
+    }, Math.max(4, Math.round(500 / capFps)));
 
     // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「画面卡住」类问题
     recDiag = {
@@ -1287,8 +1299,8 @@
       if (ok) { recDrawOk++; recDrawFail = 0; }
       else {
         recDrawFail++;
-        // 连续 ~3s 无法绘制（16ms × 180）：画面源已不可用且重定位未成功，止损停止
-        if (recDrawFail >= 180) {
+        // 连续 ~3s 无法绘制（绘制间隔 × 次数）：画面源已不可用且重定位未成功，止损停止
+        if (recDrawFail * Math.max(4, Math.round(500 / capFps)) >= 3000) {
           try { mgpToast('视频画面源已失效，录制已停止', true); } catch (e) { }
           stopRecording();
         }
