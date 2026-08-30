@@ -347,6 +347,8 @@
   let recLastHash = null;      // 上次画布采样哈希
   let recFreezeCount = 0;      // 连续无变化计数
   let recLastCT = -1;          // 上次采样时 video.currentTime
+  let recDowngradeTimer = null; // 自动降级评估（编码能力不足：丢拍率超标 → 降分辨率 / 降帧率）
+  let recLastDrops = 0, recLastTicks = 0, recDowngrades = 0;  // 丢拍增量统计 + 降级次数
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -1103,10 +1105,11 @@
       stream.getAudioTracks().forEach(t => outStream.addTrack(t));
       const reader = processor.readable.getReader();
       const writer = generator.writable.getWriter();
-      const frameDurUs = Math.round(1e6 / normRecFps(FPS)); // 标准帧率网格（微秒）
+      let frameDurUs = Math.round(1e6 / normRecFps(FPS)); // 标准帧率网格（微秒）
       let idx = 0;            // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
       let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
       let drops = 0;          // 背压丢拍计数（诊断）
+      let ticks = 0;          // 节拍总数（丢拍率 = drops / ticks）
       let stopped = false;
       let tickTimer = null;
       // 输入侧：持续读取，只保留最新帧（canvas 2× 采样节奏，读取远快于输出节拍）
@@ -1122,24 +1125,35 @@
           }
         } catch (e) { /* reader 取消 / 轨道停止 */ }
       })();
-      // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍
-      const tickMs = Math.max(4, Math.round(frameDurUs / 1000));
-      tickTimer = setInterval(() => {
+      // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍。
+      // 背压（编码器消费不及时）只丢这一拍，绝不挂起循环
+      const tick = () => {
         if (stopped || recPaused) return;
+        ticks++;
         if (!latest) return;
         const out = new VideoFrame(latest, { timestamp: idx * frameDurUs });
         idx++;
-        // 背压：generator 队列满（编码器消费不及时）时丢这一拍，绝不挂起
         if (writer.desiredSize != null && writer.desiredSize < 1) {
           drops++;
           try { out.close(); } catch (e) { }
           return;
         }
         writer.write(out).catch(() => { try { out.close(); } catch (e) { } });
-      }, tickMs);
+      };
+      let tickMs = Math.max(4, Math.round(frameDurUs / 1000));
+      tickTimer = setInterval(tick, tickMs);
       return {
         stream: outStream,
         dropCount() { return drops; },
+        tickCount() { return ticks; },
+        // 动态调整目标帧率（自动降级用）：重建节拍，时间戳网格同步切换
+        setFps(f) {
+          const nf = Math.max(15, Math.min(60, Math.round(f || 25)));
+          frameDurUs = Math.round(1e6 / nf);
+          tickMs = Math.max(4, Math.round(frameDurUs / 1000));
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+          tickTimer = setInterval(tick, tickMs);
+        },
         stop() {
           stopped = true;
           if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
@@ -1232,13 +1246,13 @@
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();
-    // 目标码率：按分辨率档位取值（比源码率档位更低，避免高码率在软编环境积压）。
-    // MediaRecorder 必然重编码，低码率换编码余量，画面连续优先于极限画质
+    // 目标码率：按分辨率档位取值（偏保守）。H.264 软编环境高码率是编码积压的
+    // 主要来源之一，码率越低编码越快；配合自动降级保证帧率稳定
     const recPx = video.videoWidth * video.videoHeight;
-    const videoBits = recPx >= 3840 * 2160 ? 30000000
-      : recPx >= 1920 * 1080 ? 12000000
-      : recPx >= 1280 * 720 ? 8000000
-      : 5000000;
+    const videoBits = recPx >= 3840 * 2160 ? 20000000
+      : recPx >= 1920 * 1080 ? 8000000
+      : recPx >= 1280 * 720 ? 6000000
+      : 4000000;
     // CFR 时间戳自控：按标准帧率网格重打时间戳，强制输出文件为标准帧率
     // （captureStream 直连输出帧率随绘制节奏浮动，无法保证标准帧率）；
     // 输入输出解耦 + 背压丢拍，不会像旧实现那样挂起冻结视频轨
@@ -1295,8 +1309,10 @@
       mimeType: mt,
       videoBits,
       audioVia,
+      resW: recCanvas.width,
+      resH: recCanvas.height,
       canvasInDom: !!recCanvas.parentElement,
-      draws: 0, drawFails: 0, adopted: false
+      draws: 0, drawFails: 0, adopted: false, downgrades: 0
     };
     recDiagTimer = setInterval(() => {
       if (!recordingInternal) return;
@@ -1338,6 +1354,49 @@
       }
       recLastHash = h;
       recLastCT = ct;
+    }, 2000);
+
+    // ─── 自动降级：编码能力不足（软编环境常见）时保证帧率稳定 ─────────
+    // 每 2s 评估 pacer 增量丢拍率：> 40% 说明编码器跟不上目标帧率，
+    // 先降低录制分辨率（×2/3，保持比例），已最低则目标帧率降一档（60→50→30→25）。
+    // 降级后编码负载下降，丢拍率回落，输出帧率稳定在标准档位
+    const REC_FPS_STEPS = [60, 50, 30, 25];
+    function recDowngradeRes() {
+      if (!recCanvas || !video) return false;
+      const nw = Math.round(recCanvas.width * 2 / 3);
+      const nh = Math.round(recCanvas.height * 2 / 3);
+      if (nw < 320 || nh < 180) return false;   // 已到最低档
+      recCanvas.width = nw; recCanvas.height = nh;
+      recDiag.resW = nw; recDiag.resH = nh;
+      return true;
+    }
+    function recFpsDownStep() {
+      const cur = recDiag.capFps;
+      const i = REC_FPS_STEPS.indexOf(cur);
+      if (i < 0 || i >= REC_FPS_STEPS.length - 1) return false;  // 已到最低档
+      const nf = REC_FPS_STEPS[i + 1];
+      recDiag.capFps = nf;
+      if (recPacer && typeof recPacer.setFps === 'function') recPacer.setFps(nf);
+      return true;
+    }
+    recLastDrops = 0; recLastTicks = 0;
+    recDowngradeTimer = setInterval(() => {
+      if (!recordingInternal || !recPacer) return;
+      const d = recPacer.dropCount(), t = recPacer.tickCount();
+      const dD = d - recLastDrops, tD = t - recLastTicks;
+      recLastDrops = d; recLastTicks = t;
+      if (tD < 20) return;              // 样本太少（刚启动 / 暂停中）不评估
+      if (dD / tD <= 0.4) return;       // 丢拍率 ≤ 40%：健康，不干预
+      // 丢拍率 > 40%：先降分辨率，再降帧率
+      if (recDowngradeRes()) {
+        recDowngrades++;
+        recDiag.downgrades = recDowngrades;
+        try { mgpToast('设备编码能力不足，已降低录制分辨率', true); } catch (e) { }
+      } else if (recFpsDownStep()) {
+        recDowngrades++;
+        recDiag.downgrades = recDowngrades;
+        try { mgpToast('设备编码能力不足，录制帧率已降为 ' + recDiag.capFps + 'fps', true); } catch (e) { }
+      }
     }, 2000);
 
     // Render：16ms 定时重绘已在上面启动（captureStream 只在 canvas 有新绘制时产帧），
@@ -1424,6 +1483,7 @@
     if (recPaintTimer) { clearInterval(recPaintTimer); recPaintTimer = null; }
     if (recDiagTimer) { clearInterval(recDiagTimer); recDiagTimer = null; }
     if (recFreezeTimer) { clearInterval(recFreezeTimer); recFreezeTimer = null; }
+    if (recDowngradeTimer) { clearInterval(recDowngradeTimer); recDowngradeTimer = null; }
     try {
       if (recDiag) {
         recDiag.draws = recDrawOk; recDiag.drawFails = recDrawFail; recDiag.adopted = recVideoAdopted;
