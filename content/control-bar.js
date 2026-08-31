@@ -2025,10 +2025,14 @@
   // 保存（下载带标注的 PNG，同时自动复制到剪贴板）或取消（关闭窗口）
   function annClose(save) {
     if (save && annCanvas && annSource) {
+      // 捕获文件名到局部变量：toBlob 异步回调执行时 annFileName 已被下方清理
+      // 置空——直接引用会得到空字符串，a.download='' 被浏览器忽略，下载回退为
+      // blob URL 的 UUID 文件名（如 0a891ae9-...）
+      const fname = annFileName;
       try {
         annCanvas.toBlob(b => {
           if (!b) { mgpToast('保存失败', true); return; }
-          downloadBlob(b, annFileName);
+          downloadBlob(b, fname);
           // 保存的同时自动复制截图：直接复用本回调生成的 blob。
           // 注意不能调用 annCopyToClipboard()——toBlob 异步回调执行时窗口已关闭，
           // annCanvas/annSource 已被下方清理置空，空检查会直接判失败
