@@ -1682,8 +1682,8 @@
       while (stack.length) {
         const el = stack.pop();
         if (!el || el.nodeType !== 1) continue;
-        // 扩展控制栏、Toast 提示不隐藏（全屏中 Toast 正常显示）
-        if (el === v || el === wrapper || el.id === 'mgp-toast-ext') continue;
+        // 扩展控制栏、Toast 提示、标注截图窗口不隐藏（全屏中标注与提示正常显示）
+        if (el === v || el === wrapper || el.id === 'mgp-toast-ext' || el.id === 'mgp-ann-mask') continue;
         if (el.contains(v)) { [...el.children].forEach(c => stack.push(c)); continue; }
         webFsSaved.hidden.push({ t: el, orig: el.style.display });
         el.style.display = 'none';
