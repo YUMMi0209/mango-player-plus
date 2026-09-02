@@ -1044,7 +1044,7 @@
   // 表现为录制画面冻结（首帧后定格）而声音正常。AudioContext 只路由音频，不影响渲染；
   // 播放器已占用 MediaElementSource 等失败场景回退 video.captureStream() 取音频轨。
   let recAudioCtx = null;
-  const recAudioSrcMap = new WeakMap();   // video 元素 → { source, dest }（每元素仅可创建一次）
+  const recAudioSrcMap = new WeakMap();   // video 元素 → MediaElementSource（createMediaElementSource 每元素仅一次）
   function getRecAudioTrack(v) {
     try {
       if (!recAudioCtx) {
@@ -1052,18 +1052,25 @@
         if (!AC) throw new Error('no-audio-context');
         recAudioCtx = new AC();
       }
-      let entry = recAudioSrcMap.get(v);
-      if (!entry) {
-        const source = recAudioCtx.createMediaElementSource(v);
-        // MediaElementSource 会重路由 video 音频：必须接回扬声器保持正常出声
-        source.connect(recAudioCtx.destination);
-        const dest = recAudioCtx.createMediaStreamDestination();
-        source.connect(dest);
-        entry = { source, dest };
-        recAudioSrcMap.set(v, entry);
+      // Autoplay Policy：页面音频未被激活时 AudioContext 处于 suspended，
+      // MediaStreamDestination 不会产生音频数据 → 直接回退 captureStream，
+      // 避免"录制有概率没声音"（resume 是异步的，无法在取轨前保证完成）
+      if (recAudioCtx.state !== 'running') {
+        recAudioCtx.resume().catch(() => { });
+        throw new Error('ac-not-running');
       }
-      if (recAudioCtx.state === 'suspended') recAudioCtx.resume().catch(() => { });
-      const t = entry.dest.stream.getAudioTracks()[0];
+      let src = recAudioSrcMap.get(v);
+      if (!src) {
+        src = recAudioCtx.createMediaElementSource(v);
+        // MediaElementSource 会重路由 video 音频：必须接回扬声器保持正常出声
+        src.connect(recAudioCtx.destination);
+        recAudioSrcMap.set(v, src);
+      }
+      // 每次录制新建 MediaStreamDestination：录制停止会 stop recStream 全部轨道
+      // （含本 dest 的音频轨），若复用旧 dest 会拿到已停止的轨道 → 录制无声
+      const dest = recAudioCtx.createMediaStreamDestination();
+      src.connect(dest);
+      const t = dest.stream.getAudioTracks()[0];
       if (t) return { track: t, via: 'audiocontext' };
     } catch (e) { /* 回退下方方案 */ }
     try {
