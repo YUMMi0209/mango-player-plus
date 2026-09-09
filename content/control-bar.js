@@ -1762,6 +1762,22 @@
     if (e.key === 'Escape' && webFsActive) exitWebFs();
   });
 
+  // 网页全屏期间：双击画面只"吃掉"事件——不退出网页全屏，也不让页面/播放器
+  // 借双击切入其他全屏（浏览器全屏等）。
+  // 仅 webFsActive 时拦截：不影响其他全屏模式下的双击行为；
+  // 扩展自身 UI（时间码切换 / 标注窗口 / 侧边按钮 / 悬浮进度条）不拦截
+  window.addEventListener('dblclick', e => {
+    if (!webFsActive) return;
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest) {
+      if (t.closest('#mgp-bar') || t.closest('#mgp-ann-mask') || t.closest('.mgp-side-btn') || t.closest('#mgp-fs-wrap')) return;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+    }
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    // 拦截吞掉双击：网页全屏保持，不触发任何退出/切换
+  }, true);
+
   function remove() {
     // 录制中移除控制栏（关闭控制栏 / 换集重建）：必须停止录制，否则 R 键失效后将无法停止
     if (recordingInternal) stopRecording();
