@@ -1337,14 +1337,39 @@
       resW: recCanvas.width,
       resH: recCanvas.height,
       canvasInDom: !!recCanvas.parentElement,
-      draws: 0, drawFails: 0, adopted: false, downgrades: 0
+      draws: 0, drawFails: 0, adopted: false, downgrades: 0,
+      hwEnc: 'probing', hwEncCfg: ''
     };
+    // 硬件编码器能力探测（WebCodecs）：MediaRecorder 无法指定编码器，
+    // isConfigSupported 可判断本机是否存在可用的硬件 H.264 编码器
+    // （返回 config.hardwareAcceleration 为 prefer-hardware 即硬件编码可用）
+    try {
+      if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
+        VideoEncoder.isConfigSupported({
+          codec: 'avc1.42E01E',
+          width: recCanvas.width,
+          height: recCanvas.height,
+          bitrate: videoBits,
+          framerate: capFps,
+          hardwareAcceleration: 'prefer-hardware'
+        }).then(r => {
+          if (!recDiag) return;
+          recDiag.hwEnc = (r && r.supported) ? 'yes' : 'no';
+          recDiag.hwEncCfg = (r && r.config && r.config.hardwareAcceleration) ? r.config.hardwareAcceleration : '';
+        }).catch(() => { if (recDiag) recDiag.hwEnc = 'error'; });
+      } else {
+        recDiag.hwEnc = 'unsupported';
+      }
+    } catch (e) { recDiag.hwEnc = 'error'; }
     recDiagTimer = setInterval(() => {
       if (!recordingInternal) return;
       recDiag.draws = recDrawOk;
       recDiag.drawFails = recDrawFail;
       recDiag.adopted = recVideoAdopted;
       recDiag.pacerDrops = recPacer && typeof recPacer.dropCount === 'function' ? recPacer.dropCount() : -1;
+      // 节拍数 = pacer 实际尝试输出的帧数：与最终文件帧数对比可区分
+      // 「pacer 未输出」与「MediaRecorder 内部丢帧（编码吞吐不足）」
+      recDiag.pacerTicks = recPacer && typeof recPacer.tickCount === 'function' ? recPacer.tickCount() : -1;
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
