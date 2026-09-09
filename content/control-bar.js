@@ -1685,6 +1685,7 @@
     // 隐藏除视频与扩展控制栏外的所有页面元素：遍历整棵 DOM 树，
     // 含视频祖先链内的兄弟与任意嵌套层级的非视频元素（播放器 UI / 标题悬浮层 / 导航等）
     const hideTree = root => {
+      if (!webFsSaved) return;   // 已退出全屏（observer 断开前的残留回调）
       const stack = [root];
       while (stack.length) {
         const el = stack.pop();
@@ -1702,6 +1703,16 @@
       muts.forEach(m => (m.addedNodes || []).forEach(n => { if (n.nodeType === 1) hideTree(n); }));
     });
     webFsSaved.observer.observe(document.body, { childList: true, subtree: true });
+    // video 元素自身绑定双击退出（捕获阶段）：同一元素捕获监听先于播放器在目标
+    // 阶段注册的双击处理执行，命中 VIDEO 时必然优先退出，防播放器抢占双击
+    const vDbl = e => {
+      if (!webFsActive) return;
+      if (e.preventDefault) e.preventDefault();
+      if (e.stopPropagation) e.stopPropagation();
+      exitWebFs();
+    };
+    v.addEventListener('dblclick', vDbl, true);
+    webFsSaved.vDbl = { v, vDbl };
     v.style.cssText =
       'position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
       'width:100vw!important;height:100vh!important;object-fit:contain!important;' +
@@ -1711,7 +1722,7 @@
     webFsActive = true;
     moveTCDown();
     syncFsProgress();
-    mgpToast('网页全屏（ESC 退出）', true);
+    mgpToast('网页全屏（双击画面或 ESC 退出）', true);
     return true;
   }
   // 用保存的元素引用还原（换集/移除后 video/wrapper 可能已不是原对象）
@@ -1721,6 +1732,11 @@
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
       if (webFsSaved.w) { webFsSaved.w.setAttribute('style', webFsSaved.wStyle); webFsSaved.w.classList.remove('fs-on'); }
       (webFsSaved.hidden || []).forEach(h => { if (h.t) h.t.style.display = h.orig; });
+      // 清理：移除 video 双击退出监听、断开隐藏兜底 observer（防泄漏与退出后误隐藏）
+      if (webFsSaved.vDbl && webFsSaved.vDbl.v) {
+        webFsSaved.vDbl.v.removeEventListener('dblclick', webFsSaved.vDbl.vDbl, true);
+      }
+      if (webFsSaved.observer) { try { webFsSaved.observer.disconnect(); } catch (e) { } }
     }
     webFsActive = false;
     webFsSaved = null;
@@ -1776,6 +1792,26 @@
     if (e.preventDefault) e.preventDefault();
     if (e.stopPropagation) e.stopPropagation();
     exitWebFs();
+  }, true);
+
+  // 保险：若播放器脚本在更早注册的捕获监听中拦截了 dblclick（stopPropagation），
+  // 双击事件不会到达上述监听。播放器必然放行 mousedown（自身要响应单击），
+  // 用"350ms 内两次按下画面"检测双击作为兜底退出通道
+  let fsDblLastDown = 0;
+  window.addEventListener('mousedown', e => {
+    if (!webFsActive) return;
+    const t = e.target;
+    if (t && t.nodeType === 1) {
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
+      if (t.closest && (t.closest('#mgp-ann-mask') || t.closest('.mgp-side-btn') || t.closest('#mgp-fs-wrap') || t.closest('#mgp-bar'))) return;
+    }
+    const now = performance.now();
+    if (fsDblLastDown && now - fsDblLastDown < 350) {
+      fsDblLastDown = 0;
+      exitWebFs();
+    } else {
+      fsDblLastDown = now;
+    }
   }, true);
 
   function remove() {
