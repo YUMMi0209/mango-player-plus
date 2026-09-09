@@ -352,6 +352,9 @@
   let recLastCT = -1;          // 上次采样时 video.currentTime
   let recDowngradeTimer = null; // 自动降级评估（编码能力不足：丢拍率超标 → 降分辨率 / 降帧率）
   let recLastDrops = 0, recLastTicks = 0, recDowngrades = 0;  // 丢拍增量统计 + 降级次数
+  let recChunkBytes = 0;        // MediaRecorder 已产出的编码数据字节数（编码进度）
+  let recLastChunkAt = 0;       // 最近一次产出数据块的时刻（编码停滞判据）
+  let recStartAt = 0;           // 本次录制开始时刻
   let recordingInternal = false;
   let recAutoStop = false;   // 是否正好从入点开始录制 → 到出点自动停止
   let recStopTarget = null;  // 自动停止目标时间（日志片段记录匹配出点，独立于预设出点）
@@ -1265,13 +1268,13 @@
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();
-    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。H.264 软编环境高码率
-    // 是编码积压的主要来源之一，码率越低编码越快；配合自动降级保证帧率稳定
+    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。H.264 软编环境码率
+    // 是编码耗时的直接因素，软编吞吐不足时低码率可显著提速
     const recPx = recCanvas.width * recCanvas.height;
-    const videoBits = recPx >= 3840 * 2160 ? 20000000
-      : recPx >= 1920 * 1080 ? 8000000
-      : recPx >= 1280 * 720 ? 6000000
-      : 4000000;
+    const videoBits = recPx >= 3840 * 2160 ? 12000000
+      : recPx >= 1920 * 1080 ? 5000000
+      : recPx >= 1280 * 720 ? 4000000
+      : 3000000;
     // CFR 时间戳自控：按标准帧率网格重打时间戳，强制输出文件为标准帧率
     // （captureStream 直连输出帧率随绘制节奏浮动，无法保证标准帧率）；
     // 输入输出解耦 + 背压丢拍，不会像旧实现那样挂起冻结视频轨
@@ -1299,7 +1302,18 @@
       return;
     }
     recChunks = [];
-    recMediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+    recChunkBytes = 0;
+    recLastChunkAt = performance.now();
+    recStartAt = performance.now();
+    // 编码产出统计：ondataavailable 的字节数与时刻是判断「编码器是否跟得上」的
+    // 唯一可靠信号（pacerDrops 只反映 pacer 队列背压，MediaRecorder 内部积压不反馈）
+    recMediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) {
+        recChunks.push(e.data);
+        recChunkBytes += e.data.size;
+        recLastChunkAt = performance.now();
+      }
+    };
     recMediaRecorder.onstop = () => finishRecording();
     // 编码器错误（H.264 硬件编码失败 / 资源耗尽等）监听：MediaRecorder 会静默停止
     // 消费视频轨导致画面定格，这里主动停止录制并提示，避免产出残缺文件
@@ -1311,17 +1325,22 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // 绘制驱动：requestAnimationFrame。capFps ≤ 25 时每 2 帧绘制一次（30fps）：
-    // 采样间隔（40ms）内必有绘制（33ms 间隔），每次采样必采到最近画面（内容最多
-    // 延迟一帧，无卡顿），而全尺寸 drawImage 是主线程重负载——1080p 每帧拷贝约
-    // 8MB 像素，60fps 绘制（500MB/s）会拖垮主线程节拍导致卡顿，减半后显著改善；
-    // capFps ≥ 30 时保持每帧绘制（30fps 采样需高于 30fps 绘制，避免同频采旧帧）
-    const paintEvery = capFps <= 25 ? 2 : 1;
-    let paintFrameCount = 0;
+    // 绘制驱动：requestAnimationFrame + 动态节拍。
+    // 目标绘制间隔 = max(rAF 间隔, 采样间隔/2)：绘制频率约 2×采样帧率即可保证
+    // 每次采样都采到最新画面（内容最多延迟半帧），同时不过度绘制——全尺寸
+    // drawImage 是主线程重负载（1080p 每帧约 8MB 像素拷贝），高频绘制会与软编
+    // 争抢 CPU 拖慢编码；rAF 间隔动态测量（兼容 60/120Hz 与主线程繁忙场景）
+    let recRafLastTs = 0, recRafInterval = 16.7, recLastPaintTs = 0;
     paintRecFrame();
-    const recRafLoop = () => {
+    const recRafLoop = ts => {
       if (!recordingInternal) return;
-      if (++paintFrameCount % paintEvery === 0) paintRecFrame();
+      if (recRafLastTs) recRafInterval = recRafInterval * 0.9 + (ts - recRafLastTs) * 0.1;
+      recRafLastTs = ts;
+      const targetPaintMs = Math.max(recRafInterval, (1000 / capFps) / 2);
+      if (!recLastPaintTs || ts - recLastPaintTs >= targetPaintMs - 1) {
+        recLastPaintTs = ts;
+        paintRecFrame();
+      }
       recPaintRaf = requestAnimationFrame(recRafLoop);
     };
     recPaintRaf = requestAnimationFrame(recRafLoop);
@@ -1370,6 +1389,8 @@
       // 节拍数 = pacer 实际尝试输出的帧数：与最终文件帧数对比可区分
       // 「pacer 未输出」与「MediaRecorder 内部丢帧（编码吞吐不足）」
       recDiag.pacerTicks = recPacer && typeof recPacer.tickCount === 'function' ? recPacer.tickCount() : -1;
+      recDiag.chunkBytes = recChunkBytes;
+      recDiag.chunkCount = recChunks.length;
       recDiag.currentTime = video ? video.currentTime : -1;
     }, 500);
 
@@ -1406,10 +1427,14 @@
       recLastCT = ct;
     }, 2000);
 
-    // ─── 自动降级：编码能力不足（软编环境常见）时保证帧率稳定 ─────────
-    // 每 2s 评估 pacer 增量丢拍率：> 40% 说明编码器跟不上目标帧率，
-    // 先降低录制分辨率（×2/3，保持比例），已最低则目标帧率降一档（60→50→30→25）。
-    // 降级后编码负载下降，丢拍率回落，输出帧率稳定在标准档位
+    // ─── 自动降级：编码能力不足（软编环境常见）时保证录制流畅 ─────────
+    // 判据用「MediaRecorder 实际编码产出」而非 pacer 丢拍率：
+    // pacerDrops 只反映 pacer→generator 队列背压，MediaRecorder 内部积压
+    // （编码器吞吐不足）不会反馈到该计数——曾导致 1080p 严重滞后却不降级。
+    // 两种判据任一成立即降级：
+    //   ① 编码停滞：已录 >5s 且超过 2.5s 没有新数据块（timeslice 250ms）
+    //   ② 编码吞吐不足：累计产出字节数远低于目标码率对应的量
+    // 降级顺序：先降录制分辨率（×2/3），已最低则目标帧率降一档（60→50→30→25）
     const REC_FPS_STEPS = [60, 50, 30, 25];
     function recDowngradeRes() {
       if (!recCanvas || !video) return false;
@@ -1429,24 +1454,39 @@
       if (recPacer && typeof recPacer.setFps === 'function') recPacer.setFps(nf);
       return true;
     }
-    recLastDrops = 0; recLastTicks = 0;
-    recDowngradeTimer = setInterval(() => {
-      if (!recordingInternal || !recPacer) return;
-      const d = recPacer.dropCount(), t = recPacer.tickCount();
-      const dD = d - recLastDrops, tD = t - recLastTicks;
-      recLastDrops = d; recLastTicks = t;
-      if (tD < 20) return;              // 样本太少（刚启动 / 暂停中）不评估
-      if (dD / tD <= 0.4) return;       // 丢拍率 ≤ 40%：健康，不干预
-      // 丢拍率 > 40%：先降分辨率，再降帧率
+    function recDoDowngrade() {
       if (recDowngradeRes()) {
         recDowngrades++;
         recDiag.downgrades = recDowngrades;
         try { mgpToast('设备编码能力不足，已降低录制分辨率', true); } catch (e) { }
-      } else if (recFpsDownStep()) {
+        return true;
+      }
+      if (recFpsDownStep()) {
         recDowngrades++;
         recDiag.downgrades = recDowngrades;
         try { mgpToast('设备编码能力不足，录制帧率已降为 ' + recDiag.capFps + 'fps', true); } catch (e) { }
+        return true;
       }
+      return false;
+    }
+    recLastDrops = 0; recLastTicks = 0;
+    recDowngradeTimer = setInterval(() => {
+      if (!recordingInternal || !recPacer) return;
+      const now = performance.now();
+      const elapsed = (now - recStartAt) / 1000;
+      if (elapsed < 4) return;           // 启动初期不评估（编码器热身 / 首块延迟）
+      const d = recPacer.dropCount(), t = recPacer.tickCount();
+      const dD = d - recLastDrops, tD = t - recLastTicks;
+      recLastDrops = d; recLastTicks = t;
+      // ① 编码停滞：2.5s 无新数据块（timeslice 250ms）
+      const stalled = now - recLastChunkAt > 2500;
+      // ② 编码吞吐：累计字节数 < 目标码率 × 录制时长 × 30%（下限 20KB 防误判）
+      const expectedBytes = ((videoBits + 128000) / 8) * elapsed * 0.3;
+      const lowThroughput = recChunkBytes > 0 && recChunkBytes < expectedBytes && expectedBytes > 20000;
+      // ③ pacer 丢拍率（旧判据，保留兜底）
+      const highDrop = tD >= 20 && dD / tD > 0.4;
+      if (!stalled && !lowThroughput && !highDrop) return;
+      recDoDowngrade();
     }, 2000);
 
     // Render：16ms 定时重绘已在上面启动（captureStream 只在 canvas 有新绘制时产帧），
