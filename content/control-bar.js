@@ -1758,12 +1758,23 @@
     if (annHost) return;   // 标注窗口打开期间：Esc 由标注窗口接管
     if (e.key === 'Escape' && webFsActive) exitWebFs();
   });
-  // 网页全屏退出：双击视频画面或 ESC（document 级常驻监听，控制栏关闭时同样生效；
-  // capture 阶段拦截，覆盖播放器自身的双击全屏操作）
-  document.addEventListener('dblclick', e => {
+  // 网页全屏退出：双击画面任意位置或 ESC。
+  // window 捕获阶段注册（事件传播最先到达，播放器脚本的 document 捕获监听无法拦截）；
+  // 全屏期间页面非视频元素均被隐藏，可见可点的几乎都是视频画面——排除扩展自身 UI
+  // （标注窗口 / 侧边按钮 / 悬浮进度条 / 输入框 / 时间码）后双击即退出，不依赖事件
+  // 目标是否为 VIDEO（播放器可能在 video 上叠加手势层导致 target 非 VIDEO 而漏判）
+  window.addEventListener('dblclick', e => {
     if (!webFsActive) return;
-    if (e && e.target && e.target.tagName !== 'VIDEO') return;
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const t = e.target;
+    if (t && t.nodeType === 1) {
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+      if (t.id === 'mgp-ann-mask') return;
+      if (t.closest) {
+        if (t.closest('#mgp-ann-mask') || t.closest('.mgp-side-btn') || t.closest('#mgp-fs-wrap') || t.closest('#mgp-bar')) return;
+      }
+    }
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
     exitWebFs();
   }, true);
 
