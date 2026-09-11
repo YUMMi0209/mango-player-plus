@@ -945,18 +945,17 @@
     const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
     return clean ? clean.slice(0, 30) : '';
   }
-  // 统一文件命名：前缀_标题_时间码备注_时间.ext
+  // 统一文件命名：标题_时间码备注_时间.ext
+  // - 无 SCS_/REC_ 类型前缀（靠扩展名区分类型）
   // - tcPlain：时间码（HH-MM-SS-FF 或 紧凑数字）
   // - noteTime：与时间码对应的时刻（截图 = 当前时刻；录制 = 入点时刻），
   //   备注就取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
-  // - 无备注时退化为：前缀_标题_时间码_时间.ext
-  function buildFileName(prefix, tcPlain, noteTime, ext) {
-    return prefix + titleForFile() + tcPlain + noteSeg(noteTime) + '_' + fmtNow() + '.' + ext;
+  // - 无备注时退化为：标题_时间码_时间.ext
+  function buildFileName(tcPlain, noteTime, ext) {
+    return titleForFile() + tcPlain + noteSeg(noteTime) + '_' + fmtNow() + '.' + ext;
   }
-  // 标题进入文件名（可开关）：取完整网页标题清洗非法字符并截断 24 字
+  // 标题进入文件名：取完整网页标题清洗非法字符并截断 24 字（始终写入）
   function titleForFile() {
-    const s = window.__mgpSettings || {};
-    if (s.titleFileName === false) return '';
     const t = pageTitle();
     if (!t) return '';
     const clean = String(t).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
@@ -989,7 +988,7 @@
         } else {
           // 时间码与备注取自同一时刻（避免文件名内两者对不上）
           const t = dispTime();
-          downloadBlob(b, buildFileName('SCS_', fmtTCPlainF(t), t, 'png'));
+          downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
           // S 键：下载并复制
           annCopyBlob(b).then(ok => {
             mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
@@ -1020,7 +1019,7 @@
   // 保存打点截图：前缀统一 SCS；t 为打点时刻（时间码与备注均取自该时刻，保持一致）
   function saveShotBlob(b, t, toast) {
     if (!b) { mgpToast('截图失败', true); return; }
-    downloadBlob(b, buildFileName('SCS_', fmtTCPlainF(t), t, 'png'));
+    downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
     if (toast) mgpToast(toast, true);
   }
 
@@ -1639,7 +1638,7 @@
     const ext = isMp4 ? 'mp4' : 'webm';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
     // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
-    const name = buildFileName('REC_', fmtTCPlainF(state.recordingStart || 0), state.recordingStart || 0, ext);
+    const name = buildFileName(fmtTCPlainF(state.recordingStart || 0), state.recordingStart || 0, ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -1713,7 +1712,7 @@
       const ps = pendingShot; pendingShot = null;
       if (ps.blob) {
         const inT = state.inPoint != null ? state.inPoint : 0;
-        downloadBlob(ps.blob, buildFileName('SCS_', fmtTCPlainF(inT), inT, 'png'));
+        downloadBlob(ps.blob, buildFileName(fmtTCPlainF(inT), inT, 'png'));
         mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's ) · 已截图', true);
       }
     }
@@ -2165,8 +2164,8 @@
     annShowTC = s.annotateTimecode === true;
     const shotT = dispTime();
     annTC = fmtTC(shotT, true);
-    // 命名与直接截图（S 键）完全一致：SCS_标题_时间码备注_时间.png
-    annFileName = buildFileName('SCS_', fmtTCPlainF(shotT), shotT, 'png');
+    // 命名与直接截图（S 键）完全一致：标题_时间码备注_时间.png
+    annFileName = buildFileName(fmtTCPlainF(shotT), shotT, 'png');
     annBuild();
   }
 

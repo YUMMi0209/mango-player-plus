@@ -138,9 +138,9 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   </ul>
   <p class="muted">链接点击可在浏览器中直接打开并自动跳转到对应时刻。</p>
   <h3>导出文件命名</h3>
-  <p>Excel 导出文件名按「<span class="mono">LOG_标题_时间码备注_时间</span>」命名：时间码与备注取自<strong>同一条记录</strong>（首条选中项），备注<strong>紧跟时间码</strong>；时间取 <span class="mono">mmddhhmmss</span>（如 <span class="mono">08011200</span>）。标题是否写入由「文件名包含标题」、备注是否写入由「文件名包含备注」控制。</p>
+  <p>Excel 导出文件名按「<span class="mono">标题_时间码备注_时间</span>」命名：时间码与备注取自<strong>同一条记录</strong>（首条选中项），备注<strong>紧跟时间码</strong>；时间取 <span class="mono">mmddhhmmss</span>（如 <span class="mono">08011200</span>）。备注是否写入由「文件名包含备注」控制；文件名不加 <span class="mono">LOG_</span> 等类型前缀。</p>
   <div class="flow">
-    <span class="chip">LOG_乘风2026_00115210高潮_08011200.xlsx</span>
+    <span class="chip">乘风2026_00115210高潮_08011200.xlsx</span>
   </div>
   <h3>导入日志</h3>
   <p>在历史记录弹窗中点击「全选」左侧的<strong>导入</strong>按钮选择日志 Excel，或把导出的 <span class="mono">.xlsx</span> 直接<strong>拖入插件窗口</strong>（弹窗 / 侧边栏 / 独立窗口均可，支持多文件）：与当前视频页匹配的记录合并进页面日志（按时间码去重），其他视频的记录进入导入明细并在历史记录中合并显示。</p>
@@ -163,7 +163,6 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <tr><td class="k">视频控制</td><td>关闭后画面内不再显示控制栏（快捷键仍然生效）</td></tr>
     <tr><td class="k">打点自动截图</td><td>开启后 M 打点立即自动截图保存；I 打入点自动截图，O 打出点时保存最后一次 I 时刻的截图（默认：百度网盘开启、其他网站关闭）</td></tr>
     <tr><td class="k">时间码显示回避</td><td>悬浮画面时时间码自动下移避开顶部遮挡；关闭后时间码不再向下移动（默认：芒果TV开启、其他网站关闭）</td></tr>
-    <tr><td class="k">文件名包含标题</td><td>截图 / 录制 / 导出文件名开头附加节目标题（如 <span class="mono">SCS_乘风2026_…</span>，默认开启）</td></tr>
     <tr><td class="k">文件名包含备注</td><td>截图 / 录制 / 导出文件名在时间码后附加该时刻记录的备注（默认开启）</td></tr>
     <tr><td class="k">应用于当前网页（实验）</td><td>在其他非芒果TV网站启用打点与记录（需授予站点权限；授权失败或无法获取页面地址时面板会提示原因）</td></tr>
     <tr><td class="k">网页全屏</td><td>视频铺满当前窗口（非浏览器全屏），按 <kbd>Esc</kbd> 退出；进入时不改变播放状态</td></tr>
@@ -171,15 +170,15 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
   </table>
   <h3>导出文件命名</h3>
   <div class="flow">
-    <span class="chip">SCS_标题_时间码备注_mmddhhmmss.png</span>
+    <span class="chip">标题_时间码备注_mmddhhmmss.png</span>
   </div>
   <div class="flow">
-    <span class="chip">REC_标题_入点时间码备注_mmddhhmmss.webm / .mp4</span>
+    <span class="chip">标题_入点时间码备注_mmddhhmmss.webm / .mp4</span>
   </div>
   <div class="flow">
-    <span class="chip">LOG_标题_时间码备注_mmddhhmmss.xlsx</span>
+    <span class="chip">标题_时间码备注_mmddhhmmss.xlsx</span>
   </div>
-  <p class="muted">有备注时备注<strong>紧跟时间码</strong>（不加下划线），时间码与备注取自同一时刻，保证文件名内两者一致；录制的时间码固定为<strong>入点时间码</strong>。</p>
+  <p class="muted">有备注时备注<strong>紧跟时间码</strong>（不加下划线），时间码与备注取自同一时刻，保证文件名内两者一致；录制的时间码固定为<strong>入点时间码</strong>；文件名不加 <span class="mono">SCS_</span> / <span class="mono">REC_</span> / <span class="mono">LOG_</span> 类型前缀（靠扩展名区分）。</p>
 
   <h2><span class="num">8</span>常见问题</h2>
   <details>
