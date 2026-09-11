@@ -460,9 +460,19 @@
     }
     v.requestVideoFrameCallback(cb);
   }
-  // 时间码基准：优先实际渲染帧的媒体时间（精确到帧），回退 video.currentTime
+  // 时间码基准：取「实际渲染帧的媒体时间」与「video.currentTime」的较小值。
+  // 单独用 mediaTime 会在两类场景下偏大：
+  //   ① 部分片源（芒果TV）首帧 PTS 不从 0 开始（偏移 2~3 帧），整条时间码会整体
+  //      偏大——视频开头明明停在第一帧，却显示成第 2 帧；
+  //   ② 播放头与渲染帧的时间基准差异。
+  // 取较小值同时保留原设计意图：掉帧时 currentTime 会跳过未渲染的帧，
+  // mediaTime 才是画面实际帧的时间（更小），据此显示才能与画面一致。
   function dispTime() {
-    return lastFrameMediaTime != null ? lastFrameMediaTime : (video ? video.currentTime : 0);
+    if (lastFrameMediaTime != null) {
+      const ct = video ? video.currentTime : lastFrameMediaTime;
+      return Math.max(0, Math.min(lastFrameMediaTime, ct));
+    }
+    return video ? video.currentTime : 0;
   }
   // 跳转目标对齐到帧起点（+ 浮点 epsilon）：直接 seek 到帧边界间的连续值会渲染
   // mediaTime ≤ 目标 的最近帧，导致显示比标记时间码早一帧
@@ -1195,25 +1205,28 @@
   function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
+    // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
+    // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
+    const nowT = dispTime();
     // 录制始终从当前位置开始，不改变已打好的入点/出点；
     // 仅当“正好从入点开始”且存在有效出点时，播放到出点自动停止
     const hasRange = state.inPoint !== null && state.outPoint !== null && state.outPoint > state.inPoint;
-    const atIn = hasRange && Math.abs(video.currentTime - state.inPoint) <= 1 / FPS;
+    const atIn = hasRange && Math.abs(nowT - state.inPoint) <= 1 / FPS;
     // 从日志列表跳转到入点开始录制：当前播放位置命中某条片段记录的入点时，
     // 以该记录的出点作为自动停止目标（页面打点状态可能未设置）
     recStopTarget = null;
     if (!atIn) {
       const rec = logs.inOut.find(u => u.inTime != null && u.outTime != null && u.outTime > u.inTime
-        && Math.abs(u.inTime - video.currentTime) <= 1 / FPS);
+        && Math.abs(u.inTime - nowT) <= 1 / FPS);
       if (rec) recStopTarget = rec.outTime;
     }
     recordingInternal = true;
     recAutoStop = atIn || recStopTarget != null;
     recStopTime = null;
-    state.recordingStart = video.currentTime;
+    state.recordingStart = nowT;
     state.tcMode = 'rec'; resetSpeed();
     saveState();
-    lastExpectedTime = video.currentTime;
+    lastExpectedTime = video.currentTime;   // seek 锁定基准用媒体时钟
     lastWallClock = performance.now() / 1000;
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.add('active');
@@ -1571,8 +1584,8 @@
         lastExpectedTime += elapsed * video.playbackRate;
       }
       lastWallClock = now;
-      // 正好从入点开始录制：播放到出点自动停止
-      if (recAutoStop && (recStopTarget != null ? video.currentTime >= recStopTarget : (state.outPoint !== null && video.currentTime >= state.outPoint))) {
+      // 正好从入点开始录制：播放到出点自动停止（用画面时刻判断，与打点同源）
+      if (recAutoStop && (recStopTarget != null ? dispTime() >= recStopTarget : (state.outPoint !== null && dispTime() >= state.outPoint))) {
         stopRecording();
         return;
       }
@@ -1602,7 +1615,7 @@
     }
     recPaused = false;
     recStopTarget = null;
-    recStopTime = video ? video.currentTime : (state.recordingStart || 0);
+    recStopTime = video ? dispTime() : (state.recordingStart || 0);
     state.tcMode = 'ot';
     saveState();
     if (video) video.pause(); resetSpeed();
@@ -1673,20 +1686,24 @@
     recStopTime = null;
     // 新入点重置出点去重标记：否则在相同出点时刻二次打出点会被误判重复而漏记
     lastLogOutTime = null;
-    state.inPoint = video.currentTime; state.outPoint = null;
+    // 打点时刻统一用 dispTime()（实际渲染帧的媒体时间，与时间码显示同源）：
+    // video.currentTime 是媒体时钟，通常领先渲染帧 2-3 帧，直接使用会导致
+    // 记录的时间码比画面上看到的多出几帧
+    const t = dispTime();
+    state.inPoint = t; state.outPoint = null;
     state.tcMode = 'in'; saveState();
     if (video.paused) video.play().catch(()=>{});
-    mgpToast('入点 ( ' + fmtTC(video.currentTime) + ' | 0s )');
+    mgpToast('入点 ( ' + fmtTC(t) + ' | 0s )');
     // 打点自动截图：暂存当前画面，待 O 打出点时保存（多次 I 只保留最后一次，与日志入点逻辑一致）
     if (autoShot()) {
-      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fmtTCPlainF(dispTime()) }; });
+      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fmtTCPlainF(t) }; });
     }
   }
 
   function markOut() {
     if (recordingInternal || state.inPoint === null || !video) return;
     recStopTime = null;
-    const outTime = video.currentTime;
+    const outTime = dispTime();   // 与时间码显示同源，避免比画面多出几帧
     // 出点早于入点无意义（时长为 0 的垃圾记录），拒绝并保持入点状态
     if (outTime < state.inPoint) { mgpToast('出点早于入点，未记录'); return; }
     state.outPoint = outTime; state.tcMode = 'ot';
@@ -1900,16 +1917,18 @@
 
   function mark() {
     if (!video || recordingInternal) return;
-    state.markTime = video.currentTime;
+    // 与时间码显示同源（dispTime），避免记录比画面多出几帧
+    const t = dispTime();
+    state.markTime = t;
     state.tcMode = 'mk'; saveState();
-    insertSorted(logs.marks, { time: state.markTime, tc: fmtTC(state.markTime), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
+    insertSorted(logs.marks, { time: t, tc: fmtTC(t), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
     saveLogs();
-    const c = fmtTC(state.markTime, true).replace(/:/g, '');
+    const c = fmtTC(t, true).replace(/:/g, '');
     navigator.clipboard.writeText(c).catch(()=>{});
-    mgpToast('已标记 ( ' + fmtTC(state.markTime) + ' )', true);
+    mgpToast('已标记 ( ' + fmtTC(t) + ' )', true);
     // 打点自动截图：M 打点立即保存
     if (autoShot()) {
-      shotToBlob(b => saveShotBlob(b, state.markTime, '已标记 ( ' + fmtTC(state.markTime) + ' ) · 已截图'));
+      shotToBlob(b => saveShotBlob(b, t, '已标记 ( ' + fmtTC(t) + ' ) · 已截图'));
     }
     clearTimeout(stateTimer);
     stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000);
@@ -1925,8 +1944,10 @@
   // 网络波动/播放器重建可能把 playbackRate 重置为 1，但状态仍应保持设定倍速：
   // 每帧校验实际倍速，偏离时按 curSpeed 重新应用，避免"标签显示 8X 实际却 1X"
   function enforceSpeed() { if (!video) return; if (curSpeed !== 1 && Math.abs(video.playbackRate - curSpeed) > 0.01) video.playbackRate = curSpeed; }
-  function jumpIn() { if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = state.inPoint; video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
-  function jumpOut() { if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = state.outPoint; video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  // 跳转到记录时刻：统一经 alignToFrame 对齐到帧起点（直接 seek 到帧边界之间
+  // 会渲染出比目标早一帧的画面，导致跳转后画面与记录时间码不符）
+  function jumpIn() { if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.inPoint); video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpOut() { if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.outPoint); video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
@@ -1943,7 +1964,7 @@
     // Shift combos
     if (e.shiftKey && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); jumpIn(); return; }
     if (e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); jumpOut(); return; }
-    if (e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); if (state.markTime !== null) { video.currentTime = state.markTime; video.pause(); resetSpeed(); state.tcMode = 'mk'; mgpToast('标记点 ( ' + fmtTC(state.markTime) + ' )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); } return; }
+    if (e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); if (state.markTime !== null) { video.currentTime = alignToFrame(state.markTime); video.pause(); resetSpeed(); state.tcMode = 'mk'; mgpToast('标记点 ( ' + fmtTC(state.markTime) + ' )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); } return; }
     // Shift+S：截图并在标注窗口中标注（红框 / 白边红字文本），Enter 保存 / Esc 取消
     if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); openAnnotate(); return; }
     if (e.shiftKey) return;
@@ -2442,7 +2463,8 @@
       const m = (location.hash || '').match(/mpp=([\d.]+)/);
       if (m) {
         const t = parseFloat(m[1]);
-        if (!isNaN(t) && isFinite(t)) v.currentTime = t;
+        // 对齐到帧起点，保证链接打开后画面与记录的时间码一致
+        if (!isNaN(t) && isFinite(t)) v.currentTime = alignToFrame(t);
       }
     } catch (e) { }
   }
