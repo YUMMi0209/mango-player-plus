@@ -152,11 +152,6 @@
   function fmtTCPlain(sec) { return fmtTC(sec, false).replace(/:/g, '-'); }
   // 带帧号文件名时间码 HH-MM-SS-FF：截图文件名与打点记录时间码精确对应，便于截图管理匹配
   function fmtTCPlainF(sec) { return fmtTC(sec, true).replace(/:/g, '-'); }
-  // v2.0 导出文件时间：mmddhhmmss（如 08011200）
-  function fmtNow() {
-    const d = new Date(), p = n => String(n).padStart(2, '0');
-    return p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
-  }
 
   const CSS = `
 :host{all:initial;display:block;width:100%!important;contain:layout style}
@@ -955,21 +950,16 @@
     const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
     return clean ? clean.slice(0, 30) : '';
   }
-  // 统一文件命名：标题_时间码备注_时间.ext
-  // - 无 SCS_/REC_ 类型前缀（靠扩展名区分类型）
-  // - tcPlain：时间码（HH-MM-SS-FF 或 紧凑数字）
+  // 统一文件命名：【HHMMSSFF_备注】——仅时间码与备注，不加任何多余符号 / 信息
+  // - 无类型前缀（SCS_/REC_）、无标题、无保存时间戳，靠扩展名区分类型
+  // - tcPlain：时间码（HH-MM-SS-FF 或紧凑数字），统一去除分隔符号得到 HHMMSSFF
   // - noteTime：与时间码对应的时刻（截图 = 当前时刻；录制 = 入点时刻），
-  //   备注就取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
-  // - 无备注时退化为：标题_时间码_时间.ext
+  //   备注取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
+  // - 无备注时仅时间码（不出现多余下滑线）：HHMMSSFF.ext
   function buildFileName(tcPlain, noteTime, ext) {
-    return titleForFile() + tcPlain + noteSeg(noteTime) + '_' + fmtNow() + '.' + ext;
-  }
-  // 标题进入文件名：取完整网页标题清洗非法字符并截断 24 字（始终写入）
-  function titleForFile() {
-    const t = pageTitle();
-    if (!t) return '';
-    const clean = String(t).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
-    return clean ? clean.slice(0, 24) + '_' : '';
+    const tc = String(tcPlain).replace(/[^0-9]/g, '');
+    const note = noteSeg(noteTime);
+    return tc + (note ? '_' + note : '') + '.' + ext;
   }
   // 打点记录标题：优先取面板重命名过的自定义标题（mpp_titles custom），否则网页标题
   function titleForLog() {
@@ -2180,7 +2170,7 @@
     annShowTC = s.annotateTimecode === true;
     const shotT = dispTime();
     annTC = fmtTC(shotT, true);
-    // 命名与直接截图（S 键）完全一致：标题_时间码备注_时间.png
+    // 命名与直接截图（S 键）完全一致：HHMMSSFF_备注.png
     annFileName = buildFileName(fmtTCPlainF(shotT), shotT, 'png');
     annBuild();
   }
