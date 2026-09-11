@@ -936,11 +936,22 @@
     }
     return '';
   }
-  function noteFileName(t) {
+  // 备注段（不含分隔下划线）：用于「时间码 + 备注」拼接——有备注时备注紧跟时间码
+  // 注意 noteSeg 的入参是「时间码对应的时刻」：时间码与备注必须取自同一时刻，
+  // 否则会出现文件名里的时间码与备注对不上的情况
+  function noteSeg(t) {
     const n = noteForFile(t);
     if (!n) return '';
     const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
-    return clean ? clean.slice(0, 30) + '_' : '';
+    return clean ? clean.slice(0, 30) : '';
+  }
+  // 统一文件命名：前缀_标题_时间码备注_时间.ext
+  // - tcPlain：时间码（HH-MM-SS-FF 或 紧凑数字）
+  // - noteTime：与时间码对应的时刻（截图 = 当前时刻；录制 = 入点时刻），
+  //   备注就取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
+  // - 无备注时退化为：前缀_标题_时间码_时间.ext
+  function buildFileName(prefix, tcPlain, noteTime, ext) {
+    return prefix + titleForFile() + tcPlain + noteSeg(noteTime) + '_' + fmtNow() + '.' + ext;
   }
   // 标题进入文件名（可开关）：取完整网页标题清洗非法字符并截断 24 字
   function titleForFile() {
@@ -976,7 +987,9 @@
             mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true);
           });
         } else {
-          downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
+          // 时间码与备注取自同一时刻（避免文件名内两者对不上）
+          const t = dispTime();
+          downloadBlob(b, buildFileName('SCS_', fmtTCPlainF(t), t, 'png'));
           // S 键：下载并复制
           annCopyBlob(b).then(ok => {
             mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
@@ -1004,10 +1017,10 @@
       c.toBlob(cb, 'image/png');
     } catch (e) { cb(null); }
   }
-  // 保存打点截图：前缀统一 SCS；t 为打点时刻视频时间（备注匹配）
+  // 保存打点截图：前缀统一 SCS；t 为打点时刻（时间码与备注均取自该时刻，保持一致）
   function saveShotBlob(b, t, toast) {
     if (!b) { mgpToast('截图失败', true); return; }
-    downloadBlob(b, 'SCS_' + titleForFile() + noteFileName(t) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png');
+    downloadBlob(b, buildFileName('SCS_', fmtTCPlainF(t), t, 'png'));
     if (toast) mgpToast(toast, true);
   }
 
@@ -1624,9 +1637,9 @@
     if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; return; }
     const isMp4 = /^video\/mp4/.test(mimeType);
     const ext = isMp4 ? 'mp4' : 'webm';
-    // 从入点开始录制时用入点备注，否则用出点时刻的备注
-    const recNote = noteFileName(state.recordingStart || 0) || (recStopTime != null ? noteFileName(recStopTime) : '');
-    const name = 'REC_' + titleForFile() + recNote + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.' + ext;
+    // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
+    // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
+    const name = buildFileName('REC_', fmtTCPlainF(state.recordingStart || 0), state.recordingStart || 0, ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -1694,11 +1707,13 @@
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
     saveState();
     mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )', true);
-    // 保存最后一次 I 键时暂存的入点截图（记录已写入，备注可匹配）；文件名时间码用入点时刻
+    // 保存最后一次 I 键时暂存的入点截图（记录已写入，备注可匹配）；
+    // 时间码与备注均取入点时刻，保证文件名内两者一致
     if (autoShot() && pendingShot) {
       const ps = pendingShot; pendingShot = null;
       if (ps.blob) {
-        downloadBlob(ps.blob, 'SCS_' + titleForFile() + noteFileName(state.inPoint) + ps.tcPlain + '_' + fmtNow() + '.png');
+        const inT = state.inPoint != null ? state.inPoint : 0;
+        downloadBlob(ps.blob, buildFileName('SCS_', fmtTCPlainF(inT), inT, 'png'));
         mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's ) · 已截图', true);
       }
     }
@@ -2148,9 +2163,10 @@
     // 嵌入时间码：读取设置（background 推送的完整设置），进入时捕获当前画面时间码
     const s = window.__mgpSettings || {};
     annShowTC = s.annotateTimecode === true;
-    annTC = fmtTC(dispTime(), true);
-    // 命名与直接截图（S 键）完全一致：SCS_标题_备注_时间码_时间.png
-    annFileName = 'SCS_' + titleForFile() + noteFileName(video.currentTime) + fmtTCPlainF(dispTime()) + '_' + fmtNow() + '.png';
+    const shotT = dispTime();
+    annTC = fmtTC(shotT, true);
+    // 命名与直接截图（S 键）完全一致：SCS_标题_时间码备注_时间.png
+    annFileName = buildFileName('SCS_', fmtTCPlainF(shotT), shotT, 'png');
     annBuild();
   }
 
