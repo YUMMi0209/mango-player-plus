@@ -1923,8 +1923,7 @@
     state.tcMode = 'mk'; saveState();
     insertSorted(logs.marks, { time: t, tc: fmtTC(t), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
     saveLogs();
-    const c = fmtTC(t, true).replace(/:/g, '');
-    navigator.clipboard.writeText(c).catch(()=>{});
+    // 不自动复制时间码（避免覆盖用户剪贴板；需要时点击控制栏时间码或面板记录行复制）
     mgpToast('已标记 ( ' + fmtTC(t) + ' )', true);
     // 打点自动截图：M 打点立即保存
     if (autoShot()) {
@@ -2140,7 +2139,8 @@
     if (annTextInput) annTextInput.hidden = true;
   }
 
-  // 保存（下载带标注的 PNG，同时自动复制到剪贴板）或取消（关闭窗口）
+  // 保存（仅下载带标注的 PNG，不自动复制）或取消（关闭窗口）
+  // 需要复制时在窗口内按 C / Ctrl+C（手动复制入口保留）
   function annClose(save) {
     if (save && annCanvas && annSource) {
       // 捕获文件名到局部变量：toBlob 异步回调执行时 annFileName 已被下方清理
@@ -2151,12 +2151,7 @@
         annCanvas.toBlob(b => {
           if (!b) { mgpToast('保存失败', true); return; }
           downloadBlob(b, fname);
-          // 保存的同时自动复制截图：直接复用本回调生成的 blob。
-          // 注意不能调用 annCopyToClipboard()——toBlob 异步回调执行时窗口已关闭，
-          // annCanvas/annSource 已被下方清理置空，空检查会直接判失败
-          annCopyBlob(b).then(ok => {
-            try { mgpToast(ok ? '标注截图已保存 · 已复制' : '标注截图已保存（复制失败）', true); } catch (err) { }
-          });
+          try { mgpToast('标注截图已保存', true); } catch (err) { }
         }, 'image/png');
       } catch (e) { mgpToast('保存失败: 内容保护', true); }
     }
