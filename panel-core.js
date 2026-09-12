@@ -1411,7 +1411,7 @@ const MPP = (() => {
       const totalPts = cands.reduce((a, c) => a + c.marks.length, 0);
       m.innerHTML =
         '<div class="mpp-modal wide qc-modal">' +
-          '<div class="qc-title">导入质检表</div>' +
+          '<div class="qc-title">导入记录</div>' +
           (names ? '<div class="qc-file" title="' + esc(names) + '">' + esc(names) + '</div>' : '') +
           // ① AI 导入（优先）：格式再杂也能用
           '<div class="qc-step">① 复制提示词发给 AI，结果粘贴到这里（推荐）</div>' +
@@ -1625,7 +1625,7 @@ const MPP = (() => {
       cands: [],
       sheets: [],
       meta: meta,
-      hint: '点「复制提示词」把质检表交给任意 AI 工具（表格可直接上传，或贴截图 / 文本），再把 AI 输出的清单粘贴到下面即可导入。'
+      hint: '点「复制提示词」把表格交给任意 AI 工具（表格可直接上传，或贴截图 / 文本），再把 AI 输出的清单粘贴到下面即可导入。'
     });
     if (!pick) return false;
     return applyQcPick(pick, meta);
@@ -1638,7 +1638,7 @@ const MPP = (() => {
   function aiPrompt(sheet) {
     const base = (window.QcImport && typeof QcImport.buildPrompt === 'function')
       ? QcImport.buildPrompt()
-      : '请把质检表整理成每行「时间码 + 空格 + 项目说明」的纯文本，时间码写成规范格式。';
+      : '请把表格整理成每行「时间码 + 空格 + 项目说明」的纯文本，时间码写成规范格式。';
     if (!sheet) return base;
     return '请只整理这个工作表：「' + sheet + '」，其它工作表不用管。\n\n' + base;
   }
@@ -1684,7 +1684,7 @@ const MPP = (() => {
       if (!n && window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: data.sheets || [] });
     }
     if (!filesOk && !qcFiles.length) {
-      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与质检表）');
+      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与记录表格）');
       return;
     }
     if (!recs.length) {
@@ -1694,7 +1694,7 @@ const MPP = (() => {
         load(true);
         return;
       }
-      panelToast('Excel 中没有可导入的记录（质检表可点「AI 导入」转换后粘贴）');
+      panelToast('Excel 中没有可导入的记录（可点「AI 导入」用提示词转换后粘贴）');
       return;
     }
     // 页面校准帧率：时间码换算与导出时保持一致（FPS≠25 时避免秒数偏移）
