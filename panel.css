@@ -155,8 +155,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 :root[data-theme="light"] .mpp-modal-actions .danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 
 /* ─── 面板轻提示（导入 / 删除 / 导出等操作反馈）── */
-#mpp-toast{position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(10px);max-width:calc(100% - 32px);background:var(--card);border:1px solid var(--card-brd);color:var(--text);font-size:12px;line-height:1.5;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120}
-#mpp-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#mpp-toast{position:fixed;left:0;right:0;bottom:64px;margin:0 auto;width:fit-content;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--card-brd);color:var(--text);font-size:12px;line-height:1.5;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);text-align:center;box-sizing:border-box;transform:translateY(10px);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120}
+#mpp-toast.show{opacity:1;transform:translateY(0)}
 
 /* ─── 选项卡（popup 左右模式，两页签等宽，卡带机按键）── */
 /* 顶部留白：header 虚线（磁带条纹）下方保持间距，与底部一致 */

@@ -1760,7 +1760,10 @@
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.id = 'mgp-toast-ext';
-      toastEl.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:2147483647;padding:8px 20px;background:rgba(0,0,0,.85);color:#fff;border:1px solid #ff5f00;border-radius:4px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .3s;font-family:"PingFang SC","Microsoft YaHei",sans-serif;';
+      // 居中方式用 left/right:0 + margin:auto + width:fit-content：
+      // 旧的 left:50% + translateX(-50%) 会让「自动宽度」的可分配空间只剩半屏，
+      // 稍长的提示（批量进度等）提前折行、看起来显示不全
+      toastEl.style.cssText = 'position:fixed;bottom:80px;left:0;right:0;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;z-index:2147483647;padding:8px 20px;background:rgba(0,0,0,.85);color:#fff;border:1px solid #ff5f00;border-radius:4px;font-size:13px;line-height:1.5;pointer-events:none;opacity:0;transition:opacity .3s;font-family:"PingFang SC","Microsoft YaHei",sans-serif;';
       document.body.appendChild(toastEl);
     } else if (toastEl.parentElement) {
       // 重新挂到 body 末尾：标注窗口等后插入的 fixed 元素 z-index 与 toast 相同（2147483647）
