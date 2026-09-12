@@ -911,6 +911,13 @@ const MPP = (() => {
       execInPage(fnBatchBusy, []).then(busy => { if (!busy) batchEnded(isShot, null); }).catch(() => { });
     }, 1000);
   }
+  // 是否有「可见的」弹窗：确认弹窗元素常驻 DOM（关闭只是 hidden=true），
+  // 必须过滤掉不可见元素——否则用过一次确认弹窗后，批量快捷键会永远被拦住
+  function isDialogOpen() {
+    const masks = document.querySelectorAll('.mpp-mask');
+    for (let i = 0; i < masks.length; i++) if (!masks[i].hidden) return true;
+    return false;
+  }
   // 是否正在文本输入：只有文本类输入框 / 文本域 / 可编辑区域才让出快捷键。
   // 复选框、单选框（记录行勾选框）获得焦点时 S / R / Esc 仍应生效
   function isTextEntry(el) {
@@ -938,7 +945,7 @@ const MPP = (() => {
       }
       const k = String(e.key || '').toLowerCase();
       if (k !== 's' && k !== 'r') return;
-      if (document.querySelector('.mpp-mask')) return;   // 有弹窗打开时不触发批量快捷键
+      if (isDialogOpen()) return;   // 有可见弹窗时不触发批量快捷键
       const isShot = k === 's';
       // 批量截图只对标记点生效；批量录制只对片段生效（另一类勾选不参与）
       const kindName = isShot ? '标记点' : '片段';

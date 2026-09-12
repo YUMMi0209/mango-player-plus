@@ -1113,11 +1113,16 @@
       let idx = 0;            // 已输出帧数（诊断用）
       let nextTsUs = 0;       // 下一帧时间戳（累加式，帧率变化不跳变）
       let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
-      let drops = 0;          // 背压丢拍计数（诊断）
+      let drops = 0;          // 丢拍计数（诊断）
       let ticks = 0;          // 节拍总数（丢拍率 = drops / ticks）
+      let writes = 0;         // 成功提交给编码器的帧数（诊断）
+      let writeFails = 0;     // 提交失败次数（诊断）
+      let inflight = 0;       // 已提交但还没被编码器收走的帧数
+      let overBp = 0;         // 连续「队列已满」次数
+      const MAX_INFLIGHT = 4; // 允许的排队深度
       let stopped = false;
       let tickTimer = null;
-      // 输入侧：持续读取，只保留最新帧（canvas 2× 采样节奏，读取远快于输出节拍）
+      // 输入侧：持续读取，只保留最新帧
       (async () => {
         try {
           while (!stopped) {
@@ -1131,7 +1136,9 @@
         } catch (e) { /* reader 取消 / 轨道停止 */ }
       })();
       // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍。
-      // 背压（编码器消费不及时）只丢这一拍，绝不挂起循环
+      // 丢拍策略：**只有持续积压才丢**（连续 3 拍队满，或自算在途帧数超上限）。
+      // 编码器轻微落后（队列偶满）不丢帧——否则源 25fps 会被丢成 ~15fps，
+      // 这正是"帧率不足"的主因；真正吃不住时仍会丢拍，只是不会无限积压。
       // 时间戳用「累加式」而不是 idx × 帧长：帧率档中途变化（自动降级）时，
       // 累加式只在后续间隔生效，不会像乘法那样产生 PTS 跳变——跳变会被播放器
       // 当成时间轴断裂，表现为花屏 / 卡顿
@@ -1139,14 +1146,20 @@
         if (stopped || recPaused) return;
         ticks++;
         if (!latest) return;
-        const out = new VideoFrame(latest, { timestamp: nextTsUs });
-        nextTsUs += frameDurUs;
-        if (writer.desiredSize != null && writer.desiredSize < 1) {
+        const bp = (writer.desiredSize != null && writer.desiredSize < 1);
+        overBp = bp ? overBp + 1 : 0;
+        if (overBp >= 3 || inflight >= MAX_INFLIGHT) {
           drops++;
-          try { out.close(); } catch (e) { }
+          nextTsUs += frameDurUs;   // 丢拍也要推进时间轴，保证文件时长与录制时长一致
           return;
         }
-        writer.write(out).catch(() => { try { out.close(); } catch (e) { } });
+        const out = new VideoFrame(latest, { timestamp: nextTsUs });
+        nextTsUs += frameDurUs;
+        inflight++;
+        writer.write(out).then(
+          () => { inflight--; writes++; },
+          () => { inflight--; writeFails++; try { out.close(); } catch (e) { } }
+        );
       };
       let tickMs = Math.max(4, Math.round(frameDurUs / 1000));
       tickTimer = setInterval(tick, tickMs);
@@ -1154,6 +1167,8 @@
         stream: outStream,
         dropCount() { return drops; },
         tickCount() { return ticks; },
+        writeCount() { return writes; },
+        writeFailCount() { return writeFails; },
         // 动态调整目标帧率（自动降级用）：重建节拍，时间戳网格同步切换
         setFps(f) {
           const nf = Math.max(15, Math.min(60, Math.round(f || 25)));
@@ -1241,7 +1256,11 @@
     recCanvas = document.createElement('canvas');
     recCanvas.width = recMaxW ? Math.min(video.videoWidth, recMaxW) : video.videoWidth;
     recCanvas.height = recMaxH ? Math.min(video.videoHeight, recMaxH) : video.videoHeight;
-    recCtx = recCanvas.getContext('2d');
+    // alpha:false（不透明）+ 显式 sRGB：
+    //   ① 不透明画布不会有 alpha 预乘 / 合成带来的颜色变化，编码器拿到的是纯 RGB；
+    //   ② 不透明画布在 Chromium 里走更快的合成路径，主线程开销更低（给编码器让 CPU）
+    recCtx = recCanvas.getContext('2d', { alpha: false, colorSpace: 'srgb', willReadFrequently: false });
+    if (recCtx) { try { recCtx.imageSmoothingQuality = 'medium'; } catch (e) { } }
     // 画布挂入文档（移出视口不可见）：部分 Chromium 版本对不在文档中的 canvas
     // captureStream 采样会停止产帧，导致录制只有首帧画面
     recCanvas.style.cssText = 'position:fixed;left:-99999px;top:0;pointer-events:none;';
@@ -1351,17 +1370,17 @@
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
     // 绘制驱动：requestAnimationFrame + 动态节拍。
-    // 目标绘制间隔 = max(rAF 间隔, 采样间隔/2)：绘制频率约 2×采样帧率即可保证
-    // 每次采样都采到最新画面（内容最多延迟半帧），同时不过度绘制——全尺寸
-    // drawImage 是主线程重负载（1080p 每帧约 8MB 像素拷贝），高频绘制会与软编
-    // 争抢 CPU 拖慢编码；rAF 间隔动态测量（兼容 60/120Hz 与主线程繁忙场景）
+    // 目标绘制间隔 ≈ 采样间隔 ×0.8（约 1.25× 采样帧率）：既能保证每次采样都拿到较新
+    // 画面，又不做无谓的重复绘制——全尺寸 drawImage（1080p 每帧约 8MB 像素搬运）是
+    // 主线程最大开销，绘制频率越低，留给编码器的 CPU 越多（此前按 2× 采样绘制，
+    // 25fps 源要画 50fps，CPU 被绘制吃掉后编码跟不上 → 丢帧成 ~15fps）
     let recRafLastTs = 0, recRafInterval = 16.7, recLastPaintTs = 0;
     paintRecFrame();
     const recRafLoop = ts => {
       if (!recordingInternal) return;
       if (recRafLastTs) recRafInterval = recRafInterval * 0.9 + (ts - recRafLastTs) * 0.1;
       recRafLastTs = ts;
-      const targetPaintMs = Math.max(recRafInterval, (1000 / capFps) / 2);
+      const targetPaintMs = Math.max(recRafInterval, (1000 / capFps) * 0.8);
       if (!recLastPaintTs || ts - recLastPaintTs >= targetPaintMs - 1) {
         recLastPaintTs = ts;
         paintRecFrame();
@@ -1414,6 +1433,9 @@
       // 节拍数 = pacer 实际尝试输出的帧数：与最终文件帧数对比可区分
       // 「pacer 未输出」与「MediaRecorder 内部丢帧（编码吞吐不足）」
       recDiag.pacerTicks = recPacer && typeof recPacer.tickCount === 'function' ? recPacer.tickCount() : -1;
+      // 实际提交给编码器的帧数 / 提交失败数：据此判断丢帧发生在 pacer 还是编码器
+      recDiag.pacerWrites = recPacer && typeof recPacer.writeCount === 'function' ? recPacer.writeCount() : -1;
+      recDiag.pacerWriteFails = recPacer && typeof recPacer.writeFailCount === 'function' ? recPacer.writeFailCount() : -1;
       recDiag.chunkBytes = recChunkBytes;
       recDiag.chunkCount = recChunks.length;
       recDiag.currentTime = video ? video.currentTime : -1;
@@ -1421,7 +1443,12 @@
 
     // 画面活性检测：视频在播放（currentTime 前进）但 canvas 内容持续无变化 →
     // 绘制已失效（drawImage 冻结 / video 渲染被接管），自动停止录制避免产出
-    // "画面定格"的废片。每 2s 采样画布 4 行像素哈希（分散采样防局部变化漏判）
+    // "画面定格"的废片。每 2s 采样一次。
+    // ⚠️ 采样走「缩到 64×36 的小画布再 getImageData」：直接对大画布 getImageData
+    // 会触发 GPU→CPU 回读，1080p 下每次都可能卡住主线程十几毫秒（丢帧元凶之一）
+    const probeCanvas = document.createElement('canvas');
+    probeCanvas.width = 64; probeCanvas.height = 36;
+    const probeCtx = probeCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
     recLastHash = null; recFreezeCount = 0; recLastCT = -1;
     recFreezeTimer = setInterval(() => {
       if (!recordingInternal) return;
@@ -1429,12 +1456,9 @@
       if (video.paused || video.readyState < 2) { recLastCT = video.currentTime; return; }
       let h = 0;
       try {
-        const w = recCanvas.width, hh = recCanvas.height;
-        const ys = [0, Math.floor(hh * 0.25), Math.floor(hh * 0.5), Math.floor(hh * 0.75)];
-        for (const y of ys) {
-          const d = recCtx.getImageData(0, y, Math.min(w, 320), 1).data;
-          for (let i = 0; i < d.length; i += 16) h = (h * 31 + d[i]) | 0;
-        }
+        probeCtx.drawImage(recCanvas, 0, 0, probeCanvas.width, probeCanvas.height);
+        const d = probeCtx.getImageData(0, 0, probeCanvas.width, probeCanvas.height).data;
+        for (let i = 0; i < d.length; i += 16) h = (h * 31 + d[i]) | 0;
       } catch (e) { recLastCT = video.currentTime; return; }   // 画布 tainted：无法采样，跳过
       const ct = video.currentTime;
       if (recLastHash !== null && h === recLastHash && ct > recLastCT) {

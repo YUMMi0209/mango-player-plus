@@ -457,6 +457,39 @@ H.264            （MP4，剪辑友好，跟随视频分辨率）
 
 ---
 
+### 录制出来的视频帧率偏低（如源 25fps 只有 15fps）？
+
+先看控制台 `[MGP-REC] saved {...}` 里的四个数：
+
+| 字段 | 含义 |
+| --- | --- |
+| `capFps` | 目标帧率（跟随源帧率） |
+| `pacerTicks` | 节拍器出的拍数（≈ 录制秒数 × capFps） |
+| `pacerDrops` | 节拍器丢拍数（持续积压才丢） |
+| `pacerWrites` | **实际提交给编码器的帧数** |
+
+- `pacerWrites ÷ 录制秒数` ≈ 文件的实际帧率
+- 若 `pacerDrops` 很小而帧率仍低 → 瓶颈在**编码器内部丢帧**：换更省 CPU 的档位（如「低分辨率 H.264」或 VP8）重录
+- 若 `pacerDrops` 很大 → 编码器长期吃不住，同样建议降档
+
+已做的优化：绘制频率降到约 1.25× 采样帧率、活性检测改为小画布回读（不再卡主线程）、节拍器只在**持续积压**时丢拍，把 CPU 尽量留给编码器。
+
+---
+
+### 录制出来的视频颜色和原片不一样？
+
+录制画布已改为**不透明 + 显式 sRGB**，排除了 alpha 合成带来的颜色差异。
+
+若仍有偏差，用 ffprobe 对比原片与录制文件的色彩元数据（把两条命令的输出发我即可定位）：
+
+```bash
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,color_range,color_space,color_transfer,color_primaries -of default=nw=1 "录制文件.webm"
+```
+
+常见结论：WebM 未写色彩范围（`color_range` 为空）时，部分播放器会按「全范围」解释，画面看起来发灰 / 发亮 —— 这种情况可以换 **H.264（MP4）** 档验证，MP4 会写入明确的 VUI 色彩信息。
+
+---
+
 ### 导出的 Excel 打不开？
 
 导出的文件为标准 `.xlsx` 格式。
