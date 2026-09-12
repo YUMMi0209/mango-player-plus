@@ -141,17 +141,6 @@
     if (!txt) return false;
     return /质检表|总时长|[（(]\s*\d+\s*分钟/.test(txt);
   }
-  // 是否含时间码
-  function hasTok(s) {
-    RUN_RE.lastIndex = 0;
-    if (RUN_RE.test(s)) return true;
-    CLOCK_RE.lastIndex = 0;
-    return CLOCK_RE.test(s);
-  }
-  function isLabelValue(v) {
-    const s = clean(v);
-    return !!s && s.length <= 16 && !NUMERIC_RE.test(s) && !hasTok(s);
-  }
   function sheetLayout(rows) {
     let firstTc = -1;
     for (let i = 0; i < rows.length; i++) if (countRowTokens(rows[i]) > 0) { firstTc = i; break; }
@@ -168,22 +157,7 @@
     const headers = headerRow.map(normHeader);
     let width = 0;
     rows.forEach(r => { if (r && r.length > width) width = r.length; });
-    // 可向下填充的标签列（分线 / 艺人 这类合并单元格）：位于表头行宽度内、
-    // 列内出现「不含时间码的短文本」（整列无纯数字）
-    const labelCols = [];
-    const headerWidth = Math.max(headerRow.length, 1);
-    for (let c = 0; c < Math.min(width, headerWidth); c++) {
-      if (SKIP_HEADERS.indexOf(headers[c]) >= 0) continue;   // 备注 / 秒数 等列不作为标签来源
-      let num = 0, txt = 0;
-      for (let i = (headerIdx >= 0 ? headerIdx + 1 : 0); i < rows.length; i++) {
-        const v = clean((rows[i] || [])[c]);
-        if (!v) continue;
-        if (NUMERIC_RE.test(v)) num++;
-        else if (isLabelValue(v)) txt++;
-      }
-      if (txt > 0 && num === 0) labelCols.push(c);
-    }
-    return { headerIdx, headers, labelCols, width };
+    return { headerIdx, headers, width };
   }
 
   // ─── 一行文本 → 时间码 + 归属的【品牌】/（说明）────────────────
@@ -287,15 +261,6 @@
       .filter(p => p && !/^[+—–~～\-—:：,，、]+$/.test(p))
       .join(' '));
   }
-  // 备注分类前缀：过长的表头（整句说明）不作为分类
-  function categoryOf(head) {
-    const h = clean(head);
-    if (!h || h.length > 6) return '';
-    if (SKIP_HEADERS.indexOf(h) >= 0) return '';
-    if (/时间码|链接|时长|秒数/.test(h)) return '';
-    return h;
-  }
-
   // ─── 导入前扫描：工作表 / 分节 / 时间码数量 ──────────────────
   function scan(sheets) {
     return (sheets || []).map(sh => {
@@ -350,17 +315,9 @@
     (sheets || []).forEach(sh => {
       const rows = sh.rows || [];
       const ctx = sheetLayout(rows);
-      const lastLabel = {};
       let count = 0;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i] || [];
-        // 标签列向下填充（合并单元格只有首行有值）；表头行本身不算标签值
-        if (i > ctx.headerIdx) {
-          ctx.labelCols.forEach(c => {
-            const v = row[c];
-            if (isLabelValue(v)) lastLabel[c] = clean(v);
-          });
-        }
         for (let col = 0; col < row.length; col++) {
           const cellRaw = cellText(row[col]);
           if (!cellRaw) continue;
@@ -377,28 +334,15 @@
               if (digitRuns + clockRuns > 0) unparsed += digitRuns + clockRuns;
               return;
             }
-            const head = clean(ctx.headers[col]);
-            const cat = categoryOf(head);
-            const labels = [];
-            ctx.labelCols.forEach(c => {
-              if (c === col) return;
-              const v = lastLabel[c];
-              if (v && labels.indexOf(v) < 0) labels.push(v);
-            });
             const vals = valueText(row, ctx, col);
             sp.items.forEach(item => {
               total++;
               if (duration > 0 && item.sec > duration + 2) { skippedOut++; return; }
-              const pieces = [];
-              const labelText = labels.join(' ');
-              if (cat) pieces.push(cat);
-              if (labelText) pieces.push(labelText);
-              if (sp.text) pieces.push(sp.text);
+              // 备注只写「对应项目」：单元格里紧跟时间码的说明 / 品牌（如 00295306趣多多空镜 → 趣多多空镜），
+              // 不写列分类、分线、艺人等额外信息；单元格里只有时间码时（露出表这类）退化为品牌 / 秒数
               const tags = (item.brands || []).concat(item.tails || []);
-              if (tags.length) pieces.push(tags.join('/'));
-              let note = tidy(pieces.join(' · '));
+              let note = tidy([sp.text, tags.join('/')].filter(Boolean).join(' '));
               if (!note) note = vals;
-              else if (vals) note = tidy(note + ' · ' + vals);
               note = clip(note, 80);
               const key = Math.round(item.sec * 100) / 100;
               const prev = byTime.get(key);
