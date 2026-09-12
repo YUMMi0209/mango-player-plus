@@ -170,6 +170,18 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-item .chk{flex-shrink:0}
 .mpp-modal-actions .mpp-ok{background:var(--orange-dk);border-color:var(--orange);color:var(--text);font-weight:600}
 .mpp-modal-actions .mpp-ok:hover{background:var(--orange);color:#fff}
+.mpp-modal-actions .mpp-ok:disabled{opacity:.45;cursor:not-allowed;background:var(--row);border-color:var(--card-brd);color:var(--muted)}
+
+/* ─── AI 导入弹窗 ─── */
+.ai-bar{display:flex;gap:8px;margin-bottom:8px}
+.ai-bar button{height:26px;padding:0 12px;border-radius:7px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
+.ai-bar button:hover{border-color:var(--orange);color:var(--orange)}
+.ai-prompt,.ai-input{width:100%;box-sizing:border-box;background:var(--row);border:1px solid var(--card-brd);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.5;padding:8px;outline:none;resize:vertical}
+.ai-prompt{height:150px;margin-bottom:8px}
+.ai-input{height:120px;margin-bottom:8px;white-space:pre}
+.ai-prompt:focus,.ai-input:focus{border-color:var(--orange)}
+.ai-status{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:10px;word-break:break-all;min-height:16px}
+.ai-mode{margin-top:-4px}
 
 /* ─── 面板轻提示（导入 / 删除 / 导出等操作反馈）── */
 #mpp-toast{position:fixed;left:0;right:0;bottom:64px;margin:0 auto;width:fit-content;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--card-brd);color:var(--text);font-size:12px;line-height:1.5;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);text-align:center;box-sizing:border-box;transform:translateY(10px);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120}

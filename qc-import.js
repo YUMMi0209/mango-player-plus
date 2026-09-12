@@ -366,5 +366,94 @@
     };
   }
 
-  return { parse, scan, detectMode, _internal: { clean, sheetLayout, splitLine, valueText, runToSec, clockToSec } };
+  // ─── AI 提示词 + 文本结果导入 ────────────────────────────
+  // 质检表版本多、格式杂：给出提示词，用户把「质检表 + 提示词」交给第三方 AI，
+  // 再把 AI 输出的纯文本粘贴回来，走同一套解析（时间码识别 / 备注 / 时长过滤）
+  function buildPrompt() {
+    return [
+      '我在整理视频质检表，请只做「时间码 → 项目说明」的提取，按下面格式输出。',
+      '',
+      '要求：',
+      '1. 逐条提取表中出现的每一个时间码，每条一行；',
+      '2. 每行格式：原表时间码 + 空格 + 该时间码对应的项目说明；',
+      '3. 时间码照抄原表，不要换算、不要补零、不要换成别的格式（原表写 011218 就写 011218，写 00:07:10:21 就写 00:07:10:21）；',
+      '4. 项目说明只写这个时间码对应的内容，例如「趣多多空镜」「阿维塔主持人口播」；不要写列名（植入 / 包装 / 空镜 / 其他）、不要写分线（P1 / P2）、不要写艺人姓名；若该条只有品牌与秒数，就写「品牌 秒数」（如「阿维塔 4s」）；',
+      '5. 一个单元格里有多个时间码时，每个时间码各占一行，把它自己的说明写在自己那行；',
+      '6. 按时间先后排序；',
+      '7. 只输出这些行（纯文本），不要表头、标题、合计、解释说明，也不要 markdown 表格或代码块。',
+      '',
+      '输出示例：',
+      '000000 片头',
+      '011218 解字空1 阿维塔',
+      '101920 阿维塔主持人口播',
+      '00:07:10:21 京东空镜①',
+      '064718 阿维塔 4s'
+    ].join('\n');
+  }
+  // AI 有时会直接返回 JSON：容错取出数组
+  function asJsonArray(text) {
+    const s = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+    if (!s || (s[0] !== '[' && s[0] !== '{')) return null;
+    const pick = v => {
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === 'object') {
+        const keys = ['marks', 'records', 'items', 'list', 'data', 'result', 'results', '标记点', '记录'];
+        for (let i = 0; i < keys.length; i++) if (Array.isArray(v[keys[i]])) return v[keys[i]];
+      }
+      return null;
+    };
+    let v = null;
+    try { v = JSON.parse(s); } catch (e) { v = null; }
+    if (v) { const a = pick(v); if (a) return a; }
+    // 前后夹了说明文字：截取最外层括号再试一次
+    const m = s.match(/[[{][\s\S]*[\]}]/);
+    if (m) {
+      try { const a = pick(JSON.parse(m[0])); if (a) return a; } catch (e) { }
+    }
+    return null;
+  }
+  const PICK = (o, keys) => {
+    for (let i = 0; i < keys.length; i++) {
+      const v = o[keys[i]];
+      if (v != null && v !== '') return v;
+    }
+    return null;
+  };
+  // AI 结果文本 → 标记点（与质检表解析同一套时间码 / 备注规则）
+  function parseText(text, opts) {
+    opts = opts || {};
+    const lines = [];
+    const arr = asJsonArray(text);
+    if (arr) {
+      arr.forEach(o => {
+        if (o == null) return;
+        if (typeof o === 'string' || typeof o === 'number') { lines.push(String(o)); return; }
+        const t = PICK(o, ['time', 'tc', 'timecode', 'start', '时间码', '时间']);
+        const n = PICK(o, ['note', 'desc', 'description', 'text', 'label', '备注', '说明', '项目']);
+        if (t == null) return;
+        lines.push(String(t) + (n ? ' ' + String(n) : ''));
+      });
+    }
+    if (!lines.length) {
+      String(text == null ? '' : text).split(/\r?\n/).forEach(l => {
+        let s = l.trim();
+        if (!s || /^```/.test(s)) return;                    // 空行 / 代码块围栏
+        s = s.replace(/^\s*[-*•·]\s+/, '');                  // 列表符号
+        s = s.replace(/^\s*\d+\s*[.、)）]\s+/, '');           // 序号
+        s = s.replace(/^\s*[|｜]/, '').replace(/[|｜]\s*$/, '');   // markdown 表格首尾竖线
+        s = s.replace(/\s*[|｜]\s*/g, ' ').trim();            // 表格列分隔
+        if (!s) return;
+        lines.push(s);
+      });
+    }
+    if (!lines.length) return { marks: [], mode: 'hhmmss', total: 0, skippedOut: 0, unparsed: 0, has6: false, lines: 0 };
+    const r = parse([{ name: 'AI', rows: lines.map(l => [l]) }], opts);
+    r.lines = lines.length;
+    return r;
+  }
+
+  return {
+    parse, scan, detectMode, parseText, buildPrompt,
+    _internal: { clean, sheetLayout, splitLine, valueText, runToSec, clockToSec, asJsonArray }
+  };
 });
