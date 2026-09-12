@@ -1110,7 +1110,6 @@ const MPP = (() => {
     const ioIdx = [...sel.io].sort((a, b) => a - b);
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     if (!ioIdx.length && !mkIdx.length) return;
-    const settings = await getSettings();
     // v2.0：备注字段位于链接之前，标题位于链接之后
     const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
     ioIdx.forEach((i, n) => {
@@ -1126,32 +1125,34 @@ const MPP = (() => {
     const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = fileName(settings);
+    a.href = url; a.download = fileName();
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     panelToast('已导出记录');
   }
 
-  // 导出文件命名：【标题_时间码_备注】——与截图 / 录制规则一致
-  // （无备注时为「标题_时间码」；无保存时间戳与类型前缀）；
-  // 时间码与备注取自同一条记录（首条选中项），标题取该记录标题 / 面板标题
+  // 导出文件命名：【标题_日志记录_导出时间】
+  // 日志导出不写记录的时间码与备注（备注只存在于表格内容里）；
+  // 标题取首条选中记录的标题 / 面板标题；导出时间为本地时间 YYYYMMDDHHMMSS
   function sanitizeName(s) {
     return String(s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
   }
-  function fileName(s) {
+  function stampNow(d) {
+    const p = n => String(n).padStart(2, '0');
+    const t = d || new Date();
+    return String(t.getFullYear()) + p(t.getMonth() + 1) + p(t.getDate())
+      + p(t.getHours()) + p(t.getMinutes()) + p(t.getSeconds());
+  }
+  function fileName() {
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     const ioIdx = [...sel.io].sort((a, b) => a - b);
-    let rec, tc;
-    if (mkIdx.length) { rec = logs.marks[mkIdx[0]]; tc = rec.tc; }
-    else if (ioIdx.length) { rec = logs.inOut[ioIdx[0]]; tc = rec.inTC; }
-    else return '芒着拉片日志.xlsx';
+    let rec = null;
+    if (mkIdx.length) rec = logs.marks[mkIdx[0]];
+    else if (ioIdx.length) rec = logs.inOut[ioIdx[0]];
     const fallback = els.pageTitle ? (els.pageTitle.textContent || '') : '';
-    const title = sanitizeName(rec.title || fallback || '').replace(/\s+/g, '_').slice(0, 24);
-    const note = (s.noteFileName !== false && rec.note)
-      ? sanitizeName(rec.note).replace(/\s+/g, '_').slice(0, 30)
-      : '';
-    return (title ? title + '_' : '') + String(tc).replace(/[^0-9]/g, '') + (note ? '_' + note : '') + '.xlsx';
+    const title = sanitizeName((rec && rec.title) || fallback || '').replace(/\s+/g, '_').slice(0, 24);
+    return (title ? title + '_' : '') + '日志记录_' + stampNow() + '.xlsx';
   }
 
   // ─── 显示模式切换（弹窗 / 侧边栏 / 独立窗口）────
