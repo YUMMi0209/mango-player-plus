@@ -151,6 +151,24 @@ const MPP = (() => {
     } catch (e) { }
     return null;
   }
+  // 取消批量任务（面板窗口按 Esc 时调用；页面焦点下由页面自身监听 Esc）
+  function fnBatchCancel() {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.batchCancel === 'function') {
+        return window.__mgpAPI.batchCancel() === true;
+      }
+    } catch (e) { }
+    return false;
+  }
+  // 页面端是否仍有批量任务在跑（面板据此判断任务是否结束）
+  function fnBatchBusy() {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.batchBusy === 'function') {
+        return window.__mgpAPI.batchBusy() === true;
+      }
+    } catch (e) { }
+    return false;
+  }
   function fnSetMarkColor(idx, color) {
     function vkey() {
       if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
@@ -780,11 +798,41 @@ const MPP = (() => {
   }
 
   // ─── 批量截图 / 录制：焦点在面板时按 S / R，对勾选的记录依次执行 ───
+  let batchActive = false;   // 批量任务进行中（进行时面板内按 Esc 取消）
+  let batchPoll = null;
+  // 任务是否结束：优先用 batchRun 的返回结果，兜底轮询页面端 batchBusy
+  // （executeScript 对 Promise 返回值是否等待由浏览器决定，轮询保证状态一定收敛）
+  function batchEnded(isShot, r) {
+    if (!batchActive) return;
+    batchActive = false;
+    if (batchPoll) { clearInterval(batchPoll); batchPoll = null; }
+    if (r && r.reason === 'cancelled') {
+      panelToast('已取消批量' + (isShot ? '截图' : '录制') + '（已完成 ' + (r.done || 0) + ' 条）');
+    }
+  }
+  function startBatchWatch(isShot) {
+    if (batchPoll) { clearInterval(batchPoll); batchPoll = null; }
+    const startedAt = Date.now();
+    batchPoll = setInterval(() => {
+      // 起始 1.2s 内不判空：注入尚未落地时页面端 batchRunning 仍是 false
+      if (Date.now() - startedAt < 1200) return;
+      execInPage(fnBatchBusy, []).then(busy => { if (!busy) batchEnded(isShot, null); }).catch(() => { });
+    }, 1000);
+  }
   function bindBatchKeys() {
     document.addEventListener('keydown', e => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;   // 放行浏览器组合键
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // 批量任务进行中：Esc 取消（焦点在面板窗口时页面收不到 Esc）
+      if (e.key === 'Escape') {
+        if (!batchActive) return;
+        e.preventDefault();
+        execInPage(fnBatchCancel, []).then(ok => {
+          if (ok) panelToast('正在取消批量任务…');
+        }).catch(() => { });
+        return;
+      }
       const k = String(e.key || '').toLowerCase();
       if (k !== 's' && k !== 'r') return;
       const ioIdx = [...sel.io].sort((a, b) => a - b);
@@ -801,10 +849,18 @@ const MPP = (() => {
         ioIdx.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
         items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
         if (!items.length) { panelToast('选中的记录没有可用时间码'); return; }
-        panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）');
-        execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).catch(() => { });
+        panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）· 按 Esc 取消');
+        batchActive = true;
+        startBatchWatch(isShot);
+        execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).then(r => {
+          if (r && (r.ok === true || r.ok === false)) batchEnded(isShot, r);
+        }).catch(() => { });
       });
     });
+    // 面板重新打开时：页面端可能仍在跑批量任务，同步一次状态，使 Esc 仍可取消
+    execInPage(fnBatchBusy, []).then(busy => {
+      if (busy && !batchActive) { batchActive = true; startBatchWatch(false); }
+    }).catch(() => { });
   }
 
   // ─── 列表交互 ───────────────────────────────
