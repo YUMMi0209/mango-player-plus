@@ -1311,7 +1311,7 @@ const MPP = (() => {
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = Math.floor(t % 60);
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
   }
-  const QC_MODE_NAME = { auto: '自动', mmssff: '分:秒:帧', hhmmss: '时:分:秒' };
+  const QC_MODE_HINT = { hhmmssff: 'HHMMSSFF 时:分:秒:帧', mmssff: 'MMSSFF 分:秒:帧', hhmmss: 'HHMMSS 时:分:秒', mmss: 'MMSS 分:秒' };
 
   // ─── 质检表导入弹窗 ─────────────────────────────────────
   // 拖入质检表后弹出：上半部分勾选自动识别到的工作表 / 分节，下半部分提供 AI 提示词与
@@ -1337,37 +1337,40 @@ const MPP = (() => {
           '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
       }).join('');
       const names = (ctx.names || []).join('、');
+      const modeOpts = [
+        '<option value="auto">自动（' + (QC_MODE_HINT[autoMode] || QC_MODE_HINT.hhmmss) + '）</option>',
+        '<option value="hhmmssff">HHMMSSFF（时:分:秒:帧）</option>',
+        '<option value="mmssff">MMSSFF（分:秒:帧）</option>',
+        '<option value="hhmmss">HHMMSS（时:分:秒）</option>',
+        '<option value="mmss">MMSS（分:秒）</option>'
+      ].join('');
       m.innerHTML =
         '<div class="mpp-modal wide">' +
           '<div class="mpp-modal-title">导入质检表</div>' +
           '<div class="qc-sub">' + (names ? esc(names) + ' · ' : '') + '按标记点导入到<strong>当前视频</strong>的日志记录</div>' +
-          (cands.length
-            ? '<div class="qc-block qc-sheets">' +
-                '<div class="qc-head"><span class="qc-step">① 自动识别结果</span>' +
-                  '<label class="qc-all"><input type="checkbox" class="chk" checked>全选</label>' +
-                  '<span class="qc-total"></span></div>' +
-                '<div class="qc-list">' + items + '</div>' +
-              '</div>'
-            : '<div class="qc-none">未自动识别到时间码，请用下面的 AI 方式转换后粘贴。</div>') +
+          // ① AI 导入（优先）：格式再杂也能用
           '<div class="qc-block">' +
-            '<div class="qc-head"><span class="qc-step">' + (cands.length ? '② ' : '') + '格式没识别全？交给 AI 转换后粘贴</span></div>' +
-            '<div class="qc-sub">点「复制提示词」，把提示词连同质检表一起给任意 AI 工具，再把 AI 输出的清单粘贴到下面（粘贴后导入的是粘贴内容）。</div>' +
+            '<div class="qc-head"><span class="qc-step">① 交给 AI 转换后粘贴（推荐）</span></div>' +
+            '<div class="qc-sub">点「复制提示词」，把提示词连同质检表一起给任意 AI 工具，再把 AI 输出的清单粘贴到下面；粘贴成功后即导入粘贴内容。</div>' +
             '<div class="ai-bar">' +
               '<button type="button" class="ai-copy">复制提示词</button>' +
               '<button type="button" class="ai-show">查看提示词</button>' +
             '</div>' +
             '<textarea class="ai-prompt" readonly hidden></textarea>' +
-            '<textarea class="ai-input" spellcheck="false" placeholder="在此粘贴 AI 输出的清单，例如：&#10;00295306 趣多多空镜&#10;00:07:10:21 京东空镜①"></textarea>' +
+            '<textarea class="ai-input" spellcheck="false" placeholder="在此粘贴 AI 输出的清单，例如：&#10;00:10:19:20 阿维塔 主持人口播&#10;00:07:10:21 京东健康 空镜"></textarea>' +
             '<div class="ai-status"></div>' +
           '</div>' +
-          (showMode
-            ? '<div class="qc-mode">时间码读法' +
-                '<select class="set-select qc-mode-sel">' +
-                  '<option value="auto">自动（' + QC_MODE_NAME[autoMode === 'mmssff' ? 'mmssff' : 'hhmmss'] + '）</option>' +
-                  '<option value="mmssff">分:秒:帧</option>' +
-                  '<option value="hhmmss">时:分:秒</option>' +
-                '</select></div>'
-            : '') +
+          // ② 自动识别结果（未粘贴时按勾选导入）
+          (cands.length
+            ? '<div class="qc-block qc-sheets">' +
+                '<div class="qc-head"><span class="qc-step">② 或按自动识别结果导入</span>' +
+                  '<label class="qc-all"><input type="checkbox" class="chk" checked>全选</label>' +
+                  '<span class="qc-total"></span></div>' +
+                '<div class="qc-list">' + items + '</div>' +
+              '</div>'
+            : '<div class="qc-none">未自动识别到时间码，请用上面的 AI 方式转换后粘贴。</div>') +
+          '<div class="qc-mode">时间码读法' +
+            '<select class="set-select qc-mode-sel">' + modeOpts + '</select></div>' +
           '<div class="mpp-modal-actions">' +
             '<button type="button" class="mpp-cancel">取消</button>' +
             '<button type="button" class="mpp-ok">导入</button>' +
@@ -1405,7 +1408,7 @@ const MPP = (() => {
           if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
         }
         if (modeSel && pasted) {
-          modeSel.options[0].textContent = '自动（' + (pasted.mode === 'mmssff' ? '分:秒:帧' : '时:分:秒') + '）';
+          modeSel.options[0].textContent = '自动（' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + '）';
         }
         if (hasPaste) {
           const preview = pasted.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
@@ -1429,8 +1432,9 @@ const MPP = (() => {
       input.addEventListener('input', refresh);
       input.addEventListener('keydown', e => e.stopPropagation());
       if (modeSel) modeSel.addEventListener('change', refresh);
-      m.querySelector('.ai-show').addEventListener('click', () => {
+      m.querySelector('.ai-show').addEventListener('click', e => {
         promptEl.hidden = !promptEl.hidden;
+        e.currentTarget.textContent = promptEl.hidden ? '查看提示词' : '隐藏提示词';
         if (!promptEl.hidden) { promptEl.focus(); promptEl.select(); }
       });
       m.querySelector('.ai-copy').addEventListener('click', () => {
@@ -1454,7 +1458,12 @@ const MPP = (() => {
       const onKey = e => {
         if (e.key !== 'Escape') return;
         e.preventDefault();
-        if (!promptEl.hidden) { promptEl.hidden = true; return; }
+        if (!promptEl.hidden) {
+          promptEl.hidden = true;
+          const btn = m.querySelector('.ai-show');
+          if (btn) btn.textContent = '查看提示词';
+          return;
+        }
         finish(null);
       };
       const ok = () => {

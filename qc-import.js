@@ -67,14 +67,31 @@
     if (m > 59 || s > 59 || f > 99) return null;
     return { sec: h * 3600 + m * 60 + s + f / fps, strict: f < fps };
   }
+  // 时间码读法（用户可指定）：把「表里用的格式」映射到 6 位数字的读法
+  //   HHMMSSFF → 6 位按 时:分:秒（丢帧的写法）
+  //   MMSSFF   → 6 位按 分:秒:帧
+  //   HHMMSS   → 6 位按 时:分:秒
+  //   MMSS     → 6 位按 分:秒:帧（其 6 位兄弟写法）
+  // 8 位固定按 时:分:秒:帧、4 位固定按 分:秒，与读法无关
+  const DIGITS6_MODE = { hhmmssff: 'hhmmss', hhmmss: 'hhmmss', mmssff: 'mmssff', mmss: 'mmssff' };
+  const MODE_NAMES = { auto: '自动', hhmmssff: 'HHMMSSFF', mmssff: 'MMSSFF', hhmmss: 'HHMMSS', mmss: 'MMSS' };
+  const MODE_HINTS = {
+    hhmmssff: '时:分:秒:帧',
+    mmssff: '分:秒:帧',
+    hhmmss: '时:分:秒',
+    mmss: '分:秒'
+  };
+  function modeDigits6(mode) { return DIGITS6_MODE[mode] || mode; }
+
   // 数字串 → 秒；9 位按 1+8 / 8+1 取合法切分，7 位按 1+6 / 6+1
   function runToSec(run, mode, fps) {
     const L = run.length;
+    const d6 = modeDigits6(mode);
     const out = [];
     if (L === 5) {
       if (run === '00000') out.push({ sec: 0, strict: true });   // 手写的 0 时刻
     } else if (L === 6) {
-      const v = digits6ToSec(run, mode, fps);
+      const v = digits6ToSec(run, d6, fps);
       if (v != null) out.push({ sec: v, strict: true });
     } else if (L === 8) {
       const v = digits8ToSec(run, fps);
@@ -85,9 +102,9 @@
       const b = digits8ToSec(run.slice(0, 8), fps);
       if (b) out.push(b);
     } else if (L === 7) {
-      const a = digits6ToSec(run.slice(1), mode, fps);
+      const a = digits6ToSec(run.slice(1), d6, fps);
       if (a != null) out.push({ sec: a, strict: true });
-      const b = digits6ToSec(run.slice(0, 6), mode, fps);
+      const b = digits6ToSec(run.slice(0, 6), d6, fps);
       if (b != null) out.push({ sec: b, strict: true });
     }
     if (!out.length) return null;
@@ -312,7 +329,9 @@
         });
       });
     });
-    const mode = (opts.mode === 'hhmmss' || opts.mode === 'mmssff') ? opts.mode : detectMode(digits6, duration, fps);
+    const mode = (opts.mode === 'hhmmss' || opts.mode === 'mmssff') ? opts.mode
+      : (MODE_NAMES[opts.mode] && opts.mode !== 'auto') ? modeDigits6(opts.mode)
+      : detectMode(digits6, duration, fps);
 
     const byTime = new Map();
     const sheetStats = [];
@@ -464,7 +483,7 @@
   }
 
   return {
-    parse, scan, detectMode, parseText, buildPrompt,
-    _internal: { clean, sheetLayout, splitLine, valueText, runToSec, clockToSec, asJsonArray }
+    parse, scan, detectMode, parseText, buildPrompt, MODE_NAMES, MODE_HINTS,
+    _internal: { clean, sheetLayout, splitLine, valueText, runToSec, clockToSec, asJsonArray, modeDigits6 }
   };
 });
