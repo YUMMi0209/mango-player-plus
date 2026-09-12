@@ -981,28 +981,15 @@ const MPP = (() => {
       const edit = e.target.closest('.note-edit');
       if (edit) growEdit(edit);
     });
-    // 备注编辑：Enter 保存并取消选中 / Shift+Enter 换行 / Esc 取消 / 失焦保存
+    // 备注编辑：Enter 保存 / Shift+Enter 换行 / Esc 取消 / 失焦保存
+    // Enter 只结束编辑并保存，不改动勾选状态（选中项保持选中，便于接着批量截图 / 录制）
     list.addEventListener('keydown', e => {
       const edit = e.target.closest('.note-edit');
       if (!edit || edit.hidden) return;
       if (e.key === 'Escape') { e.preventDefault(); cancelNoteEdit(edit); return; }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        // 先提交保存（同步读取输入值），再取消选中——updateSel 会重置备注输入框的值
         commitNoteEdit(edit);
-        const row = edit.closest('.row');
-        if (row) {
-          const isMk = row.dataset.mk !== undefined;
-          const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
-          const set = isMk ? sel.mk : sel.io;
-          if (set.has(idx)) {
-            set.delete(idx);
-            row.classList.remove('sel');
-            const chk = row.querySelector('.chk');
-            if (chk) chk.checked = false;
-            updateSel();
-          }
-        }
       }
     });
     list.addEventListener('focusout', e => {
