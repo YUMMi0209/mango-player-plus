@@ -133,6 +133,24 @@ const MPP = (() => {
       return true;
     } catch (e) { return false; }
   }
+  // 编辑记录时间码（右键双击时间码）：type 'mk'|'io'，field 'time'|'in'|'out'
+  function fnSetTime(type, idx, field, sec) {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.setTime === 'function') {
+        return window.__mgpAPI.setTime(type, idx, field, sec) === true;
+      }
+    } catch (e) { }
+    return false;
+  }
+  // 批量截图 / 录制：items = [{type:'mk'|'io', time, start, end}]，mode 'shot'|'rec'
+  function fnBatchRun(items, mode) {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.batchRun === 'function') {
+        return window.__mgpAPI.batchRun(items, mode);
+      }
+    } catch (e) { }
+    return null;
+  }
   function fnSetMarkColor(idx, color) {
     function vkey() {
       if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
@@ -420,6 +438,7 @@ const MPP = (() => {
     bindSelectAll();
     bindHistory();
     bindTitleEdit();
+    bindBatchKeys();   // 面板内按 S / R 批量截图、录制
   }
 
   // ─── 数据加载 ───────────────────────────────
@@ -717,6 +736,77 @@ const MPP = (() => {
     });
   }
 
+  // 右键双击时间码：就地编辑（Enter 保存 / Esc 取消），保存后刷新列表
+  function openTimeEdit(tcEl, isMk, idx, field) {
+    if (!tcEl || tcEl.querySelector('.tc-edit')) return;
+    const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
+    if (!rec) return;
+    const cur = isMk ? rec.tc : (field === 'out' ? rec.outTC : rec.inTC);
+    tcEl.style.position = 'relative';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'tc-edit';
+    inp.spellcheck = false;
+    inp.value = cur || '';
+    inp.title = '修改时间码，Enter 保存，Esc 取消';
+    tcEl.appendChild(inp);
+    inp.focus();
+    try { inp.select(); } catch (e) { }
+    let done = false;
+    const finish = save => {
+      if (done) return;
+      done = true;
+      const val = inp.value.trim();
+      if (inp.parentElement) inp.parentElement.removeChild(inp);
+      if (!save || !val) return;
+      execInPage(fnGetFps).catch(() => 25).then(fps => {
+        const sec = tcToSec(val, fps || 25);
+        if (sec == null) { panelToast('无法识别的时间码：' + val); return; }
+        return execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec]).then(ok => {
+          if (ok) { panelToast('已更新时间码'); load(true); }
+          else panelToast('时间码更新失败');
+        });
+      }).catch(() => { });
+    };
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.isComposing) return;   // 中文输入法组词中不拦截
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); });
+  }
+
+  // ─── 批量截图 / 录制：焦点在面板时按 S / R，对勾选的记录依次执行 ───
+  function bindBatchKeys() {
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;   // 放行浏览器组合键
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k !== 's' && k !== 'r') return;
+      const ioIdx = [...sel.io].sort((a, b) => a - b);
+      const mkIdx = [...sel.mk].sort((a, b) => a - b);
+      if (!ioIdx.length && !mkIdx.length) return;   // 未勾选：不拦截
+      e.preventDefault();
+      const isShot = k === 's';
+      const n = ioIdx.length + mkIdx.length;
+      confirmDlg('确认对选中的 ' + n + ' 条记录依次自动' + (isShot ? '截图' : '录制') + '？'
+        + (isShot ? '' : '（标记点录制前后各 5 秒，片段录制入点到出点）'), '开始').then(ok => {
+        if (!ok) return;
+        const items = [];
+        mkIdx.forEach(i => { const m = logs.marks[i]; if (m && m.time != null) items.push({ type: 'mk', time: m.time }); });
+        ioIdx.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
+        items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
+        if (!items.length) { panelToast('选中的记录没有可用时间码'); return; }
+        panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）');
+        execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).catch(() => { });
+      });
+    });
+  }
+
   // ─── 列表交互 ───────────────────────────────
   function bindList(list) {
     if (!list) return;
@@ -782,7 +872,9 @@ const MPP = (() => {
         }
       }
     });
-    // 右键点击时间码：复制紧凑时间码（如 00391214）
+    // 右键点击时间码：单击复制紧凑时间码（如 00391214）；双击（同一条时间码
+    // 400ms 内两次右键）进入时间码编辑，Enter 保存 / Esc 取消
+    let ctxTimer = null, ctxKey = null;
     list.addEventListener('contextmenu', e => {
       const tcEl = e.target.closest('.tc');
       if (!tcEl) return;                 // 非时间码区域保留浏览器默认右键菜单
@@ -793,11 +885,24 @@ const MPP = (() => {
       const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
       const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
       if (!rec) return;
-      const raw = isMk ? rec.tc : rec.inTC;
-      const compact = String(raw).replace(/:/g, '');
-      copyText(compact)
-        .then(() => execInPage(fnToast, ['已复制时间码 ( ' + compact + ' )']))
-        .catch(() => { });
+      const field = isMk ? 'time' : (tcEl.classList.contains('out') ? 'out' : 'in');
+      const key = (isMk ? 'mk' : 'io') + ':' + idx + ':' + field;
+      // 右键双击 → 编辑该时间码
+      if (ctxTimer && ctxKey === key) {
+        clearTimeout(ctxTimer); ctxTimer = null; ctxKey = null;
+        openTimeEdit(tcEl, isMk, idx, field);
+        return;
+      }
+      ctxKey = key;
+      clearTimeout(ctxTimer);
+      ctxTimer = setTimeout(() => {
+        ctxTimer = null; ctxKey = null;
+        const raw = isMk ? rec.tc : (field === 'out' ? rec.outTC : rec.inTC);
+        const compact = String(raw).replace(/:/g, '');
+        copyText(compact)
+          .then(() => execInPage(fnToast, ['已复制时间码 ( ' + compact + ' )']))
+          .catch(() => { });
+      }, 400);
     });
     list.addEventListener('change', e => {
       const chk = e.target.closest('.chk');

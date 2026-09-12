@@ -1618,6 +1618,14 @@
     else finishRecording();
   }
 
+  // ─── 批量任务完成通知（批量截图 / 录制需等每一步结束再执行下一条）──
+  let batchFinishWaiters = [];
+  function waitRecFinished() { return new Promise(r => { batchFinishWaiters.push(r); }); }
+  function notifyRecFinished() {
+    const ws = batchFinishWaiters; batchFinishWaiters = [];
+    ws.forEach(f => { try { f(); } catch (e) { } });
+  }
+
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
@@ -1636,7 +1644,7 @@
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
     mgpHideToast();
-    if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; return; }
+    if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; notifyRecFinished(); return; }
     const isMp4 = /^video\/mp4/.test(mimeType);
     const ext = isMp4 ? 'mp4' : 'webm';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
@@ -1650,6 +1658,7 @@
     const saveAndToast = blob => {
       downloadBlob(blob, name);
       mgpToast('录制结束 — ' + sec + 's', true);
+      notifyRecFinished();   // 通知批量流程：本段录制已完成
     };
     // MediaRecorder 输出的 MP4 是 fragmented MP4（moov 前置 + moof/mdat 分片），
     // 部分剪辑软件（达芬奇旧版 / 会声会影 / Edius 等）无法读取。录制结束后
@@ -1941,6 +1950,8 @@
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    // 放行带修饰键的组合：Ctrl/Cmd+S（保存网页）等浏览器快捷键不应被扩展占用
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!hostOk()) return;
     if (!video) return;
 
@@ -2454,6 +2465,111 @@
     } catch (e) { }
   }
 
+  // ─── 批量截图 / 录制引擎 ──────────────────────
+  // 面板勾选多条记录后按 S / R 触发：按时间先后依次跳转 → 截图 / 录制
+  //   截图：标记点取其时刻，片段取入点时刻
+  //   录制：标记点录制前后各 5 秒；片段录制入点到出点
+  let batchRunning = false;
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+  // 跳转并等待画面稳定：seeked 事件 + 一帧实际渲染（保证取到目标帧而非旧帧）
+  function seekAndSettle(t) {
+    return new Promise(resolve => {
+      if (!video) { resolve(); return; }
+      let done = false;
+      let timer = null;
+      const cleanup = () => {
+        try { video.removeEventListener('seeked', onSeeked); } catch (e) { }
+        clearTimeout(timer);
+      };
+      const finish = () => { if (done) return; done = true; cleanup(); resolve(); };
+      const onSeeked = () => {
+        if (typeof video.requestVideoFrameCallback === 'function') {
+          try {
+            video.requestVideoFrameCallback(() => finish());
+            setTimeout(finish, 600);   // 兜底：视频暂停时 rVFC 可能不再触发
+          } catch (e) { setTimeout(finish, 150); }
+        } else {
+          setTimeout(finish, 150);
+        }
+      };
+      try { video.pause(); } catch (e) { }
+      try { video.currentTime = alignToFrame(Math.max(0, t)); } catch (e) { finish(); return; }
+      video.addEventListener('seeked', onSeeked);
+      timer = setTimeout(finish, 5000);   // 整体超时兜底
+    });
+  }
+  // 单次截图（等待 toBlob 完成后再继续下一条）
+  function shotOnce(t) {
+    return new Promise(resolve => {
+      if (!video || !video.videoWidth) { resolve(false); return; }
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth; c.height = video.videoHeight;
+      try {
+        c.getContext('2d').drawImage(video, 0, 0);
+        c.toBlob(b => {
+          if (!b) { resolve(false); return; }
+          downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
+          resolve(true);
+        }, 'image/png');
+      } catch (e) { resolve(false); }
+    });
+  }
+  // 录制指定区间（复用「从入点录制 → 到出点自动停止」流程），等录制与保存完成
+  function recordSegment(start, end) {
+    return new Promise(resolve => {
+      if (!video || recordingInternal || start == null || end == null || !(end > start)) { resolve(false); return; }
+      state.inPoint = start; state.outPoint = end;
+      recStopTarget = end;
+      const waiter = waitRecFinished();
+      let settled = false;
+      const done = ok => { if (!settled) { settled = true; resolve(ok); } };
+      waiter.then(() => done(true));
+      // 超时兜底：区间时长 + 30s 缓冲
+      setTimeout(() => { if (recordingInternal) { try { stopRecording(); } catch (e) { } } }, (end - start) * 1000 + 30000);
+      toggleRecording();                       // atIn 成立 → 播放到出点自动停止
+      if (!recordingInternal) { done(false); }
+    });
+  }
+  async function batchRun(items, mode) {
+    if (batchRunning) { mgpToast('批量任务进行中，请稍候', true); return { ok: false, reason: 'busy' }; }
+    if (!Array.isArray(items) || !items.length) return { ok: false, reason: 'empty' };
+    batchRunning = true;
+    // 快照当前打点状态：批量录制会临时改写入点 / 出点，结束后恢复，避免污染用户状态
+    const savedIn = state.inPoint, savedOut = state.outPoint, savedMark = state.markTime;
+    let done = 0, failed = 0;
+    try {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        const label = (i + 1) + '/' + items.length;
+        if (mode === 'shot') {
+          const t = it.type === 'mk' ? it.time : it.start;
+          if (t == null || !isFinite(t)) { failed++; continue; }
+          mgpToast('批量截图 ' + label, true);
+          await seekAndSettle(t);
+          (await shotOnce(t)) ? done++ : failed++;
+          await delay(250);
+        } else {
+          const s = it.type === 'mk' ? Math.max(0, (it.time || 0) - 5) : it.start;
+          const e2 = it.type === 'mk' ? (it.time || 0) + 5 : it.end;
+          if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
+          mgpToast('批量录制 ' + label, true);
+          await seekAndSettle(s);
+          (await recordSegment(s, e2)) ? done++ : failed++;
+          await delay(400);
+        }
+      }
+    } finally {
+      batchRunning = false;
+      recStopTarget = null;
+      state.inPoint = savedIn; state.outPoint = savedOut; state.markTime = savedMark;
+      state.tcMode = 'live';
+      saveState();
+    }
+    mgpToast('批量' + (mode === 'shot' ? '截图' : '录制') + '完成 — 成功 ' + done + ' 条'
+      + (failed ? ' · 失败 ' + failed + ' 条' : ''), true);
+    return { ok: true, done, failed };
+  }
+
   // ─── Log API (used by popup via executeScript) ───
   window.__mgpToast = mgpToast;
   window.__mgpAPI = {
@@ -2577,6 +2693,34 @@
     // 网页全屏切换：进入返回 true，退出返回 false
     toggleWebFs() {
       return webFsActive ? exitWebFs() : enterWebFs();
+    },
+    // 面板右键双击编辑记录时间码：type 'mk'|'io'，field 'time'|'in'|'out'，sec 为新秒数
+    setTime(type, idx, field, sec) {
+      const arr = type === 'io' ? logs.inOut : logs.marks;
+      const rec = arr[idx];
+      if (!rec || typeof sec !== 'number' || !isFinite(sec) || sec < 0) return false;
+      const t = sec;
+      if (type === 'mk') {
+        rec.time = t; rec.tc = fmtTC(t);
+      } else if (field === 'in') {
+        rec.inTime = t; rec.inTC = fmtTC(t);
+        rec.dur = Math.max(0, (rec.outTime || 0) - t);
+      } else if (field === 'out') {
+        rec.outTime = t; rec.outTC = fmtTC(t);
+        rec.dur = Math.max(0, t - (rec.inTime || 0));
+      } else {
+        return false;
+      }
+      // 时间码变化后按时间重新排序，保持列表先后顺序一致
+      if (type === 'io') logs.inOut.sort((a, b) => (a.inTime != null ? a.inTime : 0) - (b.inTime != null ? b.inTime : 0));
+      else logs.marks.sort((a, b) => (a.time != null ? a.time : 0) - (b.time != null ? b.time : 0));
+      saveLogs();
+      try { mgpToast('已更新时间码 ( ' + fmtTC(t) + ' )'); } catch (e) { }
+      return true;
+    },
+    // 批量截图 / 录制（面板勾选多条记录后按 S / R 调用）
+    batchRun(items, mode) {
+      return batchRun(items, mode === 'rec' ? 'rec' : 'shot');
     }
   };
 

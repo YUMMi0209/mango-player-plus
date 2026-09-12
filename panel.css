@@ -87,6 +87,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .switch input:checked + .track{background:var(--orange);border-color:var(--orange)}
 .switch input:checked + .track::after{transform:translateX(15px) translateY(-50%)}
 
+/* ─── 时间码就地编辑（右键双击时间码）─────── */
+.tc-edit{position:absolute;left:0;top:50%;transform:translateY(-50%);width:100%;min-width:78px;height:18px;padding:0 4px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--text);background:var(--row-h);border:1px solid var(--orange);border-radius:4px;outline:none;z-index:3;text-align:center}
+
 /* ─── 模式切换菜单 ────────────────────────── */
 #mode-menu{position:absolute;top:calc(100% - 4px);right:12px;min-width:168px;background:var(--card);border:1px solid var(--card-brd);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);padding:5px;z-index:21;display:flex;flex-direction:column;gap:2px}
 .mode-item{width:100%;height:32px;padding:0 10px;gap:8px;display:inline-flex;align-items:center;background:none;border:none;border-radius:7px;color:var(--muted);font-size:12px;font-family:inherit;cursor:pointer;transition:background .12s,color .12s}
