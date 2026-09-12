@@ -10,7 +10,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
-      "js": ["content/tc-parse.js", "content/remux.js", "content/content.js", "content/control-bar.js"],
+      "js": ["content/tc-parse.js", "content/remux.js", "content/webm-color.js", "content/content.js", "content/control-bar.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },

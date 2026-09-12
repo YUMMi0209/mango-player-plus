@@ -101,6 +101,181 @@
     return r;
   }
 
+  // ─── 色彩范围标签：改成 limited（与录制端的对比度压缩配套）──
+  // 背景：Chrome 录制 canvas（sRGB，全范围 0-255）时，容器里写的是「全范围」标签，
+  // 但大量播放器 / 剪辑软件默认按 limited（16-235）解释视频，于是把我们全范围的画面
+  // 又拉伸一次 —— 黑位被压掉、画面发闷「偏深」。录制端已把画面压缩到 limited，
+  // 这里把容器标签一并改成 limited，两边一致，无论软件看不看标签都不会再偏。
+  // H.264 的范围有两处声明，必须一起改，否则不同软件各按各的解释：
+  //   · SPS VUI 的 video_full_range_flag（解码器 / 剪辑软件普遍读这里，最重要）
+  //   · avc1 → colr(nclx) 的 full_range_flag（QuickTime / 达芬奇读这里）
+  const HIGH_PROFILES = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+  const VISUAL_ENTRIES = ['avc1', 'avc3', 'hvc1', 'hev1', 'vp08', 'vp09', 'av01'];
+
+  // RBSP 去防竞争字节：00 00 03 → 00 00
+  function rbspUnescape(nal) {
+    const out = new Uint8Array(nal.length);
+    let n = 0;
+    for (let i = 0; i < nal.length; i++) {
+      if (i + 2 < nal.length && nal[i] === 0 && nal[i + 1] === 0 && nal[i + 2] === 3) {
+        out[n++] = 0; out[n++] = 0; i += 2;
+        continue;
+      }
+      out[n++] = nal[i];
+    }
+    return out.subarray(0, n);
+  }
+  // 重新插入防竞争字节：出现 00 00 且后一字节 ≤ 3 时插 0x03
+  function rbspEscape(rbsp) {
+    const out = new Uint8Array(rbsp.length + (rbsp.length >> 1) + 16);
+    let n = 0, zeros = 0;
+    for (let i = 0; i < rbsp.length; i++) {
+      const v = rbsp[i];
+      if (zeros >= 2 && v <= 3) { out[n++] = 3; zeros = 0; }
+      out[n++] = v;
+      zeros = v === 0 ? zeros + 1 : 0;
+    }
+    return out.subarray(0, n);
+  }
+  // 按 SPS 语法走到 VUI 的 video_full_range_flag，返回它的位偏移与当前值。
+  // 任一步与预期不符（无 VUI / 无 video_signal_type / 越界）返回 null —— 宁可不动。
+  function spsFullRangeBit(rbsp) {
+    let bit = 0, over = false;
+    const u = n => {
+      let v = 0;
+      for (let i = 0; i < n; i++) {
+        if ((bit >> 3) >= rbsp.length) { over = true; return 0; }
+        v = (v << 1) | ((rbsp[bit >> 3] >> (7 - (bit & 7))) & 1);
+        bit++;
+      }
+      return v;
+    };
+    const ue = () => { let z = 0; while (!over && u(1) === 0) { if (++z > 31) break; } const v = z && !over ? u(z) : 0; return (1 << z) - 1 + v; };
+    const se = () => { const v = ue(); return (v & 1) ? (v + 1) >> 1 : -(v >> 1); };
+    const profile = u(8); u(8); u(8); ue();
+    let chromaFormat = 1;
+    if (HIGH_PROFILES.indexOf(profile) >= 0) {
+      chromaFormat = ue();
+      if (chromaFormat === 3) u(1);
+      ue(); ue(); u(1);                       // bit_depth_luma/chroma_minus8 + qpprime
+      if (u(1)) {                             // seq_scaling_matrix_present_flag
+        const n = chromaFormat !== 3 ? 8 : 12;
+        for (let j = 0; j < n; j++) {
+          if (!u(1)) continue;
+          const size = j < 6 ? 16 : 64;
+          let last = 8, next = 8;
+          for (let k = 0; k < size; k++) {
+            if (next !== 0) next = (last + se() + 256) % 256;
+            if (next !== 0) last = next;
+          }
+        }
+      }
+    }
+    ue();                                     // log2_max_frame_num_minus4
+    const pocType = ue();
+    if (pocType === 0) ue();
+    else if (pocType === 1) { u(1); se(); se(); const n = ue(); for (let j = 0; j < n; j++) se(); }
+    ue();                                     // max_num_ref_frames
+    u(1);                                     // gaps_in_frame_num_value_allowed_flag
+    ue(); ue();                               // pic_width/height_in_mbs_minus1
+    if (!u(1)) u(1);                          // frame_mbs_only_flag → mb_adaptive_frame_field_flag
+    u(1);                                     // direct_8x8_inference_flag
+    if (u(1)) { ue(); ue(); ue(); ue(); }     // frame_cropping
+    if (over || !u(1)) return null;           // vui_parameters_present_flag
+    if (u(1)) { const idc = u(8); if (idc === 255) { u(16); u(16); } }   // aspect_ratio_info
+    if (u(1)) u(1);                           // overscan_info_present_flag
+    if (over || !u(1)) return null;           // video_signal_type_present_flag
+    u(3);                                     // video_format
+    const flagBit = bit, value = u(1);
+    return over ? null : { bit: flagBit, value };
+  }
+  // 单个 SPS NAL（含 NAL 头）→ limited；已 limited 或无法解析时返回 null
+  function spsToLimited(nal) {
+    if (!nal || nal.length < 8) return null;
+    const rbsp = rbspUnescape(nal.subarray(1));
+    const f = spsFullRangeBit(rbsp);
+    if (!f || f.value === 0) return null;
+    const patched = rbsp.slice();
+    patched[f.bit >> 3] &= ~(0x80 >> (f.bit & 7));
+    const body = rbspEscape(patched);
+    const out = new Uint8Array(body.length + 1);
+    out[0] = nal[0];
+    out.set(body, 1);
+    return out;
+  }
+  function wrU16(arr, p, v) { arr[p] = (v >> 8) & 255; arr[p + 1] = v & 255; }
+  function u16bytes(v) { const a = new Uint8Array(2); wrU16(a, 0, v); return a; }
+
+  // avcC：把其中每个 SPS 改成 limited
+  function avcCToLimited(payload) {
+    if (payload.length < 7 || payload[0] !== 1) return { data: payload, changed: 0 };
+    let p = 5;
+    const nSps = payload[p++] & 0x1F;
+    const parts = [];
+    let changed = 0;
+    for (let i = 0; i < nSps; i++) {
+      if (p + 2 > payload.length) return { data: payload, changed: 0 };
+      const len = rdU16(payload, p); p += 2;
+      if (p + len > payload.length) return { data: payload, changed: 0 };
+      const nal = payload.subarray(p, p + len); p += len;
+      const fix = spsToLimited(nal);
+      if (fix) { changed++; parts.push(u16bytes(fix.length), fix); }
+      else parts.push(u16bytes(len), nal);
+    }
+    if (!changed) return { data: payload, changed: 0 };
+    parts.push(payload.subarray(p));          // numOfPictureParameterSets + PPS 等原样保留
+    return { data: concat([payload.subarray(0, 6), ...parts]), changed };
+  }
+  // colr(nclx)：full_range_flag 1→0
+  function colrToLimited(payload) {
+    if (payload.length < 11 || ascii(payload, 0, 4) !== 'nclx') return { data: payload, changed: 0 };
+    const off = 4 + 6;                        // primaries(2) transfer(2) matrix(2)
+    if (!(payload[off] & 0x80)) return { data: payload, changed: 0 };
+    const out = payload.slice();
+    out[off] &= 0x7F;
+    return { data: out, changed: 1 };
+  }
+  // 视频样本描述（avc1 等）：改 SPS VUI 与 colr。结构不符预期时整体不动。
+  function entryToLimited(entry, type) {
+    if (VISUAL_ENTRIES.indexOf(type) < 0 || entry.length < 86) return { data: entry, changed: 0 };
+    const kids = [];
+    let p = 86, changed = 0;                  // VisualSampleEntry 固定 86 字节头（含 box 头）
+    while (p + 8 <= entry.length) {
+      const size = rdU32(entry, p);
+      if (size < 8 || p + size > entry.length) return { data: entry, changed: 0 };
+      const ktype = ascii(entry, p + 4, 4);
+      const kid = entry.subarray(p, p + size);
+      if (ktype === 'avcC') {
+        const r = avcCToLimited(kid.subarray(8));
+        if (r.changed) { kids.push(box('avcC', r.data)); changed++; } else kids.push(kid);
+      } else if (ktype === 'colr') {
+        const r = colrToLimited(kid.subarray(8));
+        if (r.changed) { kids.push(box('colr', r.data)); changed++; } else kids.push(kid);
+      } else kids.push(kid);
+      p += size;
+    }
+    if (p !== entry.length) return { data: entry, changed: 0 };
+    if (!changed) return { data: entry, changed: 0 };
+    return { data: box(type, concat([entry.subarray(8, 86), ...kids])), changed };
+  }
+  function stsdToLimited(stsd) {
+    if (!stsd || stsd.length < 16) return { data: stsd, changed: 0 };
+    const count = rdU32(stsd, 12);
+    const entries = [];
+    let p = 16, changed = 0;
+    for (let i = 0; i < count; i++) {
+      if (p + 8 > stsd.length) return { data: stsd, changed: 0 };
+      const size = rdU32(stsd, p);
+      if (size < 8 || p + size > stsd.length) return { data: stsd, changed: 0 };
+      const r = entryToLimited(stsd.subarray(p, p + size), ascii(stsd, p + 4, 4));
+      entries.push(r.data); changed += r.changed;
+      p += size;
+    }
+    if (p !== stsd.length || !changed) return { data: stsd, changed: 0 };
+    return { data: box('stsd', concat([stsd.subarray(8, 12), u32bytes(count), ...entries])), changed };
+  }
+  function u32bytes(v) { const a = new Uint8Array(4); wrU32(a, 0, v); return a; }
+
   // ─── moov 解析（保留原始字节，供重建）──────────
   function parseMoov(bytes, moovBox) {
     const info = { timescale: 1000, nextTrackId: 3, mvhdRaw: null, trex: [], traks: [] };
@@ -170,7 +345,8 @@
   }
 
   // ─── 主流程：fMP4 → classic MP4 ──────────────
-  function remuxToClassic(input) {
+  // info（可选）：调用方传入一个对象，用于回传本次改写的色彩标签情况（排障用）
+  function remuxToClassic(input, info) {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
     const len = bytes.length;
 
@@ -247,6 +423,7 @@
     // 4. 重建 moov
     const movieTs = moov.timescale || 1000;
     let maxMovieDur = 0;
+    let colorFix = 0;
     const trakBytes = [];
     for (const t of moov.traks) {
       const list = samplesByTrack.get(t.id) || [];
@@ -263,9 +440,11 @@
       const mdhdV = mdhd[8];
       wrU32(mdhd, 8 + (mdhdV === 1 ? 24 : 16), Math.min(mediaDur, 0xFFFFFFFF));
 
-      // stbl 表
+      // stbl 表（stsd 先把色彩范围标签改成 limited，与录制端的 limited 画面配套）
+      const stsdFix = stsdToLimited(t.stsdRaw);
+      if (stsdFix.changed) colorFix++;
       const stts = buildStts(list);
-      const stblParts = [t.stsdRaw];
+      const stblParts = [stsdFix.data];
       stblParts.push(stts);
       const ctts = buildCtts(list);
       if (ctts) stblParts.push(ctts);
@@ -309,6 +488,7 @@
       p += e.s.size;
     }
     out.set(moovOut, p);
+    if (info) info.rangeTag = colorFix > 0 ? 'limited×' + colorFix : 'unchanged';
     return out;
   }
 
@@ -407,5 +587,9 @@
     return out;
   }
 
-  return { remuxToClassic };
+  // _test：仅供开发自检脚本调用（Material/qc-dev/check-color-fix.js），扩展运行时不使用
+  return {
+    remuxToClassic,
+    _test: { stsdToLimited, avcCToLimited, spsToLimited, spsFullRangeBit, rbspUnescape, rbspEscape }
+  };
 });

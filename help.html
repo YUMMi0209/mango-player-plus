@@ -204,6 +204,10 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <div class="body">不会。每条记录都挂在对应分集的 key 下，面板会自动切换显示当前分集的记录；「历史记录」里可以随时跳回任意分集查看。</div>
   </details>
   <details>
+    <summary>录制的视频颜色偏深 / 和原片不一样？</summary>
+    <div class="body">浏览器录 canvas 写出的是全范围（0-255）画面，而多数播放器与剪辑软件默认按 limited（16-235）解释视频，会把画面再拉伸一次，黑位被压掉、看起来偏深。现在录制时会把画面压缩到 limited，并把容器标签一并声明为 limited（WebM 改 <span class="mono">Colour/Range</span>；MP4 改 <span class="mono">SPS VUI</span> 与 <span class="mono">colr</span>），两边一致后颜色即与原片对齐。截图（<kbd>S</kbd> 的 PNG）不受影响，仍是标准 sRGB。<br>例外：<strong>VP9 档</strong>的范围写在码流内部，容器标签改不动，因此 VP9 保持原样不做该修正；对颜色敏感时建议用 VP8 或 H.264 档。</div>
+  </details>
+  <details>
     <summary>导出的 Excel 打不开？</summary>
     <div class="body">导出的文件为标准 <span class="mono">.xlsx</span> 格式，请使用 Excel / WPS / 腾讯文档打开。若提示损坏，请更新软件版本后重试。</div>
   </details>

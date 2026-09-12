@@ -476,17 +476,34 @@ H.264            （MP4，剪辑友好，跟随视频分辨率）
 
 ---
 
-### 录制出来的视频颜色和原片不一样？
+### 录制出来的视频颜色偏深 / 和原片不一样？
 
-录制画布已改为**不透明 + 显式 sRGB**，排除了 alpha 合成带来的颜色差异。
+浏览器录 canvas 写出的是 **sRGB 全范围（0-255）** 画面，而绝大多数播放器与剪辑软件默认按
+**limited（16-235）** 解释视频，会把画面再拉伸一次 —— 黑位被压掉、暗部发闷，看起来「偏深」。
 
-若仍有偏差，用 ffprobe 对比原片与录制文件的色彩元数据（把两条命令的输出发我即可定位）：
+现在的做法是从源头对齐：
+
+1. 录制转绘时把画面压缩到 limited（`contrast(85.88%)`，255→219），落在 16-235；
+2. 容器标签一并改成 limited：WebM 改 `Colour/Range`（2→1），MP4 改 `SPS VUI` 的
+   `video_full_range_flag` 与 `colr(nclx)` 的 `full_range_flag`（两处一起改，避免不同软件各按各的解释）。
+
+这样**看标签的播放器**和**默认按 limited 的剪辑软件**都能还原出原片颜色。注意：
+
+- 截图（`S` 键 PNG）不做压缩，仍是标准 sRGB，在浏览器里看就是原色；
+- **VP9 档不做该修正**：VP9 的范围写在码流内部（uncompressed header 的 `color_range`），
+  容器标签改不动它，只改标签会造成画面与标签错配。VP9 保持「全范围画面 + 全范围标签」不变。
+
+想核对某个文件的实际色彩信息：
 
 ```bash
-ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,color_range,color_space,color_transfer,color_primaries -of default=nw=1 "录制文件.webm"
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt,color_range,color_space -of default=nw=1 "录制文件.webm"
 ```
 
-常见结论：WebM 未写色彩范围（`color_range` 为空）时，部分播放器会按「全范围」解释，画面看起来发灰 / 发亮 —— 这种情况可以换 **H.264（MP4）** 档验证，MP4 会写入明确的 VUI 色彩信息。
+正常应看到 `color_range=tv`（limited）。控制台 `[MGP-REC] saved {...}` 里的 `rangeTag`
+也会记录本次录制改写标签的结果（`Range 2→1 ✓` / `limited×1` / `off(vp9)`）。
+
+如果换到别的软件里仍然偏色，把 `ffprobe` 输出与「原片截图 / 录制画面截图」发我，可以直接定位是
+画布环节还是编码标签环节。
 
 ---
 

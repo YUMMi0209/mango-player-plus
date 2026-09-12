@@ -6,6 +6,22 @@
   window.__mgpFps = FPS;
   // 录制 remux（fMP4 → 经典 MP4）：IIFE 启动时捕获引用，防止页面脚本事后篡改 window.MPGRemux
   const MPGRemuxRef = (typeof window !== 'undefined' && window.MPGRemux) ? window.MPGRemux : null;
+  // 录制 WebM 色彩范围标签改写（Range 2→1）：同样在启动时捕获引用
+  const MPGWebmColorRef = (typeof window !== 'undefined' && window.MPGWebmColor) ? window.MPGWebmColor : null;
+  // 录制画面压缩到 limited（16-235）：Chromium 的 canvas 是 sRGB 全范围（0-255），
+  // 而几乎所有的播放器 / 剪辑软件默认按 limited 解释视频，会再把画面拉伸一次，
+  // 表现为黑位被压掉、画面发闷「偏深」。在绘制时做一次对比度压缩（255→219），
+  // 把画面落到 16-235，容器标签相应改成 limited（WebM 改 Colour/Range；
+  // MP4 改 SPS VUI + colr），录出来的文件在哪种解释下都与源画面一致。
+  // 219/255 = 85.88%；实测 1080p 每帧多约 1ms（25fps 预算 40ms），可接受。
+  const REC_LIMITED_FILTER = 'contrast(85.88%)';
+  // 万一本机 Chromium 不支持 2D context 的 filter（属性不存在时赋值只会挂个 JS 字段、
+  // 不影响绘制），就不能做范围压缩——否则画面仍是全范围而标签写成 limited，画面会发灰。
+  // 这种机型直接整体跳过范围修正，保持与改之前一致的行为。
+  const REC_FILTER_SUPPORTED = (() => {
+    try { return typeof CanvasRenderingContext2D !== 'undefined' && 'filter' in CanvasRenderingContext2D.prototype; }
+    catch (e) { return false; }
+  })();
   const BTN = '36px';
   const MARK_COLORS = { red: '#e74c3c', orange: '#ff7a1a', blue: '#3498db', green: '#2ecc71', gray: '#9aa0a6' };
 
@@ -1250,6 +1266,16 @@
     const recLow = recPref === 'h264-low';           // 低分辨率 H.264：720P
     const recMaxW = recLow ? 1280 : 0;               // 0 = 跟随源分辨率
     const recMaxH = recLow ? 720 : 0;
+    // 色彩范围修正（全范围 → limited）只在能同时改掉「码流/容器标签」时做，否则画面与
+    // 标签会错配，反而更糟：
+    //   · VP8 / H.264 / 低分辨率 H.264：范围由容器（WebM Colour）或 SPS VUI + colr 声明，
+    //     我们能在录制结束后把标签改成 limited，与压缩后的画面一致 → 可以做
+    //   · VP9：范围写在 VP9 码流内部的 uncompressed header（color_range），容器标签改不动它，
+    //     所以 VP9 保持「全范围画面 + 全范围标签」不变（与改之前行为一致）
+    //   · 画布不支持 filter 时同样跳过（无法压缩画面就别改标签）
+    //   · 负责改标签的模块没就位（脚本未注入等）时也跳过：压缩了却改不了标签会更糟
+    const recCanRangeFix = !recWantVp9 && REC_FILTER_SUPPORTED &&
+      (recWantWebm ? !!MPGWebmColorRef : !!MPGRemuxRef);
 
     // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rAF 重绘。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
@@ -1401,6 +1427,7 @@
       resH: recCanvas.height,
       canvasInDom: !!recCanvas.parentElement,
       draws: 0, drawFails: 0, adopted: false, downgrades: 0,
+      rangeFix: recCanRangeFix ? 'on' : (recWantVp9 ? 'off(vp9)' : 'off'),
       hwEnc: 'probing', hwEncCfg: ''
     };
     // 硬件编码器能力探测（WebCodecs）：MediaRecorder 无法指定编码器，
@@ -1555,10 +1582,16 @@
       let ok = false;
       try {
         if (recCtx && video && video.isConnected && video.readyState >= 2 && video.videoWidth > 0) {
+          // 全范围 → limited 压缩（见 REC_LIMITED_FILTER 说明）：只对录制画布做，
+          // 截图（PNG）保持原样——PNG 在浏览器里按 sRGB 显示，压缩反而会变灰
+          if (recCanRangeFix) recCtx.filter = REC_LIMITED_FILTER;
           recCtx.drawImage(video, 0, 0, recCanvas.width, recCanvas.height);
           ok = true;
         }
       } catch (e) { /* protected content or hidden video */ }
+      finally {
+        if (recCtx) { try { recCtx.filter = 'none'; } catch (e) { } }
+      }
       if (ok) { recDrawOk++; recDrawFail = 0; recDrawFailAt = 0; }
       else {
         if (!recDrawFailAt) recDrawFailAt = performance.now();
@@ -1692,23 +1725,53 @@
       mgpToast('录制结束 — ' + sec + 's', true);
       notifyRecFinished(true);   // 通知批量流程：本段录制已完成（有产出）
     };
+    // 色彩范围标签统一改成 limited（画面已在绘制时压缩到 16-235，见 REC_LIMITED_FILTER）：
+    //   · WebM：改 Colour/Range（2 全范围 → 1 limited）
+    //   · MP4 ：remux 时改 SPS VUI 的 video_full_range_flag 与 colr(nclx) 的 full_range_flag
+    // 标签与画面一致后，看标签的播放器与默认按 limited 的剪辑软件都能还原出源画面。
     // MediaRecorder 输出的 MP4 是 fragmented MP4（moov 前置 + moof/mdat 分片），
     // 部分剪辑软件（达芬奇旧版 / 会声会影 / Edius 等）无法读取。录制结束后
     // 经 remux.js 重封装为经典 MP4（ftyp | mdat | moov，无 moof）；失败则回退原始文件。
-    if (isMp4 && MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
-      rawBlob.arrayBuffer().then(buf => {
-        try {
-          const out = MPGRemuxRef.remuxToClassic(new Uint8Array(buf));
-          saveAndToast(new Blob([out], { type: 'video/mp4' }));
-        } catch (e) {
+    // 注意 remux 失败回退时画面已是 limited、标签仍是全范围（罕见情况，仅记日志）
+    rawBlob.arrayBuffer().then(buf => {
+      const bytes = new Uint8Array(buf);
+      if (isMp4) {
+        if (MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
+          const info = {};
+          try {
+            const out = MPGRemuxRef.remuxToClassic(bytes, info);
+            if (recDiag) recDiag.rangeTag = info.rangeTag || '';
+            console.info('[MGP-REC] range tag', info.rangeTag || '(unknown)');
+            saveAndToast(new Blob([out], { type: 'video/mp4' }));
+          } catch (e) {
+            if (recDiag) recDiag.rangeTag = 'remux失败，保留原始标签';
+            console.info('[MGP-REC] remux failed, keep raw mp4:', e && e.message);
+            saveAndToast(rawBlob);
+          }
+        } else {
           saveAndToast(rawBlob);
         }
-      }).catch(() => {
+        return;
+      }
+      // WebM / Matroska：只改 Colour 里的 Range 值，不动其它字节。
+      // VP9 不改（recCanRangeFix=false）：它的范围写在码流内部，容器标签单独改会错配
+      if (recCanRangeFix && MPGWebmColorRef && typeof MPGWebmColorRef.toLimited === 'function') {
+        try {
+          const r = MPGWebmColorRef.toLimited(bytes);
+          if (recDiag) recDiag.rangeTag = r.reason + (r.changed ? ' ✓' : '');
+          console.info('[MGP-REC] range tag', r.reason);
+          saveAndToast(r.changed ? new Blob([r.data], { type: mimeType || 'video/webm' }) : rawBlob);
+        } catch (e) {
+          if (recDiag) recDiag.rangeTag = 'webm 标签改写失败';
+          console.info('[MGP-REC] webm color patch failed:', e && e.message);
+          saveAndToast(rawBlob);
+        }
+      } else {
         saveAndToast(rawBlob);
-      });
-    } else {
+      }
+    }).catch(() => {
       saveAndToast(rawBlob);
-    }
+    });
     recChunks = [];
   }
 
