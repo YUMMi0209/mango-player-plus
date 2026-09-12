@@ -365,6 +365,8 @@ const MPP = (() => {
   }
 
   // ─── 二次确认弹窗 ──────────────────────────
+  // 键盘：← / → 在「取消 / 确认」之间切换焦点，Enter 触发当前聚焦按钮；
+  // 默认聚焦主操作（确认），危险操作（danger）默认聚焦「取消」，避免误按 Enter 删除
   let confirmResolve = null;
   function confirmDlg(message, okLabel) {
     return new Promise(resolve => {
@@ -383,17 +385,39 @@ const MPP = (() => {
             '</div>' +
           '</div>';
         document.body.appendChild(m);
-        m.querySelector('.mpp-cancel').addEventListener('click', () => finishConfirm(false));
-        m.querySelector('.mpp-ok').addEventListener('click', () => finishConfirm(true));
+        const cancelEl = m.querySelector('.mpp-cancel');
+        const okEl0 = m.querySelector('.mpp-ok');
+        cancelEl.addEventListener('click', () => finishConfirm(false));
+        okEl0.addEventListener('click', () => finishConfirm(true));
         m.addEventListener('click', e => { if (e.target === m) finishConfirm(false); });
-        document.addEventListener('keydown', e => { if (e.key === 'Escape' && !m.hidden) finishConfirm(false); });
+        document.addEventListener('keydown', e => {
+          if (m.hidden) return;
+          if (e.key === 'Escape') { e.preventDefault(); finishConfirm(false); return; }
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            const to = document.activeElement === okEl0 ? cancelEl : okEl0;
+            to.focus();
+            return;
+          }
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const cur = document.activeElement;
+            (cur === cancelEl || cur === okEl0 ? cur : okEl0).click();
+          }
+        });
       }
       const msgEl = m.querySelector('.mpp-modal-msg');
       const okEl = m.querySelector('.mpp-ok');
+      const cancelEl = m.querySelector('.mpp-cancel');
       msgEl.textContent = message;
       okEl.textContent = okLabel || '确认';
       confirmResolve = resolve;
       m.hidden = false;
+      // 默认焦点：危险操作停在「取消」，其余停在主操作按钮
+      setTimeout(() => {
+        if (m.hidden) return;
+        (okEl.classList.contains('danger') ? cancelEl : okEl).focus();
+      }, 0);
     });
   }
   function finishConfirm(val) {
@@ -914,6 +938,7 @@ const MPP = (() => {
       }
       const k = String(e.key || '').toLowerCase();
       if (k !== 's' && k !== 'r') return;
+      if (document.querySelector('.mpp-mask')) return;   // 有弹窗打开时不触发批量快捷键
       const isShot = k === 's';
       // 批量截图只对标记点生效；批量录制只对片段生效（另一类勾选不参与）
       const kindName = isShot ? '标记点' : '片段';

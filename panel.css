@@ -153,6 +153,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mpp-modal-actions{display:flex;justify-content:flex-end;gap:8px}
 .mpp-modal-actions button{height:30px;padding:0 16px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;transition:all .12s}
 .mpp-modal-actions button:hover{border-color:var(--orange)}
+/* 键盘操作（← / → 切换焦点、Enter 触发）时当前按钮要有明显焦点环 */
+.mpp-modal-actions button:focus{outline:2px solid var(--orange);outline-offset:2px}
 .mpp-modal-actions .danger{background:rgba(231,76,60,.14);border-color:#e74c3c;color:#fff;font-weight:600}
 .mpp-modal-actions .danger:hover{background:#c0392b;border-color:#c0392b}
 :root[data-theme="light"] .mpp-modal-actions .danger{color:#c0392b;background:rgba(231,76,60,.12);border-color:#e74c3c}
