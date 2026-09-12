@@ -167,7 +167,8 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);col
     <tr><td class="k">视频控制</td><td>关闭后画面内不再显示控制栏（快捷键仍然生效）</td></tr>
     <tr><td class="k">打点自动截图</td><td>开启后 M 打点立即自动截图保存；I 打入点自动截图，O 打出点时保存最后一次 I 时刻的截图（默认：百度网盘开启、其他网站关闭）</td></tr>
     <tr><td class="k">时间码显示回避</td><td>悬浮画面时时间码自动下移避开顶部遮挡；关闭后时间码不再向下移动（默认：芒果TV开启、其他网站关闭）</td></tr>
-    <tr><td class="k">文件名包含备注</td><td>截图 / 录制 / 导出文件名在时间码后附加该时刻记录的备注（默认开启）</td></tr>
+    <tr><td class="k">文件名包含备注</td><td>截图 / 录制文件名在时间码后附加该时刻记录的备注（默认开启；日志导出文件名不含备注）</td></tr>
+    <tr><td class="k">录制编码</td><td>录制分辨率与格式，共六档（WebM 在前）：<strong>1080P · WebM (VP8)（默认）</strong> / 720P · WebM (VP8) / 1080P · WebM (VP9) / 720P · WebM (VP9) / 1080P · MP4 (H.264) / 720P · MP4 (H.264)。均为软件编码，<strong>采集帧率跟随源帧率</strong>；编码跟不上时自动降级（先降分辨率再降帧率，最低 25fps）并提示，追求稳定帧率建议选 720P</td></tr>
     <tr><td class="k">应用于当前网页（实验）</td><td>在其他非芒果TV网站启用打点与记录（需授予站点权限；授权失败或无法获取页面地址时面板会提示原因）</td></tr>
     <tr><td class="k">网页全屏</td><td>视频铺满当前窗口（非浏览器全屏），按 <kbd>Esc</kbd> 退出；进入时不改变播放状态</td></tr>
     <tr><td class="k">重载插件</td><td>重新加载整个插件：修改代码后一键生效（面板会随之关闭）</td></tr>

@@ -1094,7 +1094,7 @@
   // 输出侧按标准帧率节拍把最新帧写入 generator（时间戳 = idx × frameDurUs）。
   // 输入输出完全解耦：编码器背压只导致"丢一拍"，不会挂起循环。
   // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
-  function startFramePacer(stream) {
+  function startFramePacer(stream, fps) {
     if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
     try {
       const vTrack = stream.getVideoTracks()[0];
@@ -1107,7 +1107,9 @@
       stream.getAudioTracks().forEach(t => outStream.addTrack(t));
       const reader = processor.readable.getReader();
       const writer = generator.writable.getWriter();
-      let frameDurUs = Math.round(1e6 / normRecFps(FPS)); // 标准帧率网格（微秒）
+      // 标准帧率网格（微秒）；fps 显式传入时以其为准（VP8 档会把帧率上限压到 30，
+      // 若此处仍按源帧率出拍，只会重复输出同一帧，白白增加编码负担）
+      let frameDurUs = Math.round(1e6 / (fps > 0 ? fps : normRecFps(FPS)));
       let idx = 0;            // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
       let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
       let drops = 0;          // 背压丢拍计数（诊断）
@@ -1213,12 +1215,14 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // 录制设置（面板「录制编码」）：1080p-h264 / 720p-h264 / 1080p-vp8 / 720p-vp8
+    // 录制设置（面板「录制编码」）：1080p/720p × WebM(VP8) / WebM(VP9) / MP4(H.264)
     // 分辨率档限制 canvas 输出尺寸（源分辨率低于档位时不放大）；编码档决定 mimeType
-    const recPref = (window.__mgpSettings || {}).recCodec || '1080p-h264';
+    const recPref = (window.__mgpSettings || {}).recCodec || '1080p-vp8';
     const recMaxW = recPref.indexOf('720p') === 0 ? 1280 : 1920;
     const recMaxH = recPref.indexOf('720p') === 0 ? 720 : 1080;
-    const recWantVp8 = recPref.indexOf('vp8') !== -1;
+    const recWantVp9 = recPref.indexOf('vp9') !== -1;
+    const recWantVp8 = !recWantVp9 && recPref.indexOf('vp8') !== -1;
+    const recWantWebm = recWantVp8 || recWantVp9;   // 两者都是软件编码，调优策略一致
 
     // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rAF 重绘。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
@@ -1232,7 +1236,8 @@
     document.body.appendChild(recCanvas);
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
-    // 采集帧率 = 最接近的标准档位（25/30/50/60）：输出标准帧率文件；
+    // 采集帧率 = 最接近的标准档位（25/30/50/60）：**跟随源帧率**，源 50/60fps 就按 50/60 采，
+    // 保证输出文件帧率与源一致（丢帧由 pacer 背压丢拍处理，不在这里压上限）；
     // 绘制由采样间隔一半的定时器驱动（采样间隔内必有新绘制，不会漏帧）
     const capFps = normRecFps(FPS);
     recStream = recCanvas.captureStream(capFps);
@@ -1247,32 +1252,46 @@
       return;
     }
 
-    // 编码档：VP8（WebM）或 H.264（MP4，软编最快，默认）；VP8 供无硬件加速环境尝试
+    // 编码档：WebM(VP9) / WebM(VP8) / MP4(H.264)；不支持时按候选列表依次回退
+    // （VP9 压缩率更好，但软件编码更吃 CPU；VP8 实时性最好；H.264 剪辑更友好）
     const mt = (() => {
-      const candidates = recWantVp8
-        ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-        : [
-            'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-            'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
-            'video/mp4;codecs=avc1.42E01E',
-            'video/mp4',
-            'video/webm;codecs=vp8,opus',
-            'video/webm'
-          ];
+      const candidates = recWantVp9
+        ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+        : recWantVp8
+          ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+          : [
+              'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+              'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
+              'video/mp4;codecs=avc1.42E01E',
+              'video/mp4',
+              'video/webm;codecs=vp8,opus',
+              'video/webm'
+            ];
       for (const t of candidates)
         if (MediaRecorder.isTypeSupported(t)) return t;
     })();
-    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。H.264 软编环境码率
-    // 是编码耗时的直接因素，软编吞吐不足时低码率可显著提速
+    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。软编环境码率是编码耗时
+    // 的直接因素，吞吐不足时低码率可显著提速；WebM（VP8/VP9）比 H.264 再压一档，
+    // 其中 VP9 压缩率更好，可用更低码率达到同等画质
     const recPx = recCanvas.width * recCanvas.height;
-    const videoBits = recPx >= 3840 * 2160 ? 12000000
-      : recPx >= 1920 * 1080 ? 5000000
-      : recPx >= 1280 * 720 ? 4000000
-      : 3000000;
+    const videoBits = recWantVp9
+      ? (recPx >= 3840 * 2160 ? 7000000
+        : recPx >= 1920 * 1080 ? 3000000
+        : recPx >= 1280 * 720 ? 2000000
+        : 1400000)
+      : recWantVp8
+        ? (recPx >= 3840 * 2160 ? 8000000
+          : recPx >= 1920 * 1080 ? 3500000
+          : recPx >= 1280 * 720 ? 2200000
+          : 1500000)
+        : (recPx >= 3840 * 2160 ? 12000000
+          : recPx >= 1920 * 1080 ? 5000000
+          : recPx >= 1280 * 720 ? 4000000
+          : 3000000);
     // CFR 时间戳自控：按标准帧率网格重打时间戳，强制输出文件为标准帧率
     // （captureStream 直连输出帧率随绘制节奏浮动，无法保证标准帧率）；
     // 输入输出解耦 + 背压丢拍，不会像旧实现那样挂起冻结视频轨
-    recPacer = startFramePacer(recStream);
+    recPacer = startFramePacer(recStream, capFps);
     const mediaStream = recPacer ? recPacer.stream : recStream;
     try {
       recMediaRecorder = new MediaRecorder(mediaStream, {
@@ -1468,20 +1487,21 @@
       if (!recordingInternal || !recPacer) return;
       const now = performance.now();
       const elapsed = (now - recStartAt) / 1000;
-      if (elapsed < 4) return;           // 启动初期不评估（编码器热身 / 首块延迟）
+      // 启动初期不评估（编码器热身 / 首块延迟）；VP8 软编更易吃紧，提前到 2.5s 起评估
+      if (elapsed < (recWantWebm ? 2.5 : 4)) return;
       const d = recPacer.dropCount(), t = recPacer.tickCount();
       const dD = d - recLastDrops, tD = t - recLastTicks;
       recLastDrops = d; recLastTicks = t;
-      // ① 编码停滞：2.5s 无新数据块（timeslice 250ms）
-      const stalled = now - recLastChunkAt > 2500;
+      // ① 编码停滞：无新数据块（timeslice 250ms）
+      const stalled = now - recLastChunkAt > (recWantWebm ? 1800 : 2500);
       // ② 编码吞吐：累计字节数 < 目标码率 × 录制时长 × 30%（下限 20KB 防误判）
       const expectedBytes = ((videoBits + 128000) / 8) * elapsed * 0.3;
       const lowThroughput = recChunkBytes > 0 && recChunkBytes < expectedBytes && expectedBytes > 20000;
-      // ③ pacer 丢拍率（旧判据，保留兜底）
-      const highDrop = tD >= 20 && dD / tD > 0.4;
+      // ③ pacer 丢拍率（旧判据，保留兜底）；VP8 阈值更敏感
+      const highDrop = tD >= 20 && dD / tD > (recWantWebm ? 0.25 : 0.4);
       if (!stalled && !lowThroughput && !highDrop) return;
       recDoDowngrade();
-    }, 2000);
+    }, recWantWebm ? 1500 : 2000);
 
     // Render：16ms 定时重绘已在上面启动（captureStream 只在 canvas 有新绘制时产帧），
     // 不再叠加 rVFC / rAF 绘制链——多驱动无收益且增加不确定性

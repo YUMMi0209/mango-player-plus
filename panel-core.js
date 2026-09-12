@@ -1898,7 +1898,7 @@ const MPP = (() => {
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
-      if (els.selCodec) els.selCodec.value = s.recCodec || '720p-h264';
+      if (els.selCodec) els.selCodec.value = s.recCodec || '1080p-vp8';
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });

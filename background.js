@@ -4,8 +4,8 @@
 'use strict';
 
 const SETTINGS_KEY = 'mpp_settings';
-// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关；lastMode 记忆上次的面板显示模式；annotateTimecode 标注截图嵌入时间码开关；recCodec 录制档位（1080p-h264 / 720p-h264 / 1080p-vp8 / 720p-vp8）；noteFileName 备注写入文件名开关
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: '720p-h264' };
+// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关；lastMode 记忆上次的面板显示模式；annotateTimecode 标注截图嵌入时间码开关；recCodec 录制档位（1080p-vp8 / 720p-vp8 / 1080p-h264 / 720p-h264，默认 1080p-vp8）；noteFileName 备注写入文件名开关
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: '1080p-vp8' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
