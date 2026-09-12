@@ -430,6 +430,11 @@ const MPP = (() => {
     els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
     els.sumSep = $(cfg.sumSep);
+    els.btnSearch = $(cfg.btnSearch);
+    els.searchBar = $(cfg.searchBar);
+    els.searchIn = $(cfg.searchIn);
+    els.searchHit = $(cfg.searchHit);
+    els.searchClear = $(cfg.searchClear);
     els.err = $(cfg.err);
     els.wrap = $(cfg.wrap);
     els.footer = $(cfg.footer);
@@ -445,6 +450,7 @@ const MPP = (() => {
     bindList(els.mkList);
     if (els.ioList !== els.mkList) bindList(els.ioList);
     els.btnAll.addEventListener('click', toggleAll);
+    bindSearch();
     els.btnClear.addEventListener('click', clearSel);
     els.btnExport.addEventListener('click', exportExcel);
     if (els.btnReload) els.btnReload.addEventListener('click', () => {
@@ -540,13 +546,29 @@ const MPP = (() => {
   function setVisible(valid) {
     if (els.wrap) els.wrap.hidden = !valid;
     if (els.footer) els.footer.hidden = !valid;
+    if (els.searchBar) els.searchBar.hidden = !valid || (!searchOpen && !noteQuery);
     if (els.err) els.err.hidden = valid;
   }
 
   // ─── 渲染 ───────────────────────────────────
+  // 备注搜索：仅按备注文本过滤列表（大小写不敏感），记录与勾选状态都不受影响
+  let noteQuery = '';
+  function noteMatch(note) {
+    if (!noteQuery) return true;
+    return String(note || '').toLowerCase().indexOf(noteQuery) !== -1;
+  }
+  function filteredIdx(kind) {
+    const arr = kind === 'io' ? logs.inOut : logs.marks;
+    return arr.map((r, i) => (noteMatch(r && r.note) ? i : -1)).filter(i => i >= 0);
+  }
+  function matchCount() {
+    return filteredIdx('mk').length + filteredIdx('io').length;
+  }
+
   function render() {
     if (els.cntMk) els.cntMk.textContent = logs.marks.length;
     if (els.cntIo) els.cntIo.textContent = logs.inOut.length;
+    updateSearchBar();
     els.mkList.classList.add('cards');
     if (els.ioList === els.mkList) {
       if (show === 'mk') renderMarks(els.mkList);
@@ -573,8 +595,11 @@ const MPP = (() => {
 
   function renderMarks(list) {
     if (!logs.marks.length) { list.innerHTML = '<div class="empty">暂无标记点记录</div>'; return; }
+    const idxs = filteredIdx('mk');
+    if (!idxs.length) { list.innerHTML = '<div class="empty">没有备注匹配「' + esc(noteQuery) + '」的标记点</div>'; return; }
     list.innerHTML = '';
-    logs.marks.forEach((m, i) => {
+    idxs.forEach(i => {
+      const m = logs.marks[i];
       const row = document.createElement('div');
       row.className = 'row' + (sel.mk.has(i) ? ' sel' : '');
       row.dataset.mk = i;
@@ -594,8 +619,11 @@ const MPP = (() => {
 
   function renderIO(list) {
     if (!logs.inOut.length) { list.innerHTML = '<div class="empty">暂无入点到出点记录</div>'; return; }
+    const idxs = filteredIdx('io');
+    if (!idxs.length) { list.innerHTML = '<div class="empty">没有备注匹配「' + esc(noteQuery) + '」的片段</div>'; return; }
     list.innerHTML = '';
-    logs.inOut.forEach((u, i) => {
+    idxs.forEach(i => {
+      const u = logs.inOut[i];
       const row = document.createElement('div');
       row.className = 'row' + (sel.io.has(i) ? ' sel' : '');
       row.dataset.io = i;
@@ -625,12 +653,51 @@ const MPP = (() => {
         : '';
       if (els.sumSep) els.sumSep.hidden = !selIo.length;
     }
+    // 「全选」高亮按当前可见（搜索过滤后）的记录判断
     document.querySelectorAll('.sec-head .tag').forEach(tag => {
       const key = tag.dataset.set === 'io' ? 'io' : 'mk';
-      const total = key === 'io' ? logs.inOut.length : logs.marks.length;
-      tag.classList.toggle('all-sel', total > 0 && sel[key].size === total);
+      const vis = filteredIdx(key);
+      tag.classList.toggle('all-sel', vis.length > 0 && vis.every(i => sel[key].has(i)));
     });
     updateNoteLines();
+  }
+
+  // ─── 备注搜索 ────────────────────────────────
+  let searchOpen = false;
+  function updateSearchBar() {
+    const on = !!noteQuery;
+    if (els.searchBar) els.searchBar.hidden = !on && !searchOpen;
+    if (els.searchHit) {
+      const n = matchCount();
+      els.searchHit.textContent = on ? (n ? '匹配 ' + n + ' 条' : '无匹配') : '';
+    }
+    if (els.btnSearch) els.btnSearch.classList.toggle('on', on);
+  }
+  function openSearch(open) {
+    searchOpen = open;
+    if (els.searchBar) els.searchBar.hidden = !open && !noteQuery;
+    if (open && els.searchIn) { els.searchIn.focus(); els.searchIn.select(); }
+    if (!open && noteQuery) { noteQuery = ''; if (els.searchIn) els.searchIn.value = ''; render(); }
+  }
+  function bindSearch() {
+    if (els.btnSearch) els.btnSearch.addEventListener('click', () => openSearch(els.searchBar ? els.searchBar.hidden : true));
+    if (els.searchIn) {
+      els.searchIn.addEventListener('input', () => {
+        noteQuery = els.searchIn.value.trim().toLowerCase();
+        render();
+      });
+      els.searchIn.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { e.preventDefault(); openSearch(false); }
+        else if (e.key === 'Enter') { e.preventDefault(); els.searchIn.blur(); }
+        if (e.isComposing) return;
+      });
+    }
+    if (els.searchClear) els.searchClear.addEventListener('click', () => {
+      noteQuery = '';
+      if (els.searchIn) { els.searchIn.value = ''; els.searchIn.focus(); }
+      render();
+    });
   }
 
   // ─── 打点备注：有备注的记录始终展示；选中单条时显示其备注行（可编辑）──
@@ -1001,23 +1068,23 @@ const MPP = (() => {
   }
 
   // ─── 底部按钮 ───────────────────────────────
+  // 全选：搜索过滤生效时只选中「当前可见（备注匹配）」的记录
   function toggleAll() {
+    const mkVis = filteredIdx('mk');
+    const ioVis = filteredIdx('io');
     if (els.mkList === els.ioList) {
       // popup 单列表：全选只作用于当前选项卡
       const isMk = show === 'mk';
       const set = isMk ? sel.mk : sel.io;
-      const total = isMk ? logs.marks.length : logs.inOut.length;
-      if (total > 0 && set.size === total) set.clear();
-      else { set.clear(); for (let i = 0; i < total; i++) set.add(i); }
+      const vis = isMk ? mkVis : ioVis;
+      if (vis.length && vis.every(i => set.has(i))) vis.forEach(i => set.delete(i));
+      else vis.forEach(i => set.add(i));
     } else {
       // 侧边栏双列表：全选作用于两种记录
-      const allMk = sel.mk.size === logs.marks.length;
-      const allIo = sel.io.size === logs.inOut.length;
-      if (allMk && allIo) { sel.mk.clear(); sel.io.clear(); }
-      else {
-        sel.mk = new Set(logs.marks.map((_, i) => i));
-        sel.io = new Set(logs.inOut.map((_, i) => i));
-      }
+      const allOn = (mkVis.length > 0 || ioVis.length > 0)
+        && mkVis.every(i => sel.mk.has(i)) && ioVis.every(i => sel.io.has(i));
+      if (allOn) { mkVis.forEach(i => sel.mk.delete(i)); ioVis.forEach(i => sel.io.delete(i)); }
+      else { mkVis.forEach(i => sel.mk.add(i)); ioVis.forEach(i => sel.io.add(i)); }
     }
     render();
   }
@@ -1352,7 +1419,6 @@ const MPP = (() => {
           '<div class="qc-step">① 复制提示词发给 AI，结果粘贴到这里（推荐）</div>' +
           '<div class="ai-bar">' +
             '<button type="button" class="ai-copy">复制提示词</button>' +
-            '<button type="button" class="ai-show">查看提示词</button>' +
             (sheetOpts ? '<span class="ai-sheet-wrap">只整理<select class="set-select ai-sheet-sel">' + sheetOpts + '</select></span>' : '') +
           '</div>' +
           '<textarea class="ai-prompt" readonly hidden></textarea>' +
@@ -1431,17 +1497,11 @@ const MPP = (() => {
       if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
       input.addEventListener('input', refresh);
       input.addEventListener('keydown', e => e.stopPropagation());
-      m.querySelector('.ai-show').addEventListener('click', e => {
-        promptEl.hidden = !promptEl.hidden;
-        e.currentTarget.textContent = promptEl.hidden ? '查看提示词' : '隐藏提示词';
-        if (!promptEl.hidden) { refreshPrompt(); promptEl.focus(); promptEl.select(); }
-      });
+      // 复制提示词；复制失败时展开提示词框供手动复制
       m.querySelector('.ai-copy').addEventListener('click', () => {
         const fail = () => {
           refreshPrompt();
           promptEl.hidden = false;
-          const btn = m.querySelector('.ai-show');
-          if (btn) btn.textContent = '隐藏提示词';
           promptEl.focus(); promptEl.select();
           panelToast('复制失败，请在提示词框内手动复制');
         };
@@ -1460,12 +1520,7 @@ const MPP = (() => {
       const onKey = e => {
         if (e.key !== 'Escape') return;
         e.preventDefault();
-        if (!promptEl.hidden) {
-          promptEl.hidden = true;
-          const btn = m.querySelector('.ai-show');
-          if (btn) btn.textContent = '查看提示词';
-          return;
-        }
+        if (!promptEl.hidden) { promptEl.hidden = true; return; }
         finish(null);
       };
       const ok = () => {
