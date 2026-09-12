@@ -438,6 +438,7 @@ const MPP = (() => {
     els.historyMenu = $(cfg.historyMenu);
     els.histList = $(cfg.histList);
     els.histImport = $(cfg.histImport);
+    els.histAi = $(cfg.histAi);
     els.histAll = $(cfg.histAll);
     els.histClear = $(cfg.histClear);
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
@@ -1321,7 +1322,6 @@ const MPP = (() => {
   // ctx: { names: [文件名], cands: [{label, marks, mode, has6}], sheets: [工作表名], meta, hint }
   function qcDialog(ctx) {
     const cands = ctx.cands || [];
-    const autoMode = ctx.autoMode || 'hhmmss';
     const sheetNames = ctx.sheets || [];
     const hasCands = cands.length > 0;
     return new Promise(resolve => {
@@ -1340,13 +1340,6 @@ const MPP = (() => {
           '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
       }).join('');
       const names = (ctx.names || []).join('、');
-      const modeOpts = [
-        '<option value="auto">自动（' + (QC_MODE_HINT[autoMode] || QC_MODE_HINT.hhmmss) + '）</option>',
-        '<option value="hhmmssff">HHMMSSFF（时:分:秒:帧）</option>',
-        '<option value="mmssff">MMSSFF（分:秒:帧）</option>',
-        '<option value="hhmmss">HHMMSS（时:分:秒）</option>',
-        '<option value="mmss">MMSS（分:秒）</option>'
-      ].join('');
       const sheetOpts = sheetNames.length > 1
         ? ['<option value="">全部工作表</option>'].concat(sheetNames.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>')).join('')
         : '';
@@ -1379,8 +1372,6 @@ const MPP = (() => {
                 '<div class="qc-list">' + items + '</div>' +
               '</div>'
             : (ctx.hint ? '' : '<div class="qc-none">未自动识别到时间码，请用上面的 AI 方式转换后粘贴。</div>')) +
-          '<div class="qc-mode">时间码读法' +
-            '<select class="set-select qc-mode-sel">' + modeOpts + '</select></div>' +
           '<div class="mpp-modal-actions">' +
             '<button type="button" class="mpp-cancel">取消</button>' +
             '<button type="button" class="mpp-ok">导入</button>' +
@@ -1390,7 +1381,6 @@ const MPP = (() => {
       const boxes = [...m.querySelectorAll('.qc-item input')];
       const allBox = m.querySelector('.qc-all input');
       const totalEl = m.querySelector('.qc-total');
-      const modeSel = m.querySelector('.qc-mode-sel');
       const input = m.querySelector('.ai-input');
       const statusEl = m.querySelector('.ai-status');
       const promptEl = m.querySelector('.ai-prompt');
@@ -1407,9 +1397,9 @@ const MPP = (() => {
         return n;
       };
       const refresh = () => {
-        const mode = modeSel ? modeSel.value : 'auto';
+        // 时间码读法始终自动判定（按视频时长排除不合理的读法），无需用户选择
         const text = input.value.trim();
-        pasted = text ? aiParse(text, ctx.meta || {}, mode) : null;
+        pasted = text ? aiParse(text, ctx.meta || {}, 'auto') : null;
         const hasPaste = !!(pasted && pasted.marks.length);
         // 粘贴内容优先：有可解析的粘贴内容时忽略表格勾选
         boxes.forEach(b => { b.disabled = hasPaste; });
@@ -1421,12 +1411,10 @@ const MPP = (() => {
           const allOn = boxes.length > 0 && boxes.every(b => b.checked);
           if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
         }
-        if (modeSel && pasted) {
-          modeSel.options[0].textContent = '自动（' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + '）';
-        }
         if (hasPaste) {
           const preview = pasted.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
           statusEl.textContent = '将导入粘贴内容：' + pasted.marks.length + ' 个标记点'
+            + '（按 ' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + ' 解析）'
             + (preview ? ' · ' + preview : '')
             + (pasted.skippedOut ? '（' + pasted.skippedOut + ' 条超出视频时长已忽略）' : '');
           okBtn.disabled = false;
@@ -1435,9 +1423,9 @@ const MPP = (() => {
         if (text) {
           statusEl.textContent = pasted && pasted.unparsed
             ? '粘贴内容未识别到时间码（' + pasted.unparsed + ' 处无法解析）—— 请确认 AI 输出保留了原表时间码'
-            : '粘贴内容未识别到时间码；不改读法的话可按上面的表格勾选导入';
+            : '粘贴内容未识别到时间码，请检查 AI 输出的时间码写法';
         } else {
-          statusEl.textContent = cands.length ? '粘贴 AI 结果，或直接按上面的勾选导入' : '等待粘贴 AI 结果…';
+          statusEl.textContent = cands.length ? '粘贴 AI 结果，或勾选下面的自动识别结果导入' : '等待粘贴 AI 结果…';
         }
         okBtn.disabled = sheetCount() === 0;
       };
@@ -1445,7 +1433,6 @@ const MPP = (() => {
       if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
       input.addEventListener('input', refresh);
       input.addEventListener('keydown', e => e.stopPropagation());
-      if (modeSel) modeSel.addEventListener('change', refresh);
       m.querySelector('.ai-show').addEventListener('click', e => {
         promptEl.hidden = !promptEl.hidden;
         e.currentTarget.textContent = promptEl.hidden ? '查看提示词' : '隐藏提示词';
@@ -1485,11 +1472,10 @@ const MPP = (() => {
       };
       const ok = () => {
         const text = input.value.trim();
-        const mode = modeSel ? modeSel.value : 'auto';
-        if (text && pasted && pasted.marks.length) { finish({ items: [], mode: mode, text: text }); return; }
+        if (text && pasted && pasted.marks.length) { finish({ items: [], mode: 'auto', text: text }); return; }
         const picked = cands.filter((c, i) => boxes[i].checked);
         if (!picked.length) { panelToast('请至少勾选一项，或粘贴 AI 结果'); return; }
-        finish({ items: picked, mode: mode, text: '' });
+        finish({ items: picked, mode: 'auto', text: '' });
       };
       m.querySelector('.mpp-cancel').addEventListener('click', () => finish(null));
       okBtn.addEventListener('click', ok);
@@ -1565,7 +1551,6 @@ const MPP = (() => {
       c.has6 = r.has6;
     });
     const usable = cands.filter(c => c.marks.length);
-    const modes = [...new Set(usable.map(c => c.mode))];
     const sheetNames = [];
     files.forEach(f => (f.sheets || []).forEach(s => {
       const n = String(s.name || '').trim();
@@ -1575,8 +1560,7 @@ const MPP = (() => {
       names: files.map(f => f.name),
       cands: usable,
       sheets: sheetNames,
-      meta: meta,
-      autoMode: modes.length === 1 ? modes[0] : 'hhmmss'
+      meta: meta
     });
     if (!pick) return false;
     return applyQcPick(pick, meta);
