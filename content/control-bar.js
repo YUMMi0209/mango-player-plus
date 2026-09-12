@@ -950,16 +950,23 @@
     const clean = String(n).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
     return clean ? clean.slice(0, 30) : '';
   }
-  // 统一文件命名：【HHMMSSFF_备注】——仅时间码与备注，不加任何多余符号 / 信息
-  // - 无类型前缀（SCS_/REC_）、无标题、无保存时间戳，靠扩展名区分类型
+  // 统一文件命名：【标题_时间码_备注】——无备注时为「标题_时间码」
   // - tcPlain：时间码（HH-MM-SS-FF 或紧凑数字），统一去除分隔符号得到 HHMMSSFF
   // - noteTime：与时间码对应的时刻（截图 = 当前时刻；录制 = 入点时刻），
   //   备注取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
-  // - 无备注时仅时间码（不出现多余下滑线）：HHMMSSFF.ext
+  // - 无类型前缀与保存时间戳，靠扩展名区分类型
   function buildFileName(tcPlain, noteTime, ext) {
     const tc = String(tcPlain).replace(/[^0-9]/g, '');
     const note = noteSeg(noteTime);
-    return tc + (note ? '_' + note : '') + '.' + ext;
+    return titleForFile() + tc + (note ? '_' + note : '') + '.' + ext;
+  }
+  // 标题段（始终写入文件名，附尾部分隔下划线）：面板重命名过的标题优先，
+  // 否则取网页标题；清洗非法字符并截断 24 字——与面板显示、导出表格保持一致
+  function titleForFile() {
+    const t = titleForLog() || pageTitle();
+    if (!t) return '';
+    const clean = String(t).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
+    return clean ? clean.slice(0, 24) + '_' : '';
   }
   // 打点记录标题：优先取面板重命名过的自定义标题（mpp_titles custom），否则网页标题
   function titleForLog() {
@@ -2181,7 +2188,7 @@
     annShowTC = s.annotateTimecode === true;
     const shotT = dispTime();
     annTC = fmtTC(shotT, true);
-    // 命名与直接截图（S 键）完全一致：HHMMSSFF_备注.png
+    // 命名与直接截图（S 键）完全一致：标题_时间码_备注.png
     annFileName = buildFileName(fmtTCPlainF(shotT), shotT, 'png');
     annBuild();
   }

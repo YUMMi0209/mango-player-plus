@@ -1017,8 +1017,9 @@ const MPP = (() => {
     panelToast('已导出记录');
   }
 
-  // 导出文件命名：【HHMMSSFF_备注】——与截图 / 录制一致，仅时间码与备注
-  // （无标题、无保存时间戳、无类型前缀）；备注取自同一条记录（首条选中项）
+  // 导出文件命名：【标题_时间码_备注】——与截图 / 录制规则一致
+  // （无备注时为「标题_时间码」；无保存时间戳与类型前缀）；
+  // 时间码与备注取自同一条记录（首条选中项），标题取该记录标题 / 面板标题
   function sanitizeName(s) {
     return String(s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
   }
@@ -1029,10 +1030,12 @@ const MPP = (() => {
     if (mkIdx.length) { rec = logs.marks[mkIdx[0]]; tc = rec.tc; }
     else if (ioIdx.length) { rec = logs.inOut[ioIdx[0]]; tc = rec.inTC; }
     else return '芒着拉片日志.xlsx';
+    const fallback = els.pageTitle ? (els.pageTitle.textContent || '') : '';
+    const title = sanitizeName(rec.title || fallback || '').replace(/\s+/g, '_').slice(0, 24);
     const note = (s.noteFileName !== false && rec.note)
       ? sanitizeName(rec.note).replace(/\s+/g, '_').slice(0, 30)
       : '';
-    return String(tc).replace(/[^0-9]/g, '') + (note ? '_' + note : '') + '.xlsx';
+    return (title ? title + '_' : '') + String(tc).replace(/[^0-9]/g, '') + (note ? '_' + note : '') + '.xlsx';
   }
 
   // ─── 显示模式切换（弹窗 / 侧边栏 / 独立窗口）────
