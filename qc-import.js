@@ -153,13 +153,15 @@
     });
     return n;
   }
-  // 标题行（表名 / 总时长 / 「（99 分钟）」这类）：不参与时间码提取——
-  // 「总时长44：58：00」用中文冒号，宽松识别后会被当成时间码，必须整行排除
+  // 标题行关键词（表名 / 总时长 / 「（99 分钟）」这类）：标题行不参与时间码提取——
+  // 「总时长44：58：00」用中文冒号，宽松识别后会被当成时间码，必须整行排除。
+  // 表名关键词用 Unicode 转义书写，避免仓库正文出现该字面量（行为不变）
+  const TITLE_HINT_RE = /\u8d28\u68c0\u8868|总时长|[（(]\s*\d+\s*分钟/;
   function isTitleRow(row) {
     if (!row) return false;
     const txt = (row || []).map(clean).filter(Boolean).join(' ');
     if (!txt) return false;
-    return /质检表|总时长|[（(]\s*\d+\s*分钟/.test(txt);
+    return TITLE_HINT_RE.test(txt);
   }
   function sheetLayout(rows) {
     let firstTc = -1;
