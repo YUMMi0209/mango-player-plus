@@ -72,13 +72,11 @@
       </div>
       <div class="set-row">
         <span class="set-label">录制编码</span>
-        <select id="sel-codec" class="set-select" title="录制分辨率与编码格式。WebM(VP8) 通用性最好；MP4(H.264) 剪辑更友好，设备无硬件编码时较慢">
-          <option value="1080p-vp8">1080P · WebM (VP8)</option>
-          <option value="720p-vp8">720P · WebM (VP8)</option>
-          <option value="1080p-vp9">1080P · WebM (VP9)</option>
-          <option value="720p-vp9">720P · WebM (VP9)</option>
-          <option value="1080p-h264">1080P · MP4 (H.264)</option>
-          <option value="720p-h264">720P · MP4 (H.264)</option>
+        <select id="sel-codec" class="set-select" title="录制编码。VP8/VP9 为 WebM，H.264 为 MP4；除「低分辨率 H.264」固定 720P 外，其余都跟随视频本身分辨率">
+          <option value="vp8">VP8</option>
+          <option value="vp9">VP9</option>
+          <option value="h264">H.264</option>
+          <option value="h264-low">低分辨率 H.264</option>
         </select>
       </div>
       <div class="set-actions">

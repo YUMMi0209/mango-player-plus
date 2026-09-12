@@ -1091,7 +1091,7 @@
   // 频率，无法单独保证标准帧率。MediaRecorder 按帧时间戳封装——只要视频帧时间戳
   // 严格落在标准帧率网格（如 25fps → 40ms 一拍），输出文件即标准帧率。
   // 架构：输入侧持续读取 captureStream 只保留最新帧（丢弃中间帧，读取循环永不阻塞）；
-  // 输出侧按标准帧率节拍把最新帧写入 generator（时间戳 = idx × frameDurUs）。
+  // 输出侧按标准帧率节拍把最新帧写入 generator（时间戳累加式递增，帧率变化不跳变）。
   // 输入输出完全解耦：编码器背压只导致"丢一拍"，不会挂起循环。
   // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
   function startFramePacer(stream, fps) {
@@ -1110,7 +1110,8 @@
       // 标准帧率网格（微秒）；fps 显式传入时以其为准（VP8 档会把帧率上限压到 30，
       // 若此处仍按源帧率出拍，只会重复输出同一帧，白白增加编码负担）
       let frameDurUs = Math.round(1e6 / (fps > 0 ? fps : normRecFps(FPS)));
-      let idx = 0;            // 已输出帧数（时间戳 = idx × frameDurUs，暂停后保持连续）
+      let idx = 0;            // 已输出帧数（诊断用）
+      let nextTsUs = 0;       // 下一帧时间戳（累加式，帧率变化不跳变）
       let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
       let drops = 0;          // 背压丢拍计数（诊断）
       let ticks = 0;          // 节拍总数（丢拍率 = drops / ticks）
@@ -1131,12 +1132,15 @@
       })();
       // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍。
       // 背压（编码器消费不及时）只丢这一拍，绝不挂起循环
+      // 时间戳用「累加式」而不是 idx × 帧长：帧率档中途变化（自动降级）时，
+      // 累加式只在后续间隔生效，不会像乘法那样产生 PTS 跳变——跳变会被播放器
+      // 当成时间轴断裂，表现为花屏 / 卡顿
       const tick = () => {
         if (stopped || recPaused) return;
         ticks++;
         if (!latest) return;
-        const out = new VideoFrame(latest, { timestamp: idx * frameDurUs });
-        idx++;
+        const out = new VideoFrame(latest, { timestamp: nextTsUs });
+        nextTsUs += frameDurUs;
         if (writer.desiredSize != null && writer.desiredSize < 1) {
           drops++;
           try { out.close(); } catch (e) { }
@@ -1215,20 +1219,28 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // 录制设置（面板「录制编码」）：1080p/720p × WebM(VP8) / WebM(VP9) / MP4(H.264)
-    // 分辨率档限制 canvas 输出尺寸（源分辨率低于档位时不放大）；编码档决定 mimeType
-    const recPref = (window.__mgpSettings || {}).recCodec || '1080p-vp8';
-    const recMaxW = recPref.indexOf('720p') === 0 ? 1280 : 1920;
-    const recMaxH = recPref.indexOf('720p') === 0 ? 720 : 1080;
-    const recWantVp9 = recPref.indexOf('vp9') !== -1;
-    const recWantVp8 = !recWantVp9 && recPref.indexOf('vp8') !== -1;
+    // 录制设置（面板「录制编码」）：vp8 / vp9 / h264 / h264-low（默认 vp8）
+    // 分辨率：h264-low 固定 720P；其余三档**跟随视频本身分辨率**（不缩放、不放大）
+    // 兼容旧档位值（1080p-vp8 / 720p-vp8 / 1080p-vp9 / 720p-vp9 / 1080p-h264 / 720p-h264）
+    const LEGACY_CODEC = {
+      '1080p-vp8': 'vp8', '720p-vp8': 'vp8',
+      '1080p-vp9': 'vp9', '720p-vp9': 'vp9',
+      '1080p-h264': 'h264', '720p-h264': 'h264-low'
+    };
+    const recRaw = (window.__mgpSettings || {}).recCodec || 'vp8';
+    const recPref = LEGACY_CODEC[recRaw] || recRaw;
+    const recWantVp9 = recPref === 'vp9';
+    const recWantVp8 = recPref === 'vp8';
     const recWantWebm = recWantVp8 || recWantVp9;   // 两者都是软件编码，调优策略一致
+    const recLow = recPref === 'h264-low';           // 低分辨率 H.264：720P
+    const recMaxW = recLow ? 1280 : 0;               // 0 = 跟随源分辨率
+    const recMaxH = recLow ? 720 : 0;
 
     // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rAF 重绘。
     // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
     recCanvas = document.createElement('canvas');
-    recCanvas.width = Math.min(video.videoWidth, recMaxW);
-    recCanvas.height = Math.min(video.videoHeight, recMaxH);
+    recCanvas.width = recMaxW ? Math.min(video.videoWidth, recMaxW) : video.videoWidth;
+    recCanvas.height = recMaxH ? Math.min(video.videoHeight, recMaxH) : video.videoHeight;
     recCtx = recCanvas.getContext('2d');
     // 画布挂入文档（移出视口不可见）：部分 Chromium 版本对不在文档中的 canvas
     // captureStream 采样会停止产帧，导致录制只有首帧画面
@@ -1445,19 +1457,14 @@
     // pacerDrops 只反映 pacer→generator 队列背压，MediaRecorder 内部积压
     // （编码器吞吐不足）不会反馈到该计数——曾导致 1080p 严重滞后却不降级。
     // 两种判据任一成立即降级：
-    //   ① 编码停滞：已录 >5s 且超过 2.5s 没有新数据块（timeslice 250ms）
+    //   ① 编码停滞：超过阈值没有新数据块（timeslice 250ms）
     //   ② 编码吞吐不足：累计产出字节数远低于目标码率对应的量
-    // 降级顺序：先降录制分辨率（×2/3），已最低则目标帧率降一档（60→50→30→25）
+    //
+    // ⚠️ 只降帧率（60→50→30→25），**绝不改分辨率**：
+    // 录制中途改 canvas 尺寸会让编码器收到与首帧不同的尺寸，而 MP4 的
+    // moov/stsd 里记录的是起始分辨率 —— H.264 轨道随后出现花屏 / 绿块
+    // （WebM 对分辨率变化更宽容，但同样不保证）。要改分辨率请重新开始录制。
     const REC_FPS_STEPS = [60, 50, 30, 25];
-    function recDowngradeRes() {
-      if (!recCanvas || !video) return false;
-      const nw = Math.round(recCanvas.width * 2 / 3);
-      const nh = Math.round(recCanvas.height * 2 / 3);
-      if (nw < 320 || nh < 180) return false;   // 已到最低档
-      recCanvas.width = nw; recCanvas.height = nh;
-      recDiag.resW = nw; recDiag.resH = nh;
-      return true;
-    }
     function recFpsDownStep() {
       const cur = recDiag.capFps;
       const i = REC_FPS_STEPS.indexOf(cur);
@@ -1468,19 +1475,13 @@
       return true;
     }
     function recDoDowngrade() {
-      if (recDowngradeRes()) {
-        recDowngrades++;
-        recDiag.downgrades = recDowngrades;
-        try { mgpToast('设备编码能力不足，已降低录制分辨率', true); } catch (e) { }
-        return true;
-      }
       if (recFpsDownStep()) {
         recDowngrades++;
         recDiag.downgrades = recDowngrades;
         try { mgpToast('设备编码能力不足，录制帧率已降为 ' + recDiag.capFps + 'fps', true); } catch (e) { }
         return true;
       }
-      return false;
+      return false;   // 已到最低帧率：继续丢拍，保证文件时间轴正确（不再改分辨率）
     }
     recLastDrops = 0; recLastTicks = 0;
     recDowngradeTimer = setInterval(() => {
@@ -1554,14 +1555,12 @@
       video = nv;
       video.addEventListener('ended', onVideoEnded);
       video.addEventListener('seeking', onSeekBlock, true);
-      // 重同步跳转锁定基准；分辨率变化后画布同步（canvas 尺寸重置会清空画布，仅在尺寸变化时重置）
+      // 重同步跳转锁定基准。
+      // ⚠️ 不在这里改画布尺寸：录制中途改变分辨率会让编码器收到与首帧不同的尺寸，
+      // MP4（H.264）随后花屏 / 绿块。画布保持起始尺寸，新视频按画布尺寸缩放绘制
       lastExpectedTime = video.currentTime;
       lastWallClock = performance.now() / 1000;
-      if (recCanvas && video.videoWidth > 0 &&
-          (recCanvas.width !== video.videoWidth || recCanvas.height !== video.videoHeight)) {
-        recCanvas.width = video.videoWidth;
-        recCanvas.height = video.videoHeight;
-      }
+      try { mgpToast('录制已跟随新的视频源', true); } catch (e) { }
     }
     // 独立 rAF 轻量 tick：持续维护录制期望时间（跳转锁定），暂停时也保持时钟新鲜
     (function tickExpected() {

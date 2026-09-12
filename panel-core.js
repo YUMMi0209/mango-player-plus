@@ -1905,11 +1905,23 @@ const MPP = (() => {
         els.settingsMenu.hidden = true;
       }
     });
+    // 录制编码：新值 vp8 / vp9 / h264 / h264-low；兼容旧值（1080p-* / 720p-*）
+    const LEGACY_CODEC = {
+      '1080p-vp8': 'vp8', '720p-vp8': 'vp8',
+      '1080p-vp9': 'vp9', '720p-vp9': 'vp9',
+      '1080p-h264': 'h264', '720p-h264': 'h264-low'
+    };
+    const CODECS = ['vp8', 'vp9', 'h264', 'h264-low'];
+    function normalizeCodec(v) {
+      const raw = String(v || '');
+      const mapped = LEGACY_CODEC[raw] || raw;
+      return CODECS.indexOf(mapped) >= 0 ? mapped : 'vp8';
+    }
     getSettings().then(s => {
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
-      if (els.selCodec) els.selCodec.value = s.recCodec || '1080p-vp8';
+      if (els.selCodec) els.selCodec.value = normalizeCodec(s.recCodec);
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
