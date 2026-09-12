@@ -835,20 +835,25 @@ const MPP = (() => {
       }
       const k = String(e.key || '').toLowerCase();
       if (k !== 's' && k !== 'r') return;
-      const ioIdx = [...sel.io].sort((a, b) => a - b);
-      const mkIdx = [...sel.mk].sort((a, b) => a - b);
-      if (!ioIdx.length && !mkIdx.length) return;   // 未勾选：不拦截
-      e.preventDefault();
       const isShot = k === 's';
-      const n = ioIdx.length + mkIdx.length;
-      confirmDlg('确认对选中的 ' + n + ' 条记录依次自动' + (isShot ? '截图' : '录制') + '？'
-        + (isShot ? '' : '（标记点录制前后各 5 秒，片段录制入点到出点）'), '开始').then(ok => {
+      // 批量截图只对标记点生效；批量录制只对片段生效（另一类勾选不参与）
+      const kindName = isShot ? '标记点' : '片段';
+      const idxs = isShot ? [...sel.mk].sort((a, b) => a - b) : [...sel.io].sort((a, b) => a - b);
+      if (!idxs.length) {
+        if (!sel.mk.size && !sel.io.size) return;   // 完全未勾选：不拦截按键
+        e.preventDefault();
+        panelToast('批量' + (isShot ? '截图' : '录制') + '只对' + kindName + '生效，请勾选' + kindName);
+        return;
+      }
+      e.preventDefault();
+      const n = idxs.length;
+      confirmDlg('确认对选中的 ' + n + ' 条' + kindName + '依次自动' + (isShot ? '截图' : '录制') + '？', '开始').then(ok => {
         if (!ok) return;
         const items = [];
-        mkIdx.forEach(i => { const m = logs.marks[i]; if (m && m.time != null) items.push({ type: 'mk', time: m.time }); });
-        ioIdx.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
+        if (isShot) idxs.forEach(i => { const m = logs.marks[i]; if (m && m.time != null) items.push({ type: 'mk', time: m.time }); });
+        else idxs.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
         items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
-        if (!items.length) { panelToast('选中的记录没有可用时间码'); return; }
+        if (!items.length) { panelToast('选中的' + kindName + '没有可用时间码'); return; }
         panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）· 按 Esc 取消');
         batchActive = true;
         startBatchWatch(isShot);

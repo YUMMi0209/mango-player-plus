@@ -2469,9 +2469,9 @@
   }
 
   // ─── 批量截图 / 录制引擎 ──────────────────────
-  // 面板勾选多条记录后按 S / R 触发：按时间先后依次跳转 → 截图 / 录制
-  //   截图：标记点取其时刻，片段取入点时刻
-  //   录制：标记点录制前后各 5 秒；片段录制入点到出点
+  // 面板勾选记录后按 S / R 触发，按时间先后依次跳转 → 截图 / 录制
+  //   批量截图：只适用于标记点，取该标记点时刻
+  //   批量录制：只适用于片段，录制入点到出点
   let batchRunning = false;
   let batchCancel = false;   // Esc 取消批量任务：中断后续条目
   let recAbort = false;      // 批量取消导致当前这段录制作废（不下载、不写剪贴板）
@@ -2578,7 +2578,8 @@
         // 单条失败不得中断整批：任何异常只记为失败，继续处理后续条目
         try {
           if (mode === 'shot') {
-            const t = it.type === 'mk' ? it.time : it.start;
+            // 批量截图只适用于标记点：取该标记点时刻
+            const t = it.time != null ? it.time : it.start;
             if (t == null || !isFinite(t)) { failed++; continue; }
             mgpToast('批量截图 ' + label + ' · Esc 取消', true);
             await seekAndSettle(t);
@@ -2588,8 +2589,8 @@
             okShot ? done++ : failed++;
             await delay(250);
           } else {
-            const s = it.type === 'mk' ? Math.max(0, (it.time || 0) - 5) : it.start;
-            const e2 = it.type === 'mk' ? (it.time || 0) + 5 : it.end;
+            // 批量录制只适用于片段：入点 → 出点
+            const s = it.start, e2 = it.end;
             if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
             mgpToast('批量录制 ' + label + ' · Esc 取消', true);
             await seekAndSettle(s);
@@ -2778,7 +2779,7 @@
       try { mgpToast('已更新时间码 ( ' + fmtTC(t) + ' )'); } catch (e) { }
       return true;
     },
-    // 批量截图 / 录制（面板勾选多条记录后按 S / R 调用）
+    // 批量截图 / 录制（面板勾选记录后按 S / R 调用；截图只传标记点，录制只传片段）
     batchRun(items, mode) {
       return batchRun(items, mode === 'rec' ? 'rec' : 'shot');
     },
