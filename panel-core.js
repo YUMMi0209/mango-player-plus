@@ -1341,38 +1341,33 @@ const MPP = (() => {
       }).join('');
       const names = (ctx.names || []).join('、');
       const sheetOpts = sheetNames.length > 1
-        ? ['<option value="">全部工作表</option>'].concat(sheetNames.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>')).join('')
+        ? ['<option value="">全部</option>'].concat(sheetNames.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>')).join('')
         : '';
+      const totalPts = cands.reduce((a, c) => a + c.marks.length, 0);
       m.innerHTML =
-        '<div class="mpp-modal wide">' +
-          '<div class="mpp-modal-title">导入质检表</div>' +
-          '<div class="qc-sub">' + (names ? esc(names) + ' · ' : '') + '按标记点导入到<strong>当前视频</strong>的日志记录</div>' +
+        '<div class="mpp-modal wide qc-modal">' +
+          '<div class="qc-title">导入质检表</div>' +
+          (names ? '<div class="qc-file" title="' + esc(names) + '">' + esc(names) + '</div>' : '') +
           // ① AI 导入（优先）：格式再杂也能用
-          '<div class="qc-block">' +
-            '<div class="qc-head"><span class="qc-step">① 交给 AI 转换后粘贴（推荐）</span></div>' +
-            '<div class="qc-sub">' + esc(ctx.hint || '点「复制提示词」，把提示词连同质检表一起给任意 AI 工具，再把 AI 输出的清单粘贴到下面；粘贴成功后即导入粘贴内容。') + '</div>' +
-            (sheetOpts
-              ? '<div class="qc-mode"><span>让 AI 只整理工作表</span>' +
-                  '<select class="set-select ai-sheet-sel">' + sheetOpts + '</select></div>'
-              : '') +
-            '<div class="ai-bar">' +
-              '<button type="button" class="ai-copy">复制提示词</button>' +
-              '<button type="button" class="ai-show">查看提示词</button>' +
-            '</div>' +
-            '<textarea class="ai-prompt" readonly hidden></textarea>' +
-            '<textarea class="ai-input" spellcheck="false" placeholder="在此粘贴 AI 输出的清单，例如：&#10;00:10:19:20 阿维塔 主持人口播&#10;00:07:10:21 京东健康 空镜"></textarea>' +
-            '<div class="ai-status"></div>' +
+          '<div class="qc-step">① 复制提示词发给 AI，结果粘贴到这里（推荐）</div>' +
+          '<div class="ai-bar">' +
+            '<button type="button" class="ai-copy">复制提示词</button>' +
+            '<button type="button" class="ai-show">查看提示词</button>' +
+            (sheetOpts ? '<span class="ai-sheet-wrap">只整理<select class="set-select ai-sheet-sel">' + sheetOpts + '</select></span>' : '') +
           '</div>' +
-          // ② 自动识别结果（默认不勾选，需手动选择后导入）
+          '<textarea class="ai-prompt" readonly hidden></textarea>' +
+          '<textarea class="ai-input" spellcheck="false" placeholder="粘贴 AI 输出的清单，例如：&#10;00:10:19:20 阿维塔 主持人口播"></textarea>' +
+          // ② 自动识别结果（默认不勾选，折叠收起）
           (hasCands
-            ? '<div class="qc-block qc-sheets">' +
-                '<div class="qc-head"><span class="qc-step">② 或勾选自动识别结果导入</span>' +
-                  '<label class="qc-all"><input type="checkbox" class="chk">全选</label>' +
-                  '<span class="qc-total"></span></div>' +
+            ? '<details class="qc-details">' +
+                '<summary>② 或勾选自动识别结果导入<span class="qc-total"></span></summary>' +
+                '<div class="qc-head"><label class="qc-all"><input type="checkbox" class="chk">全选</label>' +
+                  '<span class="qc-count">共 ' + totalPts + ' 点</span></div>' +
                 '<div class="qc-list">' + items + '</div>' +
-              '</div>'
-            : (ctx.hint ? '' : '<div class="qc-none">未自动识别到时间码，请用上面的 AI 方式转换后粘贴。</div>')) +
-          '<div class="mpp-modal-actions">' +
+              '</details>'
+            : '') +
+          '<div class="qc-foot">' +
+            '<div class="ai-status"></div>' +
             '<button type="button" class="mpp-cancel">取消</button>' +
             '<button type="button" class="mpp-ok">导入</button>' +
           '</div>' +
@@ -1401,33 +1396,36 @@ const MPP = (() => {
         const text = input.value.trim();
         pasted = text ? aiParse(text, ctx.meta || {}, 'auto') : null;
         const hasPaste = !!(pasted && pasted.marks.length);
+        const nSheet = sheetCount();
         // 粘贴内容优先：有可解析的粘贴内容时忽略表格勾选
         boxes.forEach(b => { b.disabled = hasPaste; });
         if (allBox) allBox.disabled = hasPaste;
         m.classList.toggle('ai-active', hasPaste);
         if (totalEl) {
-          const n = sheetCount();
-          totalEl.textContent = '共 ' + n + ' 个标记点';
           const allOn = boxes.length > 0 && boxes.every(b => b.checked);
+          totalEl.textContent = boxes.length ? '（已选 ' + nSheet + ' 点）' : '';
           if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
         }
         if (hasPaste) {
-          const preview = pasted.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
-          statusEl.textContent = '将导入粘贴内容：' + pasted.marks.length + ' 个标记点'
-            + '（按 ' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + ' 解析）'
+          const preview = pasted.marks.slice(0, 1).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join('');
+          statusEl.textContent = '将导入 ' + pasted.marks.length + ' 点（' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + '）'
             + (preview ? ' · ' + preview : '')
-            + (pasted.skippedOut ? '（' + pasted.skippedOut + ' 条超出视频时长已忽略）' : '');
+            + (pasted.skippedOut ? ' · 忽略 ' + pasted.skippedOut + ' 条超时长' : '');
+          okBtn.textContent = '导入 ' + pasted.marks.length + ' 点';
           okBtn.disabled = false;
           return;
         }
         if (text) {
           statusEl.textContent = pasted && pasted.unparsed
-            ? '粘贴内容未识别到时间码（' + pasted.unparsed + ' 处无法解析）—— 请确认 AI 输出保留了原表时间码'
-            : '粘贴内容未识别到时间码，请检查 AI 输出的时间码写法';
+            ? '未识别到时间码（' + pasted.unparsed + ' 处无法解析）——请检查 AI 输出的时间码'
+            : '未识别到时间码，请检查 AI 输出的时间码写法';
+        } else if (nSheet) {
+          statusEl.textContent = '已选 ' + nSheet + ' 点';
         } else {
-          statusEl.textContent = cands.length ? '粘贴 AI 结果，或勾选下面的自动识别结果导入' : '等待粘贴 AI 结果…';
+          statusEl.textContent = hasCands ? '粘贴 AI 结果，或展开 ② 勾选' : '未自动识别到时间码，请用 AI 方式转换后粘贴';
         }
-        okBtn.disabled = sheetCount() === 0;
+        okBtn.textContent = nSheet ? '导入 ' + nSheet + ' 点' : '导入';
+        okBtn.disabled = nSheet === 0;
       };
       boxes.forEach(b => b.addEventListener('change', refresh));
       if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
