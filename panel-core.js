@@ -766,7 +766,7 @@ const MPP = (() => {
     inp.className = 'tc-edit';
     inp.spellcheck = false;
     inp.value = cur || '';
-    inp.title = '修改时间码，Enter 保存，Esc 取消';
+    inp.title = '修改时间码，Enter 保存，Esc 取消（支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss）';
     tcEl.appendChild(inp);
     inp.focus();
     try { inp.select(); } catch (e) { }
@@ -778,7 +778,7 @@ const MPP = (() => {
       if (inp.parentElement) inp.parentElement.removeChild(inp);
       if (!save || !val) return;
       execInPage(fnGetFps).catch(() => 25).then(fps => {
-        const sec = tcToSec(val, fps || 25);
+        const sec = parseTcInput(val, fps || 25);
         if (sec == null) { panelToast('无法识别的时间码：' + val); return; }
         return execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec]).then(ok => {
           if (ok) { panelToast('已更新时间码'); load(true); }
@@ -1294,6 +1294,13 @@ const MPP = (() => {
     if (p.length === 3) return p[0] * 60 + p[1] + p[2] / f;
     if (p.length === 4) return p[0] * 3600 + p[1] * 60 + p[2] + p[3] / f;
     return null;
+  }
+  // 用户手动输入的时间码（面板就地编辑）：与页面控制栏右键输入完全同一套格式，
+  // 支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，以及无分隔的 hhmmssff / mmssff / mmss
+  function parseTcInput(raw, fps) {
+    const lib = window.MPGTcParse;
+    if (lib && typeof lib.parseTCInput === 'function') return lib.parseTCInput(raw, fps);
+    return tcToSec(raw, fps);
   }
   // 页面校准帧率（control-bar 暴露；导出/导入按同一帧率换算）
   function fnGetFps() {

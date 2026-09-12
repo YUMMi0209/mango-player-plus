@@ -786,40 +786,10 @@
 
   // ─── 右键时间码：输入时间码跳转 ───────────────
   // 兼容 hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss
+  // （解析实现见 content/tc-parse.js，与面板「右键双击时间码」就地编辑共用同一套逻辑）
   function parseTCInput(raw) {
-    const s = String(raw || '').trim();
-    if (!s || !/^[0-9:]+$/.test(s)) return null;
-    if (s.indexOf(':') !== -1) {
-      const parts = s.split(':');
-      if (parts.length < 2 || parts.length > 4) return null;
-      const n = parts.map(Number);
-      if (n.some(isNaN)) return null;
-      if (parts.length === 2) {
-        // mm:ss
-        if (n[1] >= 60) return null;
-        return n[0] * 60 + n[1];
-      }
-      // 3 段：mm:ss:ff；4 段：hh:mm:ss:ff（末段为帧）
-      const ff = n[n.length - 1], ss = n[n.length - 2];
-      if (ss >= 60 || ff >= FPS) return null;
-      if (parts.length === 3) return n[0] * 60 + ss + ff / FPS;
-      const hh = n[0], mm = n[1];
-      if (mm >= 60) return null;
-      return hh * 3600 + mm * 60 + ss + ff / FPS;
-    }
-    const d = s.length;
-    if (d === 4) {
-      const mm = Number(s.slice(0, 2)), ss = Number(s.slice(2, 4));
-      return ss < 60 ? mm * 60 + ss : null;
-    }
-    if (d === 6) {
-      const mm = Number(s.slice(0, 2)), ss = Number(s.slice(2, 4)), ff = Number(s.slice(4, 6));
-      return (ss < 60 && ff < FPS) ? mm * 60 + ss + ff / FPS : null;
-    }
-    if (d === 8) {
-      const hh = Number(s.slice(0, 2)), mm = Number(s.slice(2, 4)), ss = Number(s.slice(4, 6)), ff = Number(s.slice(6, 8));
-      return (mm < 60 && ss < 60 && ff < FPS) ? hh * 3600 + mm * 60 + ss + ff / FPS : null;
-    }
+    const lib = (typeof window !== 'undefined') ? window.MPGTcParse : null;
+    if (lib && typeof lib.parseTCInput === 'function') return lib.parseTCInput(raw, FPS);
     return null;
   }
 

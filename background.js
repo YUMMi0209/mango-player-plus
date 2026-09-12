@@ -83,7 +83,7 @@ async function syncActiveScripts() {
       await chrome.scripting.registerContentScripts([
         {
           id: ACTIVE_SCRIPTS_ID,
-          matches, js: ['content/content.js', 'content/control-bar.js'],
+          matches, js: ['content/tc-parse.js', 'content/remux.js', 'content/content.js', 'content/control-bar.js'],
           runAt: 'document_idle', world: 'MAIN'
         },
         {
