@@ -1495,7 +1495,13 @@ const MPP = (() => {
       };
       boxes.forEach(b => b.addEventListener('change', refresh));
       if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
-      input.addEventListener('input', refresh);
+      // 粘贴框随内容自动增高（上限 168px，超出才出现一条细滚动条）
+      const growInput = () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(168, Math.max(72, input.scrollHeight)) + 'px';
+      };
+      input.addEventListener('input', () => { growInput(); refresh(); });
+      input.addEventListener('paste', () => setTimeout(growInput, 0));
       input.addEventListener('keydown', e => e.stopPropagation());
       // 复制提示词；复制失败时展开提示词框供手动复制
       m.querySelector('.ai-copy').addEventListener('click', () => {
