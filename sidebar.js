@@ -37,6 +37,7 @@
     historyMenu: '#history-menu',
     histList: '#hist-list',
     histImport: '#hist-import',
+  histAi: '#hist-ai',
     histAll: '#hist-all',
     histClear: '#hist-clear'
   });
