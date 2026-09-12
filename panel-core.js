@@ -1299,12 +1299,165 @@ const MPP = (() => {
   function fnGetFps() {
     try { return window.__mgpFps || 25; } catch (e) { return 25; }
   }
+  // 当前视频元信息：质检表导入需要时长判定时间码读法（分:秒:帧 / 时:分:秒）
+  function fnVideoMeta() {
+    try {
+      const v = window.__mgp_video;
+      const d = v && isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+      return { duration: d, fps: window.__mgpFps || 25 };
+    } catch (e) { return { duration: 0, fps: 25 }; }
+  }
+  function fmtSec(s) {
+    const t = Math.max(0, Number(s) || 0);
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = Math.floor(t % 60);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+  const QC_MODE_NAME = { auto: '自动', mmssff: '分:秒:帧', hhmmss: '时:分:秒' };
+
+  // ─── 质检表导入：弹窗选择要导入的 sheet / 分节 ─────────────
+  function qcDialog(cands, autoMode, showMode) {
+    return new Promise(resolve => {
+      let m = document.getElementById('mpp-qc');
+      if (m) m.remove();
+      m = document.createElement('div');
+      m.id = 'mpp-qc';
+      m.className = 'mpp-mask';
+      const items = cands.map((c, i) => {
+        const hint = c.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
+        return '<label class="qc-item" data-i="' + i + '">' +
+            '<input type="checkbox" class="chk" checked>' +
+            '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
+            '<span class="qc-count">' + c.marks.length + ' 点</span>' +
+          '</label>' +
+          '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
+      }).join('');
+      m.innerHTML =
+        '<div class="mpp-modal wide">' +
+          '<div class="mpp-modal-title">导入质检表</div>' +
+          '<div class="qc-sub">按标记点导入到<strong>当前视频</strong>的日志记录，勾选要导入的内容：</div>' +
+          '<div class="qc-head"><label class="qc-all"><input type="checkbox" class="chk" checked>全选</label>' +
+            '<span class="qc-total"></span></div>' +
+          '<div class="qc-list">' + items + '</div>' +
+          (showMode
+            ? '<div class="qc-mode">时间码读法' +
+                '<select class="set-select qc-mode-sel">' +
+                  '<option value="auto">自动（' + QC_MODE_NAME[autoMode === 'mmssff' ? 'mmssff' : 'hhmmss'] + '）</option>' +
+                  '<option value="mmssff">分:秒:帧</option>' +
+                  '<option value="hhmmss">时:分:秒</option>' +
+                '</select></div>'
+            : '') +
+          '<div class="mpp-modal-actions">' +
+            '<button type="button" class="mpp-cancel">取消</button>' +
+            '<button type="button" class="mpp-ok">导入</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(m);
+      const boxes = [...m.querySelectorAll('.qc-item input')];
+      const allBox = m.querySelector('.qc-all input');
+      const totalEl = m.querySelector('.qc-total');
+      const syncTotal = () => {
+        let n = 0;
+        cands.forEach((c, i) => { if (boxes[i].checked) n += c.marks.length; });
+        totalEl.textContent = '共 ' + n + ' 个标记点';
+        const allOn = boxes.every(b => b.checked);
+        allBox.checked = allOn;
+        allBox.indeterminate = !allOn && boxes.some(b => b.checked);
+      };
+      boxes.forEach(b => b.addEventListener('change', syncTotal));
+      allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); syncTotal(); });
+      syncTotal();
+      const finish = val => {
+        document.removeEventListener('keydown', onKey);
+        m.remove();
+        resolve(val);
+      };
+      const onKey = e => {
+        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+        else if (e.key === 'Enter' && e.target && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT') { e.preventDefault(); ok(); }
+      };
+      const ok = () => {
+        const picked = cands.filter((c, i) => boxes[i].checked);
+        if (!picked.length) { panelToast('请至少勾选一项'); return; }
+        const sel = m.querySelector('.qc-mode-sel');
+        finish({ items: picked, mode: sel ? sel.value : 'auto' });
+      };
+      m.querySelector('.mpp-cancel').addEventListener('click', () => finish(null));
+      m.querySelector('.mpp-ok').addEventListener('click', ok);
+      m.addEventListener('click', e => { if (e.target === m) finish(null); });
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  // 质检表文件 → 候选（工作表 / 分节）→ 弹窗选择 → 解析为标记点导入当前视频
+  async function importQcFiles(files) {
+    if (!window.QcImport) return false;
+    let meta = { duration: 0, fps: 25 };
+    try { meta = (await execInPage(fnVideoMeta)) || meta; } catch (e) { }
+    const cands = [];
+    files.forEach(f => {
+      let scanned = [];
+      try { scanned = QcImport.scan(f.sheets); } catch (e) { scanned = []; }
+      scanned.forEach((sh, si) => {
+        const sheet = (f.sheets || [])[si] || { rows: [] };
+        const secs = (sh.sections || []).filter(s => s.tokens > 0);
+        const list = secs.length ? secs : [{ title: '', start: 0, end: (sheet.rows || []).length - 1 }];
+        list.forEach(sec => {
+          const rows = (sheet.rows || []).slice(sec.start, sec.end + 1);
+          const extra = sec.title && sec.title.indexOf(sh.name) < 0 ? ' · ' + sec.title : '';
+          const multi = files.length > 1 ? f.name + ' — ' : '';
+          cands.push({ file: f.name, sheet: sh.name, label: multi + (sh.name || 'Sheet') + extra, rows: rows });
+        });
+      });
+    });
+    if (!cands.length) { panelToast('质检表里没有可导入的时间码'); return false; }
+    // 先按自动识别解析一次：弹窗里显示每个候选的标记点数与备注预览
+    cands.forEach(c => {
+      const r = QcImport.parse([{ name: c.sheet, rows: c.rows }], { fps: meta.fps, duration: meta.duration });
+      c.marks = r.marks;
+      c.mode = r.mode;
+      c.has6 = r.has6;
+    });
+    const usable = cands.filter(c => c.marks.length);
+    if (!usable.length) { panelToast('质检表里没有可导入的时间码'); return false; }
+    const modes = [...new Set(usable.map(c => c.mode))];
+    const autoMode = modes.length === 1 ? modes[0] : 'hhmmss';
+    const showMode = usable.some(c => c.has6);
+    const pick = await qcDialog(usable, autoMode, showMode);
+    if (!pick) return false;
+    const byTime = new Map();
+    let total = 0;
+    pick.items.forEach(c => {
+      const r = QcImport.parse([{ name: c.sheet, rows: c.rows }],
+        { fps: meta.fps, duration: meta.duration, mode: pick.mode === 'auto' ? undefined : pick.mode });
+      c.marks = r.marks;
+      r.marks.forEach(m => {
+        total++;
+        const k = Math.round(m.time * 100) / 100;
+        const prev = byTime.get(k);
+        if (!prev) byTime.set(k, { time: k, note: m.note });
+        else if (m.note && prev.note.indexOf(m.note) < 0) prev.note = (prev.note ? prev.note + ' / ' : '') + m.note;
+      });
+    });
+    const marks = [...byTime.values()].sort((a, b) => a.time - b.time);
+    let added = 0;
+    try { added = (await execInPage(fnImportLogs, [marks, []])) || 0; } catch (e) { }
+    if (!added) {
+      panelToast(marks.length ? '未导入：当前页面无法访问视频，或时间码与已有记录重复' : '质检表里没有可导入的时间码');
+      return false;
+    }
+    panelToast('已导入质检表 ' + added + ' 个标记点'
+      + (total > marks.length ? '（' + (total - marks.length) + ' 条同时刻已合并）' : '')
+      + (added < marks.length ? '（' + (marks.length - added) + ' 条重复已跳过）' : ''));
+    return true;
+  }
+
   function timeFromUrl(url) {
     const m = String(url || '').match(/mpp=([\d.]+)/);
     return m ? parseFloat(m[1]) : null;
   }
   async function importLogsFromFiles(files) {
     const recs = [];
+    const qcFiles = [];        // 质检表（非本插件导出）：交给 QC 导入流程，弹窗选择导入内容
     let filesOk = 0;
     for (const f of files) {
       let buf;
@@ -1313,20 +1466,31 @@ const MPP = (() => {
       try { data = window.XlsxReader ? XlsxReader.read(buf) : null; } catch (e) { data = null; }
       if (!data) continue;
       filesOk++;
+      let n = 0;
       (data.marks || []).slice(1).forEach(r => {
         if (!r[1]) return;
+        n++;
         recs.push({ kind: 'marks', tc: r[1], color: r[2] || null, note: r[3] || null, url: r[4] || '', title: r[5] || '' });
       });
       (data.inOut || []).slice(1).forEach(r => {
         if (!r[1] || !r[2]) return;
+        n++;
         recs.push({ kind: 'inOut', inTC: r[1], outTC: r[2], dur: parseFloat(r[3]) || 0, note: r[4] || null, url: r[5] || '', title: r[6] || '' });
       });
+      // 不是本插件导出格式 → 按质检表处理（工作表 / 分节由用户在弹窗里选择）
+      if (!n && window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: data.sheets || [] });
     }
     if (!filesOk) {
-      panelToast('无法解析 Excel（仅支持本插件导出的 xlsx）');
+      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与质检表）');
       return;
     }
     if (!recs.length) {
+      if (qcFiles.length) {
+        try { await importQcFiles(qcFiles); } catch (e) { }
+        loadHistory();
+        load(true);
+        return;
+      }
       panelToast('Excel 中没有可导入的记录');
       return;
     }
@@ -1388,6 +1552,9 @@ const MPP = (() => {
     });
     if (impAdded) await chrome.storage.local.set({ mpp_imported: base }).catch(() => { });
     panelToast('已导入 ' + Object.keys(groups).length + ' 个视频 · ' + (pageAdded + impAdded) + ' 条记录');
+    if (qcFiles.length) {
+      try { await importQcFiles(qcFiles); } catch (e) { }
+    }
     loadHistory();
     load(true);
   }

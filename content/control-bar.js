@@ -2687,11 +2687,16 @@
     importLogs(marks, inOut) {
       let added = 0;
       (Array.isArray(marks) ? marks : []).forEach(m => {
-        if (!m || !m.tc) return;
-        if (logs.marks.some(x => x.tc === m.tc)) return;
+        if (!m) return;
+        // 质检表导入只带 time（由页面按校准帧率格式化时间码），本插件导出导入带 tc
+        const hasTc = !!m.tc;
+        const t = (m.time != null && isFinite(m.time)) ? Number(m.time) : null;
+        if (!hasTc && t == null) return;
+        const tc = hasTc ? m.tc : fmtTC(t);
+        if (logs.marks.some(x => x.tc === tc)) return;
         insertSorted(logs.marks, {
-          time: m.time != null ? m.time : 0,
-          tc: m.tc, color: m.color || null, note: m.note || null,
+          time: t != null ? t : 0,
+          tc: tc, color: m.color || null, note: m.note || null,
           url: location.href, title: titleForLog()
         }, x => x.time != null ? x.time : 0);
         added++;
