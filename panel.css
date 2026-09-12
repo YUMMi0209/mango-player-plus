@@ -168,8 +168,6 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .ai-bar{display:flex;align-items:center;gap:6px}
 .ai-bar button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s;flex-shrink:0}
 .ai-bar button:hover{border-color:var(--orange);color:var(--orange)}
-.ai-sheet-wrap{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);min-width:0}
-.ai-sheet-wrap .set-select{max-width:112px}
 .ai-prompt,.ai-input{width:100%;box-sizing:border-box;background:var(--row);border:1px solid var(--card-brd);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.55;padding:7px 8px;outline:none;
   /* 长行折行 + 只保留一条细竖滚动条：避免右边 / 下边同时出现滚动条 */
   white-space:pre-wrap;word-break:break-word;overflow-x:hidden;overflow-y:auto;
