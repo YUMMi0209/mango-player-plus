@@ -1381,8 +1381,6 @@ const MPP = (() => {
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = Math.floor(t % 60);
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
   }
-  const QC_MODE_HINT = { hhmmssff: 'HHMMSSFF 时:分:秒:帧', mmssff: 'MMSSFF 分:秒:帧', hhmmss: 'HHMMSS 时:分:秒', mmss: 'MMSS 分:秒' };
-
   // ─── 质检表导入弹窗 ─────────────────────────────────────
   // 拖入质检表（或点历史栏 AI 按钮）后弹出：① AI 提示词 + 粘贴框（优先）
   // ② 自动识别到的工作表 / 分节（默认不勾选，需手动选择）
@@ -1473,24 +1471,17 @@ const MPP = (() => {
           if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
         }
         if (hasPaste) {
-          const preview = pasted.marks.slice(0, 1).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join('');
-          statusEl.textContent = '将导入 ' + pasted.marks.length + ' 点（' + (QC_MODE_HINT[pasted.mode] || QC_MODE_HINT.hhmmss) + '）'
-            + (preview ? ' · ' + preview : '')
-            + (pasted.skippedOut ? ' · 忽略 ' + pasted.skippedOut + ' 条超时长' : '');
-          okBtn.textContent = '导入 ' + pasted.marks.length + ' 点';
+          statusEl.textContent = '共 ' + pasted.marks.length + ' 条记录';
+          okBtn.textContent = '导入';
           okBtn.disabled = false;
           return;
         }
         if (text) {
-          statusEl.textContent = pasted && pasted.unparsed
-            ? '未识别到时间码（' + pasted.unparsed + ' 处无法解析）——请检查 AI 输出的时间码'
-            : '未识别到时间码，请检查 AI 输出的时间码写法';
-        } else if (nSheet) {
-          statusEl.textContent = '已选 ' + nSheet + ' 点';
+          statusEl.textContent = '未识别到时间码，请检查 AI 输出';
         } else {
-          statusEl.textContent = hasCands ? '粘贴 AI 结果，或展开 ② 勾选' : '未自动识别到时间码，请用 AI 方式转换后粘贴';
+          statusEl.textContent = '共 ' + nSheet + ' 条记录';
         }
-        okBtn.textContent = nSheet ? '导入 ' + nSheet + ' 点' : '导入';
+        okBtn.textContent = '导入';
         okBtn.disabled = nSheet === 0;
       };
       boxes.forEach(b => b.addEventListener('change', refresh));
