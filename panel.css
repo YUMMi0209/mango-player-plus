@@ -154,13 +154,15 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 :root[data-theme="light"] .mpp-modal-actions .danger{color:#c0392b;background:rgba(231,76,60,.12);border-color:#e74c3c}
 :root[data-theme="light"] .mpp-modal-actions .danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 
-/* ─── 质检表导入弹窗（选择要导入的工作表 / 分节）── */
+/* ─── 质检表导入弹窗（勾选工作表 + AI 提示词 / 粘贴）── */
 .mpp-modal.wide{width:360px}
 .qc-sub{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px}
-.qc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 6px;border-bottom:1px solid var(--card-brd);margin-bottom:6px}
-.qc-all{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text);cursor:pointer}
-.qc-total{font-size:11px;color:var(--orange)}
-.qc-list{max-height:44vh;overflow-y:auto;margin:0 -4px 10px;padding:0 4px}
+.qc-block{margin-bottom:10px}
+.qc-head{display:flex;align-items:center;gap:8px;padding:0 2px 6px;border-bottom:1px solid var(--card-brd);margin-bottom:6px}
+.qc-step{font-size:11px;color:var(--text);font-weight:600}
+.qc-all{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text);cursor:pointer;margin-left:auto}
+.qc-total{font-size:11px;color:var(--orange);flex-shrink:0}
+.qc-list{max-height:30vh;overflow-y:auto;margin:0 -4px;padding:0 4px}
 .qc-item{display:flex;align-items:center;gap:8px;padding:6px 6px;border-radius:7px;cursor:pointer;transition:background .12s}
 .qc-item:hover{background:var(--row)}
 .qc-name{flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -168,20 +170,22 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-hint{font-size:10px;color:var(--faint);padding:0 6px 6px 28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qc-mode{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);margin-bottom:10px}
 .qc-item .chk{flex-shrink:0}
+.qc-none{font-size:11px;color:var(--orange);line-height:1.5;margin-bottom:10px;padding:6px 8px;border:1px dashed var(--card-brd);border-radius:8px}
+/* 粘贴了 AI 结果：表格勾选被忽略，整体压暗提示优先级 */
+#mpp-qc.ai-active .qc-sheets{opacity:.45;pointer-events:none}
 .mpp-modal-actions .mpp-ok{background:var(--orange-dk);border-color:var(--orange);color:var(--text);font-weight:600}
 .mpp-modal-actions .mpp-ok:hover{background:var(--orange);color:#fff}
 .mpp-modal-actions .mpp-ok:disabled{opacity:.45;cursor:not-allowed;background:var(--row);border-color:var(--card-brd);color:var(--muted)}
 
-/* ─── AI 导入弹窗 ─── */
+/* ─── AI 提示词 / 粘贴框（质检表导入弹窗内）── */
 .ai-bar{display:flex;gap:8px;margin-bottom:8px}
 .ai-bar button{height:26px;padding:0 12px;border-radius:7px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
 .ai-bar button:hover{border-color:var(--orange);color:var(--orange)}
 .ai-prompt,.ai-input{width:100%;box-sizing:border-box;background:var(--row);border:1px solid var(--card-brd);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.5;padding:8px;outline:none;resize:vertical}
-.ai-prompt{height:150px;margin-bottom:8px}
-.ai-input{height:120px;margin-bottom:8px;white-space:pre}
+.ai-prompt{height:140px;margin-bottom:8px}
+.ai-input{height:96px;margin-bottom:8px;white-space:pre}
 .ai-prompt:focus,.ai-input:focus{border-color:var(--orange)}
-.ai-status{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:10px;word-break:break-all;min-height:16px}
-.ai-mode{margin-top:-4px}
+.ai-status{font-size:11px;color:var(--muted);line-height:1.5;word-break:break-all;min-height:16px}
 
 /* ─── 面板轻提示（导入 / 删除 / 导出等操作反馈）── */
 #mpp-toast{position:fixed;left:0;right:0;bottom:64px;margin:0 auto;width:fit-content;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--card-brd);color:var(--text);font-size:12px;line-height:1.5;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);text-align:center;box-sizing:border-box;transform:translateY(10px);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120}

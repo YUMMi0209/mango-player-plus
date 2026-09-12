@@ -1219,8 +1219,6 @@ const MPP = (() => {
         fi.value = '';
       });
     }
-    // AI 导入：复制提示词交给第三方 AI，把结果粘贴回来
-    if (els.histAi) els.histAi.addEventListener('click', () => { aiImport(); });
     ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
     document.addEventListener('drop', e => {
       e.preventDefault();
@@ -1315,8 +1313,14 @@ const MPP = (() => {
   }
   const QC_MODE_NAME = { auto: '自动', mmssff: '分:秒:帧', hhmmss: '时:分:秒' };
 
-  // ─── 质检表导入：弹窗选择要导入的 sheet / 分节 ─────────────
-  function qcDialog(cands, autoMode, showMode) {
+  // ─── 质检表导入弹窗 ─────────────────────────────────────
+  // 拖入质检表后弹出：上半部分勾选自动识别到的工作表 / 分节，下半部分提供 AI 提示词与
+  // 粘贴框（格式复杂的表格可交给第三方 AI 转换后粘贴，粘贴内容优先）
+  // ctx: { names: [文件名], cands: [{label, marks, mode, has6}], autoMode, showMode }
+  function qcDialog(ctx) {
+    const cands = ctx.cands || [];
+    const autoMode = ctx.autoMode || 'hhmmss';
+    const showMode = !!ctx.showMode;
     return new Promise(resolve => {
       let m = document.getElementById('mpp-qc');
       if (m) m.remove();
@@ -1332,13 +1336,30 @@ const MPP = (() => {
           '</label>' +
           '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
       }).join('');
+      const names = (ctx.names || []).join('、');
       m.innerHTML =
         '<div class="mpp-modal wide">' +
           '<div class="mpp-modal-title">导入质检表</div>' +
-          '<div class="qc-sub">按标记点导入到<strong>当前视频</strong>的日志记录，勾选要导入的内容：</div>' +
-          '<div class="qc-head"><label class="qc-all"><input type="checkbox" class="chk" checked>全选</label>' +
-            '<span class="qc-total"></span></div>' +
-          '<div class="qc-list">' + items + '</div>' +
+          '<div class="qc-sub">' + (names ? esc(names) + ' · ' : '') + '按标记点导入到<strong>当前视频</strong>的日志记录</div>' +
+          (cands.length
+            ? '<div class="qc-block qc-sheets">' +
+                '<div class="qc-head"><span class="qc-step">① 自动识别结果</span>' +
+                  '<label class="qc-all"><input type="checkbox" class="chk" checked>全选</label>' +
+                  '<span class="qc-total"></span></div>' +
+                '<div class="qc-list">' + items + '</div>' +
+              '</div>'
+            : '<div class="qc-none">未自动识别到时间码，请用下面的 AI 方式转换后粘贴。</div>') +
+          '<div class="qc-block">' +
+            '<div class="qc-head"><span class="qc-step">' + (cands.length ? '② ' : '') + '格式没识别全？交给 AI 转换后粘贴</span></div>' +
+            '<div class="qc-sub">点「复制提示词」，把提示词连同质检表一起给任意 AI 工具，再把 AI 输出的清单粘贴到下面（粘贴后导入的是粘贴内容）。</div>' +
+            '<div class="ai-bar">' +
+              '<button type="button" class="ai-copy">复制提示词</button>' +
+              '<button type="button" class="ai-show">查看提示词</button>' +
+            '</div>' +
+            '<textarea class="ai-prompt" readonly hidden></textarea>' +
+            '<textarea class="ai-input" spellcheck="false" placeholder="在此粘贴 AI 输出的清单，例如：&#10;00295306 趣多多空镜&#10;00:07:10:21 京东空镜①"></textarea>' +
+            '<div class="ai-status"></div>' +
+          '</div>' +
           (showMode
             ? '<div class="qc-mode">时间码读法' +
                 '<select class="set-select qc-mode-sel">' +
@@ -1356,40 +1377,103 @@ const MPP = (() => {
       const boxes = [...m.querySelectorAll('.qc-item input')];
       const allBox = m.querySelector('.qc-all input');
       const totalEl = m.querySelector('.qc-total');
-      const syncTotal = () => {
+      const modeSel = m.querySelector('.qc-mode-sel');
+      const input = m.querySelector('.ai-input');
+      const statusEl = m.querySelector('.ai-status');
+      const promptEl = m.querySelector('.ai-prompt');
+      const okBtn = m.querySelector('.mpp-ok');
+      promptEl.value = aiPrompt();
+      let pasted = null;
+      const sheetCount = () => {
         let n = 0;
         cands.forEach((c, i) => { if (boxes[i].checked) n += c.marks.length; });
-        totalEl.textContent = '共 ' + n + ' 个标记点';
-        const allOn = boxes.every(b => b.checked);
-        allBox.checked = allOn;
-        allBox.indeterminate = !allOn && boxes.some(b => b.checked);
+        return n;
       };
-      boxes.forEach(b => b.addEventListener('change', syncTotal));
-      allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); syncTotal(); });
-      syncTotal();
+      const refresh = () => {
+        const mode = modeSel ? modeSel.value : 'auto';
+        const text = input.value.trim();
+        pasted = text ? aiParse(text, ctx.meta || {}, mode) : null;
+        const hasPaste = !!(pasted && pasted.marks.length);
+        // 粘贴内容优先：有可解析的粘贴内容时忽略表格勾选
+        boxes.forEach(b => { b.disabled = hasPaste; });
+        if (allBox) allBox.disabled = hasPaste;
+        m.classList.toggle('ai-active', hasPaste);
+        if (totalEl) {
+          const n = sheetCount();
+          totalEl.textContent = '共 ' + n + ' 个标记点';
+          const allOn = boxes.length > 0 && boxes.every(b => b.checked);
+          if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
+        }
+        if (modeSel && pasted) {
+          modeSel.options[0].textContent = '自动（' + (pasted.mode === 'mmssff' ? '分:秒:帧' : '时:分:秒') + '）';
+        }
+        if (hasPaste) {
+          const preview = pasted.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
+          statusEl.textContent = '将导入粘贴内容：' + pasted.marks.length + ' 个标记点'
+            + (preview ? ' · ' + preview : '')
+            + (pasted.skippedOut ? '（' + pasted.skippedOut + ' 条超出视频时长已忽略）' : '');
+          okBtn.disabled = false;
+          return;
+        }
+        if (text) {
+          statusEl.textContent = pasted && pasted.unparsed
+            ? '粘贴内容未识别到时间码（' + pasted.unparsed + ' 处无法解析）—— 请确认 AI 输出保留了原表时间码'
+            : '粘贴内容未识别到时间码；不改读法的话可按上面的表格勾选导入';
+        } else {
+          statusEl.textContent = cands.length ? '粘贴 AI 结果，或直接按上面的勾选导入' : '等待粘贴 AI 结果…';
+        }
+        okBtn.disabled = sheetCount() === 0;
+      };
+      boxes.forEach(b => b.addEventListener('change', refresh));
+      if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
+      input.addEventListener('input', refresh);
+      input.addEventListener('keydown', e => e.stopPropagation());
+      if (modeSel) modeSel.addEventListener('change', refresh);
+      m.querySelector('.ai-show').addEventListener('click', () => {
+        promptEl.hidden = !promptEl.hidden;
+        if (!promptEl.hidden) { promptEl.focus(); promptEl.select(); }
+      });
+      m.querySelector('.ai-copy').addEventListener('click', () => {
+        const fail = () => {
+          promptEl.hidden = false;
+          promptEl.focus(); promptEl.select();
+          panelToast('复制失败，请在提示词框内手动复制');
+        };
+        try {
+          const p = aiPrompt();
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(p).then(() => panelToast('已复制提示词，粘贴给 AI 即可')).catch(fail);
+          } else fail();
+        } catch (e) { fail(); }
+      });
       const finish = val => {
         document.removeEventListener('keydown', onKey);
         m.remove();
         resolve(val);
       };
       const onKey = e => {
-        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
-        else if (e.key === 'Enter' && e.target && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT') { e.preventDefault(); ok(); }
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        if (!promptEl.hidden) { promptEl.hidden = true; return; }
+        finish(null);
       };
       const ok = () => {
+        const text = input.value.trim();
+        const mode = modeSel ? modeSel.value : 'auto';
+        if (text && pasted && pasted.marks.length) { finish({ items: [], mode: mode, text: text }); return; }
         const picked = cands.filter((c, i) => boxes[i].checked);
-        if (!picked.length) { panelToast('请至少勾选一项'); return; }
-        const sel = m.querySelector('.qc-mode-sel');
-        finish({ items: picked, mode: sel ? sel.value : 'auto' });
+        if (!picked.length) { panelToast('请至少勾选一项，或粘贴 AI 结果'); return; }
+        finish({ items: picked, mode: mode, text: '' });
       };
       m.querySelector('.mpp-cancel').addEventListener('click', () => finish(null));
-      m.querySelector('.mpp-ok').addEventListener('click', ok);
+      okBtn.addEventListener('click', ok);
       m.addEventListener('click', e => { if (e.target === m) finish(null); });
       document.addEventListener('keydown', onKey);
+      refresh();
     });
   }
 
-  // 质检表文件 → 候选（工作表 / 分节）→ 弹窗选择 → 解析为标记点导入当前视频
+  // 质检表文件 → 候选（工作表 / 分节）+ AI 提示词 → 弹窗 → 解析为标记点导入当前视频
   async function importQcFiles(files) {
     if (!window.QcImport) return false;
     let meta = { duration: 0, fps: 25 };
@@ -1397,7 +1481,7 @@ const MPP = (() => {
     const cands = [];
     files.forEach(f => {
       let scanned = [];
-      try { scanned = QcImport.scan(f.sheets); } catch (e) { scanned = []; }
+      try { scanned = QcImport.scan(f.sheets || []); } catch (e) { scanned = []; }
       scanned.forEach((sh, si) => {
         const sheet = (f.sheets || [])[si] || { rows: [] };
         const secs = (sh.sections || []).filter(s => s.tokens > 0);
@@ -1410,7 +1494,6 @@ const MPP = (() => {
         });
       });
     });
-    if (!cands.length) { panelToast('质检表里没有可导入的时间码，可用「AI 导入」转换后粘贴'); return false; }
     // 先按自动识别解析一次：弹窗里显示每个候选的标记点数与备注预览
     cands.forEach(c => {
       const r = QcImport.parse([{ name: c.sheet, rows: c.rows }], { fps: meta.fps, duration: meta.duration });
@@ -1419,31 +1502,40 @@ const MPP = (() => {
       c.has6 = r.has6;
     });
     const usable = cands.filter(c => c.marks.length);
-    if (!usable.length) { panelToast('质检表里没有可导入的时间码，可用「AI 导入」转换后粘贴'); return false; }
     const modes = [...new Set(usable.map(c => c.mode))];
-    const autoMode = modes.length === 1 ? modes[0] : 'hhmmss';
-    const showMode = usable.some(c => c.has6);
-    const pick = await qcDialog(usable, autoMode, showMode);
+    const pick = await qcDialog({
+      names: files.map(f => f.name),
+      cands: usable,
+      meta: meta,
+      autoMode: modes.length === 1 ? modes[0] : 'hhmmss',
+      showMode: true   // 粘贴内容与表格都可能含 6 位数字：始终给出读法开关
+    });
     if (!pick) return false;
     const byTime = new Map();
     let total = 0;
-    pick.items.forEach(c => {
-      const r = QcImport.parse([{ name: c.sheet, rows: c.rows }],
-        { fps: meta.fps, duration: meta.duration, mode: pick.mode === 'auto' ? undefined : pick.mode });
-      c.marks = r.marks;
-      r.marks.forEach(m => {
-        total++;
-        const k = Math.round(m.time * 100) / 100;
-        const prev = byTime.get(k);
-        if (!prev) byTime.set(k, { time: k, note: m.note });
-        else if (m.note && prev.note.indexOf(m.note) < 0) prev.note = (prev.note ? prev.note + ' / ' : '') + m.note;
+    const pushMark = (time, note) => {
+      total++;
+      const k = Math.round(time * 100) / 100;
+      const prev = byTime.get(k);
+      if (!prev) byTime.set(k, { time: k, note: note });
+      else if (note && prev.note.indexOf(note) < 0) prev.note = (prev.note ? prev.note + ' / ' : '') + note;
+    };
+    // 粘贴内容优先；否则用勾选的表格
+    if (pick.text && pick.text.trim()) {
+      const r = aiParse(pick.text, meta, pick.mode) || { marks: [] };
+      r.marks.forEach(m => pushMark(m.time, m.note));
+    } else {
+      pick.items.forEach(c => {
+        const r = QcImport.parse([{ name: c.sheet, rows: c.rows }],
+          { fps: meta.fps, duration: meta.duration, mode: pick.mode === 'auto' ? undefined : pick.mode });
+        r.marks.forEach(m => pushMark(m.time, m.note));
       });
-    });
+    }
     const marks = [...byTime.values()].sort((a, b) => a.time - b.time);
     let added = 0;
     try { added = (await execInPage(fnImportLogs, [marks, []])) || 0; } catch (e) { }
     if (!added) {
-      panelToast(marks.length ? '未导入：当前页面无法访问视频，或时间码与已有记录重复' : '质检表里没有可导入的时间码');
+      panelToast(marks.length ? '未导入：当前页面无法访问视频，或时间码与已有记录重复' : '没有可导入的时间码');
       return false;
     }
     panelToast('已导入质检表 ' + added + ' 个标记点'
@@ -1452,7 +1544,7 @@ const MPP = (() => {
     return true;
   }
 
-  // ─── AI 导入：提示词 + 粘贴 AI 结果 ───────────────────────
+  // ─── AI 提示词 + 粘贴结果解析（质检表导入弹窗内使用）────────
   // 质检表版本多、格式杂：把提示词连同表格交给第三方 AI，再把 AI 输出的清单粘贴回来。
   // 粘贴内容走与质检表相同的解析（时间码识别 / 备注规则 / 时长过滤），支持纯文本与 JSON
   function aiPrompt() {
@@ -1465,122 +1557,6 @@ const MPP = (() => {
       fps: meta.fps, duration: meta.duration,
       mode: (mode && mode !== 'auto') ? mode : undefined
     });
-  }
-  function aiImportDialog(meta, mode) {
-    return new Promise(resolve => {
-      let m = document.getElementById('mpp-ai');
-      if (m) m.remove();
-      m = document.createElement('div');
-      m.id = 'mpp-ai';
-      m.className = 'mpp-mask';
-      m.innerHTML =
-        '<div class="mpp-modal wide">' +
-          '<div class="mpp-modal-title">AI 导入质检表</div>' +
-          '<div class="qc-sub">把提示词和质检表一起交给 AI（表格可直接上传 / 贴截图），让 AI 按格式整理；' +
-            '把结果粘贴到下面即可导入到<strong>当前视频</strong>的标记点。</div>' +
-          '<div class="ai-bar">' +
-            '<button type="button" class="ai-copy">复制提示词</button>' +
-            '<button type="button" class="ai-show">查看提示词</button>' +
-          '</div>' +
-          '<textarea class="ai-prompt" readonly hidden></textarea>' +
-          '<textarea class="ai-input" spellcheck="false" placeholder="在此粘贴 AI 输出的清单，例如：&#10;00295306 趣多多空镜&#10;00:07:10:21 京东空镜①&#10;011218 解字平1 阿维塔"></textarea>' +
-          '<div class="ai-status">等待粘贴…</div>' +
-          '<div class="qc-mode ai-mode" hidden>时间码读法' +
-            '<select class="set-select ai-mode-sel">' +
-              '<option value="auto">自动</option>' +
-              '<option value="mmssff">分:秒:帧</option>' +
-              '<option value="hhmmss">时:分:秒</option>' +
-            '</select></div>' +
-          '<div class="mpp-modal-actions">' +
-            '<button type="button" class="mpp-cancel">取消</button>' +
-            '<button type="button" class="mpp-ok" disabled>导入</button>' +
-          '</div>' +
-        '</div>';
-      document.body.appendChild(m);
-      const input = m.querySelector('.ai-input');
-      const statusEl = m.querySelector('.ai-status');
-      const modeWrap = m.querySelector('.ai-mode');
-      const modeSel = m.querySelector('.ai-mode-sel');
-      const okBtn = m.querySelector('.mpp-ok');
-      const promptEl = m.querySelector('.ai-prompt');
-      promptEl.value = aiPrompt();
-      let parsed = null;
-      const refresh = () => {
-        const text = input.value.trim();
-        const mode = modeSel ? modeSel.value : 'auto';
-        parsed = text ? aiParse(text, meta, mode) : null;
-        const n = parsed ? parsed.marks.length : 0;
-        modeWrap.hidden = !(parsed && parsed.has6);
-        if (modeSel && parsed) {
-          const auto = parsed.mode === 'mmssff' ? '分:秒:帧' : '时:分:秒';
-          modeSel.options[0].textContent = '自动（' + auto + '）';
-        }
-        okBtn.disabled = n === 0;
-        if (!text) { statusEl.textContent = '等待粘贴…'; return; }
-        if (!n) {
-          statusEl.textContent = parsed && parsed.unparsed
-            ? '未识别到时间码（' + parsed.unparsed + ' 处无法解析）—— 请确认 AI 输出保留了原表时间码'
-            : '未识别到时间码';
-          return;
-        }
-        const preview = parsed.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
-        statusEl.textContent = '识别到 ' + n + ' 个标记点' + (preview ? ' · ' + preview : '')
-          + (parsed.skippedOut ? '（' + parsed.skippedOut + ' 条超出视频时长已忽略）' : '');
-      };
-      input.addEventListener('input', refresh);
-      input.addEventListener('keydown', e => e.stopPropagation());
-      modeSel.addEventListener('change', refresh);
-      m.querySelector('.ai-show').addEventListener('click', () => {
-        promptEl.hidden = !promptEl.hidden;
-        if (!promptEl.hidden) { promptEl.focus(); promptEl.select(); }
-      });
-      m.querySelector('.ai-copy').addEventListener('click', () => {
-        const p = aiPrompt();
-        const done = () => panelToast('已复制提示词，粘贴给 AI 即可');
-        const fail = () => {
-          promptEl.hidden = false;
-          promptEl.focus(); promptEl.select();
-          panelToast('复制失败，请在提示词框内手动复制');
-        };
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(p).then(done).catch(fail);
-          else fail();
-        } catch (e) { fail(); }
-      });
-      const finish = val => {
-        document.removeEventListener('keydown', onKey);
-        m.remove();
-        resolve(val);
-      };
-      const onKey = e => {
-        if (e.key === 'Escape' && !promptEl.hidden) { promptEl.hidden = true; return; }
-        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
-      };
-      m.querySelector('.mpp-cancel').addEventListener('click', () => finish(null));
-      m.querySelector('.mpp-ok').addEventListener('click', () => {
-        if (!parsed || !parsed.marks.length) return;
-        finish(parsed.marks);
-      });
-      m.addEventListener('click', e => { if (e.target === m) finish(null); });
-      document.addEventListener('keydown', onKey);
-      refresh();
-      input.focus();
-    });
-  }
-  async function aiImport() {
-    let meta = { duration: 0, fps: 25 };
-    try { meta = (await execInPage(fnVideoMeta)) || meta; } catch (e) { }
-    const marks = await aiImportDialog(meta, 'auto');
-    if (!marks || !marks.length) return false;
-    let added = 0;
-    try { added = (await execInPage(fnImportLogs, [marks, []])) || 0; } catch (e) { }
-    if (!added) {
-      panelToast('未导入：当前页面无法访问视频，或时间码与已有记录重复');
-      return false;
-    }
-    panelToast('已导入 ' + added + ' 个标记点' + (added < marks.length ? '（' + (marks.length - added) + ' 条重复已跳过）' : ''));
-    load(true);
-    return true;
   }
 
   function timeFromUrl(url) {
@@ -1596,7 +1572,11 @@ const MPP = (() => {
       try { buf = await f.arrayBuffer(); } catch (e) { continue; }
       let data = null;
       try { data = window.XlsxReader ? XlsxReader.read(buf) : null; } catch (e) { data = null; }
-      if (!data) continue;
+      if (!data) {
+        // 读不出来也交给质检表弹窗：可用 AI 提示词转换后粘贴导入
+        if (window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: [] });
+        continue;
+      }
       filesOk++;
       let n = 0;
       (data.marks || []).slice(1).forEach(r => {
@@ -1612,7 +1592,7 @@ const MPP = (() => {
       // 不是本插件导出格式 → 按质检表处理（工作表 / 分节由用户在弹窗里选择）
       if (!n && window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: data.sheets || [] });
     }
-    if (!filesOk) {
+    if (!filesOk && !qcFiles.length) {
       panelToast('无法解析 Excel（支持本插件导出的 xlsx 与质检表）');
       return;
     }
