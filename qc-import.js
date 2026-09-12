@@ -29,7 +29,8 @@
   const NUMERIC_RE = /^-?\d+(?:\.\d+)?$/;
   // 数字串：6-9 位（9 位多为多打/漏打一位）；另兼容「00000」这类手写的 0 时刻
   const RUN_RE = /(?<!\d)(\d{6,9}|00000)(?!\d)/g;
-  const CLOCK_RE = /(?<!\d)(\d{1,2}[:;]\d{2}(?:[:;]\d{2}){0,2})(?!\d)/g;
+  // 带分隔符：中英文冒号 / 分号都算（质检表里常见中文冒号、误打分号）
+  const CLOCK_RE = /(?<!\d)(\d{1,2}[:;：；]\d{2}(?:[:;：；]\d{2}){0,2})(?!\d)/g;
 
   function clean(s) {
     return String(s == null ? '' : s)
@@ -94,7 +95,7 @@
     return strict.length ? strict[0] : out[0];
   }
   function clockToSec(tok, fps) {
-    const p = tok.replace(/;/g, ':').split(':').map(n => parseInt(n, 10));
+    const p = tok.replace(/[;；]/g, ':').replace(/：/g, ':').split(':').map(n => parseInt(n, 10));
     if (p.some(n => !isFinite(n))) return null;
     if (p.length === 2) return { sec: p[0] * 60 + p[1], strict: true };
     if (p.length === 3) return { sec: p[0] * 3600 + p[1] * 60 + p[2], strict: true };
@@ -135,15 +136,19 @@
     });
     return n;
   }
+  // 标题行（表名 / 总时长 / 「（99 分钟）」这类）：不参与时间码提取——
+  // 「总时长44：58：00」用中文冒号，宽松识别后会被当成时间码，必须整行排除
   function isTitleRow(row) {
-    if (!row || countRowTokens(row) > 0) return false;
+    if (!row) return false;
     const txt = (row || []).map(clean).filter(Boolean).join(' ');
     if (!txt) return false;
     return /质检表|总时长|[（(]\s*\d+\s*分钟/.test(txt);
   }
   function sheetLayout(rows) {
     let firstTc = -1;
-    for (let i = 0; i < rows.length; i++) if (countRowTokens(rows[i]) > 0) { firstTc = i; break; }
+    for (let i = 0; i < rows.length; i++) {
+      if (!isTitleRow(rows[i]) && countRowTokens(rows[i]) > 0) { firstTc = i; break; }
+    }
     // 表头行：首个含时间码的行之前，非空单元格最多且本身不含时间码的行
     let headerIdx = -1, best = 0;
     const limit = firstTc < 0 ? rows.length : firstTc;
@@ -318,6 +323,7 @@
       let count = 0;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i] || [];
+        if (isTitleRow(row)) continue;   // 表名 / 总时长等标题行不提取时间码
         for (let col = 0; col < row.length; col++) {
           const cellRaw = cellText(row[col]);
           if (!cellRaw) continue;
@@ -375,19 +381,24 @@
       '',
       '要求：',
       '1. 逐条提取表中出现的每一个时间码，每条一行；',
-      '2. 每行格式：原表时间码 + 空格 + 该时间码对应的项目说明；',
-      '3. 时间码照抄原表，不要换算、不要补零、不要换成别的格式（原表写 011218 就写 011218，写 00:07:10:21 就写 00:07:10:21）；',
-      '4. 项目说明只写这个时间码对应的内容，例如「趣多多空镜」「阿维塔主持人口播」；不要写列名（植入 / 包装 / 空镜 / 其他）、不要写分线（P1 / P2）、不要写艺人姓名；若该条只有品牌与秒数，就写「品牌 秒数」（如「阿维塔 4s」）；',
-      '5. 一个单元格里有多个时间码时，每个时间码各占一行，把它自己的说明写在自己那行；',
+      '2. 每行格式：时间码 + 空格 + 项目说明；',
+      '3. 时间码请写成规范格式（英文冒号）：带帧号写成 时:分:秒:帧（如 00:07:10:21），不带帧号写成 时:分:秒（如 00:07:10）；原表写法可能不规范（中文冒号、分号、缺前导零、纯数字等），请统一改成上面的规范格式；',
+      '4. 项目说明按「品牌 → 艺人 → 权益 → 时长」的顺序拼接，没有的部分省略，各部分之间用空格分隔：',
+      '   · 品牌：露出的品牌（阿维塔 / 京东健康 / 趣多多 / 利郎…）',
+      '   · 艺人：出镜艺人姓名（张泉灵 / 张彬彬 / 米卡…）',
+      '   · 权益：这次露出的形式或内容（主持人口播 / 自然使用 / 花字 / 转场 / 空镜 / 品牌时刻 / 交互植入 / 片尾鸣谢…）',
+      '   · 时长：原表标注的秒数（4s / 10.5s…）',
+      '5. 不要把列名（植入 / 包装 / 空镜 / 其他）、分线编号（P1 / P2）写进说明；一个单元格里有多个时间码时，每个时间码各占一行，把它自己的说明写在自己那行；',
       '6. 按时间先后排序；',
       '7. 只输出这些行（纯文本），不要表头、标题、合计、解释说明，也不要 markdown 表格或代码块。',
       '',
       '输出示例：',
-      '000000 片头',
-      '011218 解字空1 阿维塔',
-      '101920 阿维塔主持人口播',
-      '00:07:10:21 京东空镜①',
-      '064718 阿维塔 4s'
+      '00:00:00:00 片头',
+      '00:01:12:18 阿维塔 解字空1',
+      '00:07:10:21 京东健康 空镜',
+      '00:10:19:20 阿维塔 主持人口播',
+      '00:06:47:18 阿维塔 张泉灵 4s',
+      '00:17:56:11 趣多多 张彬彬 食用'
     ].join('\n');
   }
   // AI 有时会直接返回 JSON：容错取出数组
