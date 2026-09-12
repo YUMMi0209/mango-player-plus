@@ -887,11 +887,22 @@ const MPP = (() => {
       execInPage(fnBatchBusy, []).then(busy => { if (!busy) batchEnded(isShot, null); }).catch(() => { });
     }, 1000);
   }
+  // 是否正在文本输入：只有文本类输入框 / 文本域 / 可编辑区域才让出快捷键。
+  // 复选框、单选框（记录行勾选框）获得焦点时 S / R / Esc 仍应生效
+  function isTextEntry(el) {
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA') return true;
+    if (tag !== 'INPUT') return false;
+    const type = String(el.type || 'text').toLowerCase();
+    return type !== 'checkbox' && type !== 'radio' && type !== 'button' && type !== 'submit';
+  }
+
   function bindBatchKeys() {
     document.addEventListener('keydown', e => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;   // 放行浏览器组合键
-      const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (isTextEntry(e.target)) return;                // 输入框内（备注 / 时间码 / 搜索 / 粘贴）不抢键
       // 批量任务进行中：Esc 取消（焦点在面板窗口时页面收不到 Esc）
       if (e.key === 'Escape') {
         if (!batchActive) return;
