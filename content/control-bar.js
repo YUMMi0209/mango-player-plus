@@ -1237,7 +1237,9 @@
     if (video.paused) video.play().catch(()=>{});
     video.addEventListener('seeking', onSeekBlock, true);
     // 画中画保持录制（需用户手势）：页面切后台后视频在 PiP 窗口继续渲染，录制画面不冻结
-    if (pipRecordEnabled() && typeof video.requestPictureInPicture === 'function') {
+    // 批量任务期间不进入画中画：每段录制都切一次 PiP 会打断页面观看与画面采集，
+    // 且批量录制本就在页面上逐条执行
+    if (!batchRunning && pipRecordEnabled() && typeof video.requestPictureInPicture === 'function') {
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
@@ -1626,11 +1628,12 @@
   }
 
   // ─── 批量任务完成通知（批量截图 / 录制需等每一步结束再执行下一条）──
+  // ok = false 表示本次录制没有产出内容（空录制 / 被取消），批量流程据此统计失败
   let batchFinishWaiters = [];
   function waitRecFinished() { return new Promise(r => { batchFinishWaiters.push(r); }); }
-  function notifyRecFinished() {
+  function notifyRecFinished(ok) {
     const ws = batchFinishWaiters; batchFinishWaiters = [];
-    ws.forEach(f => { try { f(); } catch (e) { } });
+    ws.forEach(f => { try { f(ok !== false); } catch (e) { } });
   }
 
   function finishRecording() {
@@ -1651,14 +1654,14 @@
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
     mgpHideToast();
-    if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; notifyRecFinished(); return; }
+    if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; notifyRecFinished(false); return; }
     // 批量任务取消：本段录制作废（不下载、不写剪贴板），仅收尾并通知批量流程
     if (recAbort) {
       recAbort = false;
       recChunks = [];
       state.tcMode = 'live';
       mgpToast('已取消当前录制', true);
-      notifyRecFinished();
+      notifyRecFinished(false);
       return;
     }
     const isMp4 = /^video\/mp4/.test(mimeType);
@@ -1674,7 +1677,7 @@
     const saveAndToast = blob => {
       downloadBlob(blob, name);
       mgpToast('录制结束 — ' + sec + 's', true);
-      notifyRecFinished();   // 通知批量流程：本段录制已完成
+      notifyRecFinished(true);   // 通知批量流程：本段录制已完成（有产出）
     };
     // MediaRecorder 输出的 MP4 是 fragmented MP4（moov 前置 + moof/mdat 分片），
     // 部分剪辑软件（达芬奇旧版 / 会声会影 / Edius 等）无法读取。录制结束后
@@ -1900,7 +1903,9 @@
   function remove() {
     // 录制中移除控制栏（关闭控制栏 / 换集重建）：必须停止录制，否则 R 键失效后将无法停止
     if (recordingInternal) stopRecording();
-    if (batchRunning) cancelBatch();   // 批量任务进行中：终止后续条目，避免失去控制栏后无法取消
+    // 注意：批量任务不随控制栏重建而取消——播放器换元素会触发 inject（重建控制栏），
+    // 若在此取消整批，批量录制会「提前结束」；取消只由 Esc / 面板触发，重建后
+    // 后续片段照常继续（inject 会更新 video 引用）
     if (video) video.removeEventListener('ended', onVideoEnded);
     if (videoContainer) {
       videoContainer.removeEventListener('mousemove', onBarHover);
@@ -2556,16 +2561,32 @@
   function recordSegment(start, end) {
     return new Promise(resolve => {
       if (!video || recordingInternal || start == null || end == null || !(end > start) || batchCancel) { resolve(false); return; }
+      const dur = Math.max(0, end - start);
+      let settled = false, guardStop = null, guardGiveUp = null;
+      // 收尾统一清理兜底定时器：定时器若不清，会在几十秒后误杀后续片段的录制
+      // （表现为批量录制中某一段「提前结束」，此前为偶发）
+      const done = ok => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(guardStop); clearTimeout(guardGiveUp);
+        resolve(ok && !batchCancel);
+      };
       state.inPoint = start; state.outPoint = end;
       recStopTarget = end;
       const waiter = waitRecFinished();
-      let settled = false;
-      const done = ok => { if (!settled) { settled = true; resolve(ok && !batchCancel); } };
-      waiter.then(() => done(true));
-      // 超时兜底：区间时长 + 30s 缓冲
-      setTimeout(() => { if (recordingInternal) { try { stopRecording(); } catch (e) { } } }, (end - start) * 1000 + 30000);
+      waiter.then(ok => done(ok));
+      // 兜底 1：区间时长 + 30s 仍在录制 → 强制停止（编码卡死等异常）
+      guardStop = setTimeout(() => { if (recordingInternal && !settled) { try { stopRecording(); } catch (e) { } } }, dur * 1000 + 30000);
+      // 兜底 2：再过 15s 仍未收到录制结束通知 → 放弃本段，避免整批卡死
+      guardGiveUp = setTimeout(() => done(false), dur * 1000 + 45000);
       toggleRecording();                       // atIn 成立 → 播放到出点自动停止
-      if (!recordingInternal) { done(false); }
+      if (!recordingInternal) { done(false); return; }
+      // 强化自动停止目标：atIn 判定受帧对齐 / 播放器 seek 影响，未命中时会退回
+      // 日志片段匹配（可能匹配到别的出点）或完全不自动停止；批量录制必须严格停在
+      // 本段出点，因此启动后统一以本段 end 为准
+      recStopTarget = end;
+      state.outPoint = end;
+      recAutoStop = true;
     });
   }
   async function batchRun(items, mode) {
@@ -2581,27 +2602,35 @@
         if (batchCancel) break;
         const it = items[i] || {};
         const label = (i + 1) + '/' + items.length;
-        if (mode === 'shot') {
-          const t = it.type === 'mk' ? it.time : it.start;
-          if (t == null || !isFinite(t)) { failed++; continue; }
-          mgpToast('批量截图 ' + label + ' · Esc 取消', true);
-          await seekAndSettle(t);
-          if (batchCancel) break;
-          const okShot = await shotOnce(t);
-          if (batchCancel) break;   // 取消：本条不计入成功 / 失败
-          okShot ? done++ : failed++;
-          await delay(250);
-        } else {
-          const s = it.type === 'mk' ? Math.max(0, (it.time || 0) - 5) : it.start;
-          const e2 = it.type === 'mk' ? (it.time || 0) + 5 : it.end;
-          if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
-          mgpToast('批量录制 ' + label + ' · Esc 取消', true);
-          await seekAndSettle(s);
-          if (batchCancel) break;
-          const okRec = await recordSegment(s, e2);
-          if (batchCancel) break;   // 取消：本段作废，不计入成功 / 失败
-          okRec ? done++ : failed++;
-          await delay(400);
+        // 单条失败不得中断整批：任何异常只记为失败，继续处理后续条目
+        try {
+          if (mode === 'shot') {
+            const t = it.type === 'mk' ? it.time : it.start;
+            if (t == null || !isFinite(t)) { failed++; continue; }
+            mgpToast('批量截图 ' + label + ' · Esc 取消', true);
+            await seekAndSettle(t);
+            if (batchCancel) break;
+            const okShot = await shotOnce(t);
+            if (batchCancel) break;   // 取消：本条不计入成功 / 失败
+            okShot ? done++ : failed++;
+            await delay(250);
+          } else {
+            const s = it.type === 'mk' ? Math.max(0, (it.time || 0) - 5) : it.start;
+            const e2 = it.type === 'mk' ? (it.time || 0) + 5 : it.end;
+            if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
+            mgpToast('批量录制 ' + label + ' · Esc 取消', true);
+            await seekAndSettle(s);
+            if (batchCancel) break;
+            const okRec = await recordSegment(s, e2);
+            if (batchCancel) break;   // 取消：本段作废，不计入成功 / 失败
+            okRec ? done++ : failed++;
+            await delay(400);
+          }
+        } catch (e) {
+          failed++;
+          // 异常后确保录制停下，避免本条失败把后续条目全部拖垮
+          if (recordingInternal) { try { stopRecording(); } catch (e2) { } }
+          await delay(200);
         }
       }
     } finally {
