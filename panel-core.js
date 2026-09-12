@@ -757,6 +757,7 @@ const MPP = (() => {
       if (!rec) return;
       const tcEl = e.target.closest('.tc');
       if (tcEl) {
+        // 左键点击时间码：跳转到对应时刻
         let time;
         if (isMk) time = rec.time;
         else if (tcEl.classList.contains('out')) time = rec.outTime;
@@ -764,6 +765,34 @@ const MPP = (() => {
         if (time != null && isFinite(time)) execInPage(fnJump, [time]).catch(() => { });
         return;
       }
+      // 点击记录行其他区域：为该条记录添加 / 编辑备注（原「点击行空白复制时间码」
+      // 已改为右键时间码复制）
+      const lineEl = row.querySelector('.note-line');
+      if (lineEl) {
+        lineEl.hidden = false;
+        const textEl = lineEl.querySelector('.note-text');
+        if (textEl) {
+          textEl.textContent = rec.note || '添加备注…';
+          textEl.classList.toggle('empty', !rec.note);
+        }
+        const editEl = lineEl.querySelector('.note-edit');
+        if (editEl) {
+          editEl.value = rec.note || '';
+          enterNoteEdit(editEl);
+        }
+      }
+    });
+    // 右键点击时间码：复制紧凑时间码（如 00391214）
+    list.addEventListener('contextmenu', e => {
+      const tcEl = e.target.closest('.tc');
+      if (!tcEl) return;                 // 非时间码区域保留浏览器默认右键菜单
+      e.preventDefault();
+      const row = tcEl.closest('.row');
+      if (!row) return;
+      const isMk = row.dataset.mk !== undefined;
+      const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
+      const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
+      if (!rec) return;
       const raw = isMk ? rec.tc : rec.inTC;
       const compact = String(raw).replace(/:/g, '');
       copyText(compact)

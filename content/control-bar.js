@@ -1710,7 +1710,7 @@
       saveLogs();
     }
     const dur = state.outPoint - state.inPoint, sec = Math.round(dur*2)/2;
-    navigator.clipboard.writeText(String(sec)).catch(()=>{});
+    // 不自动复制片段时长（避免覆盖用户剪贴板）
     saveState();
     mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )', true);
     // 保存最后一次 I 键时暂存的入点截图（记录已写入，备注可匹配）；
