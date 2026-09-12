@@ -2659,7 +2659,7 @@
       let added = 0;
       (Array.isArray(marks) ? marks : []).forEach(m => {
         if (!m) return;
-        // 质检表导入只带 time（由页面按校准帧率格式化时间码），本插件导出导入带 tc
+        // 记录表导入只带 time（由页面按校准帧率格式化时间码），本插件导出导入带 tc
         const hasTc = !!m.tc;
         const t = (m.time != null && isFinite(m.time)) ? Number(m.time) : null;
         if (!hasTc && t == null) return;

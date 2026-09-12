@@ -1368,7 +1368,7 @@ const MPP = (() => {
   function fnGetFps() {
     try { return window.__mgpFps || 25; } catch (e) { return 25; }
   }
-  // 当前视频元信息：质检表导入需要时长判定时间码读法（分:秒:帧 / 时:分:秒）
+  // 当前视频元信息：记录表导入需要时长判定时间码读法（分:秒:帧 / 时:分:秒）
   function fnVideoMeta() {
     try {
       const v = window.__mgp_video;
@@ -1381,8 +1381,8 @@ const MPP = (() => {
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = Math.floor(t % 60);
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
   }
-  // ─── 质检表导入弹窗 ─────────────────────────────────────
-  // 拖入质检表（或点历史栏 AI 按钮）后弹出：① AI 提示词 + 粘贴框（优先）
+  // ─── 记录表导入弹窗 ─────────────────────────────────────
+  // 拖入记录表（或点历史栏 AI 按钮）后弹出：① AI 提示词 + 粘贴框（优先）
   // ② 自动识别到的工作表 / 分节（默认不勾选，需手动选择）
   // ctx: { names: [文件名], cands: [{label, marks, mode, has6}], sheets: [工作表名], meta, hint }
   function qcDialog(ctx) {
@@ -1572,7 +1572,7 @@ const MPP = (() => {
     return true;
   }
 
-  // 质检表文件 → 候选（工作表 / 分节）+ AI 提示词 → 弹窗 → 导入当前视频
+  // 记录表文件 → 候选（工作表 / 分节）+ AI 提示词 → 弹窗 → 导入当前视频
   async function importQcFiles(files) {
     if (!window.QcImport) return false;
     let meta = { duration: 0, fps: 25 };
@@ -1631,9 +1631,9 @@ const MPP = (() => {
     return applyQcPick(pick, meta);
   }
 
-  // ─── AI 提示词 + 粘贴结果解析（质检表导入弹窗内使用）────────
-  // 质检表版本多、格式杂：把提示词连同表格交给第三方 AI，再把 AI 输出的清单粘贴回来。
-  // 粘贴内容走与质检表相同的解析（时间码识别 / 备注规则 / 时长过滤），支持纯文本与 JSON
+  // ─── AI 提示词 + 粘贴结果解析（记录表导入弹窗内使用）────────
+  // 记录表版本多、格式杂：把提示词连同表格交给第三方 AI，再把 AI 输出的清单粘贴回来。
+  // 粘贴内容走与记录表相同的解析（时间码识别 / 备注规则 / 时长过滤），支持纯文本与 JSON
   // sheet：指定只整理哪个工作表（多工作表时避免 AI 把上集 / 下集混在一起）
   function aiPrompt(sheet) {
     const base = (window.QcImport && typeof QcImport.buildPrompt === 'function')
@@ -1656,7 +1656,7 @@ const MPP = (() => {
   }
   async function importLogsFromFiles(files) {
     const recs = [];
-    const qcFiles = [];        // 质检表（非本插件导出）：交给 QC 导入流程，弹窗选择导入内容
+    const qcFiles = [];        // 记录表格（非本插件导出）：交给导入记录流程，弹窗选择导入内容
     let filesOk = 0;
     for (const f of files) {
       let buf;
@@ -1664,7 +1664,7 @@ const MPP = (() => {
       let data = null;
       try { data = window.XlsxReader ? XlsxReader.read(buf) : null; } catch (e) { data = null; }
       if (!data) {
-        // 读不出来也交给质检表弹窗：可用 AI 提示词转换后粘贴导入
+        // 读不出来也交给记录表弹窗：可用 AI 提示词转换后粘贴导入
         if (window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: [] });
         continue;
       }
@@ -1680,7 +1680,7 @@ const MPP = (() => {
         n++;
         recs.push({ kind: 'inOut', inTC: r[1], outTC: r[2], dur: parseFloat(r[3]) || 0, note: r[4] || null, url: r[5] || '', title: r[6] || '' });
       });
-      // 不是本插件导出格式 → 按质检表处理（工作表 / 分节由用户在弹窗里选择）
+      // 不是本插件导出格式 → 按记录表处理（工作表 / 分节由用户在弹窗里选择）
       if (!n && window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: data.sheets || [] });
     }
     if (!filesOk && !qcFiles.length) {

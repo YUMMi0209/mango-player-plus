@@ -158,7 +158,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 :root[data-theme="light"] .mpp-modal-actions .danger{color:#c0392b;background:rgba(231,76,60,.12);border-color:#e74c3c}
 :root[data-theme="light"] .mpp-modal-actions .danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 
-/* ─── 质检表导入弹窗（精简版：AI 主路径 + 折叠的自动识别结果）── */
+/* ─── 记录表导入弹窗（精简版：AI 主路径 + 折叠的自动识别结果）── */
 .mpp-modal.wide{width:344px}
 .qc-modal{padding:14px}
 .qc-title{font-size:13px;font-weight:600;color:var(--text)}
