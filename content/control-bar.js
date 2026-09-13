@@ -1250,7 +1250,7 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // 录制设置（面板「录制编码」）：vp8 / vp9 / h264 / h264-low（默认 vp8）
+    // 录制设置（面板「录制编码」）：h264 / h264-low / vp8 / vp9（默认 h264）
     // 分辨率：h264-low 固定 720P；其余三档**跟随视频本身分辨率**（不缩放、不放大）
     // 兼容旧档位值（1080p-vp8 / 720p-vp8 / 1080p-vp9 / 720p-vp9 / 1080p-h264 / 720p-h264）
     const LEGACY_CODEC = {
@@ -1258,7 +1258,7 @@
       '1080p-vp9': 'vp9', '720p-vp9': 'vp9',
       '1080p-h264': 'h264', '720p-h264': 'h264-low'
     };
-    const recRaw = (window.__mgpSettings || {}).recCodec || 'vp8';
+    const recRaw = (window.__mgpSettings || {}).recCodec || 'h264';
     const recPref = LEGACY_CODEC[recRaw] || recRaw;
     const recWantVp9 = recPref === 'vp9';
     const recWantVp8 = recPref === 'vp8';
