@@ -311,6 +311,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mc-dot:hover{transform:scale(1.25)}
 .mc-dot.on{background:var(--dc,#999)}
 .list.cards{display:flex;flex-direction:column;padding:6px}
+/* 列表整表重建（每秒轮询刷新时的 render）不要启用浏览器的「滚动锚定」：
+   否则重建过程中浏览器会自动调整滚动位置，表现为保存备注后列表「跳」一下。
+   （panel-core.js 的 render 里另有滚动位置的快照 / 还原，两者配套） */
+.list{overflow-anchor:none}
 .list.cards .row{border:0;border-bottom:1px solid var(--row-brd);padding:8px;min-width:0}
 /* 最下面一条记录不再需要下划线 */
 .list.cards .row:last-child{border-bottom:none}

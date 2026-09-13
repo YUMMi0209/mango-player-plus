@@ -589,7 +589,25 @@ const MPP = (() => {
     return filteredIdx('mk').length + filteredIdx('io').length;
   }
 
+  // 列表滚动容器：弹窗只有一条列表（mkList === ioList），侧边栏两条
+  function listScrollers() {
+    const out = [];
+    [els.mkList, els.ioList].forEach(el => { if (el && out.indexOf(el) < 0) out.push(el); });
+    return out;
+  }
+  // 滚动位置快照 / 还原：render() 会整表重建（list.innerHTML = ''），重建过程会让滚动容器
+  // 的滚动位置被浏览器重新计算 —— 表现为「保存备注后列表跳一下」（每秒轮询刷新即触发）。
+  // 重建前后按像素还原，用户当前浏览的位置就不会动。
+  function anchorScroll() {
+    const snap = listScrollers().map(el => [el, el.scrollTop, el.scrollLeft]);
+    return () => snap.forEach(s => {
+      if (s[0].scrollTop !== s[1]) s[0].scrollTop = s[1];
+      if (s[0].scrollLeft !== s[2]) s[0].scrollLeft = s[2];
+    });
+  }
+
   function render() {
+    const restoreScroll = anchorScroll();
     if (els.cntMk) els.cntMk.textContent = logs.marks.length;
     if (els.cntIo) els.cntIo.textContent = logs.inOut.length;
     updateSearchBar();
@@ -603,11 +621,14 @@ const MPP = (() => {
       renderIO(els.ioList);
     }
     updateSel();
+    restoreScroll();
   }
 
   function setTab(t) {
     show = t;
     render();
+    // 切标签页要的是一个全新的列表：回到顶部（render 的滚动还原只服务于「刷新不跳动」）
+    listScrollers().forEach(el => { el.scrollTop = 0; });
   }
 
   function noteLineHTML(hasNote) {
