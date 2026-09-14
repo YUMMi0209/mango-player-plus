@@ -16,6 +16,7 @@ MPP.init({
   searchIn: '#search-in',
   searchHit: '#search-hit',
   searchClear: '#search-clear',
+  searchColors: '#search-colors',
   btnAll: '#btn-all',
   btnClear: '#btn-clear',
   btnExport: '#btn-export',
@@ -44,7 +45,6 @@ MPP.init({
   historyMenu: '#history-menu',
   histList: '#hist-list',
   histImport: '#hist-import',
-  histAi: '#hist-ai',
   histAll: '#hist-all',
   histClear: '#hist-clear'
 });

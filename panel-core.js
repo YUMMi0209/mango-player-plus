@@ -317,6 +317,8 @@ const MPP = (() => {
 
   // ─── 工具 ───────────────────────────────────
   function fmtDur(s) { return String(Math.round(s * 2) / 2); }
+  // 列表序号：固定两位（1 → 01），超过两位按实际位数（100 → 100）
+  function seqNo(i) { const n = (Number(i) || 0) + 1; return n < 10 ? '0' + n : String(n); }
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
@@ -367,8 +369,11 @@ const MPP = (() => {
   // ─── 二次确认弹窗 ──────────────────────────
   // 键盘：← / → 在「取消 / 确认」之间切换焦点，Enter 触发当前聚焦按钮；
   // 默认聚焦主操作（确认），危险操作（danger）默认聚焦「取消」，避免误按 Enter 删除
+  // opts.input = { label, value, maxLength, hint } → 弹窗里多一个可编辑输入框
+  //   （批量截图 / 录制用它确认「标题」：标题会写进这次产出的文件名）
   let confirmResolve = null;
-  function confirmDlg(message, okLabel) {
+  function confirmDlgEx(message, okLabel, opts) {
+    opts = opts || {};
     return new Promise(resolve => {
       let m = document.getElementById('mpp-confirm');
       if (!m) {
@@ -379,6 +384,11 @@ const MPP = (() => {
           '<div class="mpp-modal">' +
             '<div class="mpp-modal-title">确认操作</div>' +
             '<div class="mpp-modal-msg"></div>' +
+            '<div class="mpp-modal-field" hidden>' +
+              '<span class="mpp-modal-label"></span>' +
+              '<input type="text" spellcheck="false">' +
+              '<span class="mpp-modal-hint" hidden></span>' +
+            '</div>' +
             '<div class="mpp-modal-actions">' +
               '<button type="button" class="mpp-cancel">取消</button>' +
               '<button type="button" class="mpp-ok danger">确认</button>' +
@@ -387,13 +397,17 @@ const MPP = (() => {
         document.body.appendChild(m);
         const cancelEl = m.querySelector('.mpp-cancel');
         const okEl0 = m.querySelector('.mpp-ok');
+        const fieldEl = m.querySelector('.mpp-modal-field');
+        const inpEl = fieldEl.querySelector('input');
         cancelEl.addEventListener('click', () => finishConfirm(false));
         okEl0.addEventListener('click', () => finishConfirm(true));
         m.addEventListener('click', e => { if (e.target === m) finishConfirm(false); });
         document.addEventListener('keydown', e => {
           if (m.hidden) return;
           if (e.key === 'Escape') { e.preventDefault(); finishConfirm(false); return; }
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          // 输入框里左右键要移光标，不抢去切按钮
+          const inField = !fieldEl.hidden && document.activeElement === inpEl;
+          if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !inField) {
             e.preventDefault();
             const to = document.activeElement === okEl0 ? cancelEl : okEl0;
             to.focus();
@@ -409,21 +423,46 @@ const MPP = (() => {
       const msgEl = m.querySelector('.mpp-modal-msg');
       const okEl = m.querySelector('.mpp-ok');
       const cancelEl = m.querySelector('.mpp-cancel');
+      const field = m.querySelector('.mpp-modal-field');
+      const inp = field.querySelector('input');
+      const cfgIn = opts.input;
       msgEl.textContent = message;
       okEl.textContent = okLabel || '确认';
+      // 危险操作（删除类）主按钮用红色样式，且默认焦点落在「取消」，避免误按 Enter
+      okEl.classList.toggle('danger', !!opts.danger);
+      if (cfgIn) {
+        field.hidden = false;
+        field.querySelector('.mpp-modal-label').textContent = cfgIn.label || '';
+        inp.value = cfgIn.value == null ? '' : String(cfgIn.value);
+        inp.maxLength = cfgIn.maxLength || 80;
+        const hintEl = field.querySelector('.mpp-modal-hint');
+        hintEl.textContent = cfgIn.hint || '';
+        hintEl.hidden = !cfgIn.hint;
+      } else {
+        field.hidden = true;
+        inp.value = '';
+      }
       confirmResolve = resolve;
       m.hidden = false;
-      // 默认焦点：危险操作停在「取消」，其余停在主操作按钮
+      // 默认焦点：危险操作停在「取消」，其余停在主操作按钮（带输入框时停在输入框）
       setTimeout(() => {
         if (m.hidden) return;
-        (okEl.classList.contains('danger') ? cancelEl : okEl).focus();
+        const target = okEl.classList.contains('danger') ? cancelEl : (cfgIn ? inp : okEl);
+        target.focus();
+        if (cfgIn && target === inp) { try { inp.select(); } catch (e) { } }
       }, 0);
     });
   }
+  // 返回布尔（沿用旧调用方）：确认 / 取消；opts.danger 用于删除类操作
+  function confirmDlg(message, okLabel, opts) {
+    return confirmDlgEx(message, okLabel, opts).then(r => !!r.ok);
+  }
   function finishConfirm(val) {
     const m = document.getElementById('mpp-confirm');
+    const field = m ? m.querySelector('.mpp-modal-field') : null;
+    const value = (field && !field.hidden) ? field.querySelector('input').value : '';
     if (m) m.hidden = true;
-    if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(val); }
+    if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r({ ok: val === true, value: value }); }
   }
 
   // ─── 初始化 ─────────────────────────────────
@@ -459,6 +498,7 @@ const MPP = (() => {
     els.searchIn = $(cfg.searchIn);
     els.searchHit = $(cfg.searchHit);
     els.searchClear = $(cfg.searchClear);
+    els.searchColors = $(cfg.searchColors);
     els.err = $(cfg.err);
     els.wrap = $(cfg.wrap);
     els.footer = $(cfg.footer);
@@ -467,7 +507,6 @@ const MPP = (() => {
     els.historyMenu = $(cfg.historyMenu);
     els.histList = $(cfg.histList);
     els.histImport = $(cfg.histImport);
-    els.histAi = $(cfg.histAi);
     els.histAll = $(cfg.histAll);
     els.histClear = $(cfg.histClear);
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
@@ -581,12 +620,34 @@ const MPP = (() => {
     if (!noteQuery) return true;
     return String(note || '').toLowerCase().indexOf(noteQuery) !== -1;
   }
+  // 颜色筛选只对标记点生效（片段没有颜色）
+  function colorMatch(m) {
+    if (!colorQuery.size) return true;
+    return colorQuery.has((m && m.color) || '');
+  }
   function filteredIdx(kind) {
     const arr = kind === 'io' ? logs.inOut : logs.marks;
-    return arr.map((r, i) => (noteMatch(r && r.note) ? i : -1)).filter(i => i >= 0);
+    return arr.map((r, i) => {
+      if (!r) return -1;
+      if (kind === 'mk' && !colorMatch(r)) return -1;
+      return noteMatch(r.note) ? i : -1;
+    }).filter(i => i >= 0);
   }
   function matchCount() {
     return filteredIdx('mk').length + filteredIdx('io').length;
+  }
+  // 备注文本 → 可安全插入的 HTML：搜索命中的片段包进 <mark> 高亮（逐段转义，防 XSS）
+  function noteHTML(text) {
+    const src = String(text == null ? '' : text);
+    if (!noteQuery) return esc(src);
+    const lower = src.toLowerCase();
+    let out = '', from = 0;
+    for (let at = lower.indexOf(noteQuery); at >= 0; at = lower.indexOf(noteQuery, from)) {
+      out += esc(src.slice(from, at)) + '<mark class="hl">' + esc(src.slice(at, at + noteQuery.length)) + '</mark>';
+      from = at + noteQuery.length;
+      if (!noteQuery.length) break;
+    }
+    return out + esc(src.slice(from));
   }
 
   // 列表滚动容器：弹窗只有一条列表（mkList === ioList），侧边栏两条
@@ -608,8 +669,6 @@ const MPP = (() => {
 
   function render() {
     const restoreScroll = anchorScroll();
-    if (els.cntMk) els.cntMk.textContent = logs.marks.length;
-    if (els.cntIo) els.cntIo.textContent = logs.inOut.length;
     updateSearchBar();
     els.mkList.classList.add('cards');
     if (els.ioList === els.mkList) {
@@ -641,7 +700,7 @@ const MPP = (() => {
   function renderMarks(list) {
     if (!logs.marks.length) { list.innerHTML = '<div class="empty">暂无标记点记录</div>'; return; }
     const idxs = filteredIdx('mk');
-    if (!idxs.length) { list.innerHTML = '<div class="empty">没有备注匹配「' + esc(noteQuery) + '」的标记点</div>'; return; }
+    if (!idxs.length) { list.innerHTML = '<div class="empty">' + esc(noMatchText('标记点')) + '</div>'; return; }
     list.innerHTML = '';
     idxs.forEach(i => {
       const m = logs.marks[i];
@@ -650,7 +709,7 @@ const MPP = (() => {
       row.dataset.mk = i;
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.mk.has(i) ? ' checked' : '') + '>' +
-        '<span class="idx">' + (i + 1) + '</span>' +
+        '<span class="idx">' + seqNo(i) + '</span>' +
         // esc() 转义：tc 来自页面 localStorage（mpp_logs），恶意站点页面脚本可注入任意内容，
         // 未转义会在扩展面板上下文执行（存储型 XSS → 扩展权限提升）
         '<span class="tc mk">' + esc(m.tc) + '</span>' +
@@ -665,7 +724,7 @@ const MPP = (() => {
   function renderIO(list) {
     if (!logs.inOut.length) { list.innerHTML = '<div class="empty">暂无入点到出点记录</div>'; return; }
     const idxs = filteredIdx('io');
-    if (!idxs.length) { list.innerHTML = '<div class="empty">没有备注匹配「' + esc(noteQuery) + '」的片段</div>'; return; }
+    if (!idxs.length) { list.innerHTML = '<div class="empty">' + esc(noMatchText('片段')) + '</div>'; return; }
     list.innerHTML = '';
     idxs.forEach(i => {
       const u = logs.inOut[i];
@@ -674,7 +733,7 @@ const MPP = (() => {
       row.dataset.io = i;
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.io.has(i) ? ' checked' : '') + '>' +
-        '<span class="idx">' + (i + 1) + '</span>' +
+        '<span class="idx">' + seqNo(i) + '</span>' +
         // esc() 转义：时间码字段来自页面 localStorage，防存储型 XSS
         '<span class="tc in">' + esc(u.inTC) + '</span>' +
         '<span class="sep">&rarr;</span>' +
@@ -683,6 +742,13 @@ const MPP = (() => {
         noteLineHTML(!!u.note);
       list.appendChild(row);
     });
+  }
+  // 无匹配时的空列表文案：说清是按什么筛掉的（备注关键词 / 颜色）
+  function noMatchText(kindName) {
+    const bits = [];
+    if (noteQuery) bits.push('备注含「' + noteQuery + '」');
+    if (colorQuery.size) bits.push('颜色为' + [...colorQuery].map(colorName).filter(Boolean).join('/'));
+    return bits.length ? '没有' + bits.join('且') + '的' + kindName : '没有匹配的' + kindName;
   }
 
   function updateSel() {
@@ -707,25 +773,82 @@ const MPP = (() => {
     updateNoteLines();
   }
 
-  // ─── 备注搜索 ────────────────────────────────
+  // ─── 备注搜索（关键词 + 标记颜色筛选）────────
   let searchOpen = false;
+  let colorQuery = new Set();          // 选中的颜色（hex）；空集 = 不按颜色筛
+  function isFiltering() { return !!noteQuery || colorQuery.size > 0; }
+  function filterSummary() {
+    const bits = [];
+    if (noteQuery) bits.push('备注「' + noteQuery + '」');
+    if (colorQuery.size) bits.push([...colorQuery].map(colorName).filter(Boolean).join('/') + '色');
+    return bits.join(' + ');
+  }
   function updateSearchBar() {
-    const on = !!noteQuery;
+    const on = isFiltering();
     if (els.searchBar) els.searchBar.hidden = !on && !searchOpen;
+    if (els.searchColors) els.searchColors.hidden = !on && !searchOpen;
     if (els.searchHit) {
       const n = matchCount();
       els.searchHit.textContent = on ? (n ? '匹配 ' + n + ' 条' : '无匹配') : '';
     }
     if (els.btnSearch) els.btnSearch.classList.toggle('on', on);
+    // 搜索时，标记 / 片段右侧「全选」上的数字改成搜索结果数（点击全选选中的就是这批）
+    if (els.cntMk) els.cntMk.textContent = on ? filteredIdx('mk').length : logs.marks.length;
+    if (els.cntIo) els.cntIo.textContent = on ? filteredIdx('io').length : logs.inOut.length;
+  }
+  // 颜色筛选小圆点：按当前选中态刷新高亮
+  function syncColorChips() {
+    if (!els.searchColors) return;
+    els.searchColors.querySelectorAll('.sc-dot').forEach(d => {
+      d.classList.toggle('on', colorQuery.has(d.dataset.c));
+    });
+    const reset = els.searchColors.querySelector('.sc-reset');
+    if (reset) reset.hidden = colorQuery.size === 0;
   }
   function openSearch(open) {
     searchOpen = open;
     if (els.searchBar) els.searchBar.hidden = !open && !noteQuery;
+    if (els.searchColors) els.searchColors.hidden = !open && !isFiltering();
     if (open && els.searchIn) { els.searchIn.focus(); els.searchIn.select(); }
-    if (!open && noteQuery) { noteQuery = ''; if (els.searchIn) els.searchIn.value = ''; render(); }
+    if (!open && isFiltering()) {
+      noteQuery = ''; colorQuery.clear();
+      if (els.searchIn) els.searchIn.value = '';
+      syncColorChips();
+      render();
+    } else if (!open) {
+      syncColorChips();
+      updateSearchBar();
+    }
+  }
+  function clearSearch() {
+    noteQuery = ''; colorQuery.clear();
+    if (els.searchIn) els.searchIn.value = '';
+    syncColorChips();
+    render();
   }
   function bindSearch() {
     if (els.btnSearch) els.btnSearch.addEventListener('click', () => openSearch(els.searchBar ? els.searchBar.hidden : true));
+    // 颜色筛选圆点（按 MARK_COLORS 生成，避免两个页面各写一份）
+    if (els.searchColors && !els.searchColors.querySelector('.sc-dot')) {
+      els.searchColors.innerHTML =
+        '<span class="sc-label">颜色</span>' +
+        MARK_COLORS.map(([name, v]) =>
+          '<span class="sc-dot" data-c="' + v + '" style="--dc:' + v + '" title="只看' + name + '色标记点"></span>'
+        ).join('') +
+        '<span class="sc-reset" hidden>清除颜色</span>';
+      els.searchColors.addEventListener('click', e => {
+        const dot = e.target.closest('.sc-dot');
+        if (dot) {
+          const c = dot.dataset.c;
+          if (colorQuery.has(c)) colorQuery.delete(c); else colorQuery.add(c);
+          syncColorChips();
+          render();
+          return;
+        }
+        if (e.target.closest('.sc-reset')) { colorQuery.clear(); syncColorChips(); render(); }
+      });
+    }
+    syncColorChips();
     if (els.searchIn) {
       els.searchIn.addEventListener('input', () => {
         noteQuery = els.searchIn.value.trim().toLowerCase();
@@ -739,9 +862,11 @@ const MPP = (() => {
       });
     }
     if (els.searchClear) els.searchClear.addEventListener('click', () => {
-      noteQuery = '';
-      if (els.searchIn) { els.searchIn.value = ''; els.searchIn.focus(); }
-      render();
+      // 搜索栏为空（也没选颜色）时，× 直接关掉搜索栏；有内容时先清空内容
+      const empty = !els.searchIn || !els.searchIn.value.trim();
+      if (empty && !colorQuery.size) { openSearch(false); return; }
+      clearSearch();
+      if (els.searchIn) els.searchIn.focus();
     });
   }
 
@@ -763,7 +888,8 @@ const MPP = (() => {
       el.hidden = !hasNote;
       const text = el.querySelector('.note-text');
       if (text) {
-        text.textContent = hasNote ? rec.note : '添加备注…';
+        // 搜索命中处高亮（noteHTML 内部已逐段转义）
+        text.innerHTML = hasNote ? noteHTML(rec.note) : '添加备注…';
         text.classList.toggle('empty', !hasNote);
       }
       const edit = el.querySelector('.note-edit');
@@ -785,7 +911,7 @@ const MPP = (() => {
     line.hidden = false;
     const text = line.querySelector('.note-text');
     if (text) {
-      text.textContent = rec.note || '添加备注…';
+      text.innerHTML = rec.note ? noteHTML(rec.note) : '添加备注…';
       text.classList.toggle('empty', !rec.note);
     }
     const edit = line.querySelector('.note-edit');
@@ -816,6 +942,8 @@ const MPP = (() => {
     const text = edit.parentElement.querySelector('.note-text');
     edit.hidden = true;
     if (text) text.hidden = false;
+    // 编辑态曾把显示文本写成纯文本：取消 / 结束后恢复成带搜索高亮的样子
+    updateNoteLines();
   }
   function commitNoteEdit(edit) {
     // 防重提交：Enter 后失焦会再触发一次 blur 保存，跳过避免用旧值覆盖已存内容
@@ -979,8 +1107,22 @@ const MPP = (() => {
       }
       e.preventDefault();
       const n = idxs.length;
-      confirmDlg('确认对选中的 ' + n + ' 条' + kindName + '依次自动' + (isShot ? '截图' : '录制') + '？', '开始').then(ok => {
-        if (!ok) return;
+      // 批量前先确认标题：产出文件名取「标题_时间码_备注」，标题不对整批文件都要改名
+      const curTitle = els.pageTitle ? String(els.pageTitle.textContent || '').trim() : '';
+      confirmDlgEx('确认对选中的 ' + n + ' 条' + kindName + '依次自动' + (isShot ? '截图' : '录制') + '？', '开始', {
+        input: {
+          label: '标题（写入文件名）',
+          value: curTitle,
+          maxLength: 80,
+          hint: '文件名格式：标题_时间码_备注；留空则用网页标题'
+        }
+      }).then(r => {
+        if (!r.ok) return;
+        const t = String(r.value || '').trim();
+        if (t && t !== curTitle) {
+          if (els.pageTitle) { els.pageTitle.textContent = t; els.pageTitle.title = t; els.pageTitle.hidden = false; }
+          execInPage(fnSetTitle, [t]).catch(() => { });
+        }
         const items = [];
         if (isShot) idxs.forEach(i => { const m = logs.marks[i]; if (m && m.time != null) items.push({ type: 'mk', time: m.time }); });
         else idxs.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
@@ -1160,7 +1302,7 @@ const MPP = (() => {
     };
     const n = selObj.inOut.length + selObj.marks.length;
     if (!n) return;
-    const ok = await confirmDlg('确认删除选中的 ' + n + ' 条记录？此操作不可恢复。', '删除');
+    const ok = await confirmDlg('确认删除选中的 ' + n + ' 条记录？此操作不可恢复。', '删除', { danger: true });
     if (!ok) return;
     try { await execInPage(fnRemove, [selObj]); } catch (e) { }
     sel.io.clear();
@@ -1341,19 +1483,8 @@ const MPP = (() => {
         if (url) chrome.tabs.create({ url }).catch(() => { });
       });
     }
-    // AI 导入：不拖文件，复制提示词交给第三方 AI 后把结果粘贴回来
-    if (els.histAi) els.histAi.addEventListener('click', () => { aiImport(); });
-    // 日志 Excel 导入：历史弹窗导入按钮 + 拖拽文件到插件窗口
-    if (els.histImport) {
-      const fi = document.createElement('input');
-      fi.type = 'file'; fi.accept = '.xlsx'; fi.hidden = true;
-      document.body.appendChild(fi);
-      els.histImport.addEventListener('click', () => fi.click());
-      fi.addEventListener('change', () => {
-        importLogsFromFiles([...fi.files]);
-        fi.value = '';
-      });
-    }
+    // 导入：一个入口，弹窗里既能「从表格文件导入」也能「AI 导入」（非本插件导出的表格引导优先用 AI）
+    if (els.histImport) els.histImport.addEventListener('click', () => { openQcImport({}).catch(() => { }); });
     ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
     document.addEventListener('drop', e => {
       e.preventDefault();
@@ -1374,7 +1505,8 @@ const MPP = (() => {
       const ok = await confirmDlg(
         all ? '确认清除所有历史记录？此操作不可恢复。'
             : '确认清除选中的 ' + keys.length + ' 个视频的标记记录？此操作不可恢复。',
-        all ? '清除所有' : '清除'
+        all ? '清除所有' : '清除',
+        { danger: true }
       );
       if (!ok) return;
       try { await execInPage(all ? fnClearAll : fnRemoveHistory, all ? [] : [keys]); } catch (e) { }
@@ -1446,50 +1578,42 @@ const MPP = (() => {
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = Math.floor(t % 60);
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
   }
-  // ─── 记录表导入弹窗 ─────────────────────────────────────
-  // 拖入记录表（或点历史栏 AI 按钮）后弹出：① AI 提示词 + 粘贴框（优先）
-  // ② 自动识别到的工作表 / 分节（默认不勾选，需手动选择）
-  // ctx: { names: [文件名], cands: [{label, marks, mode, has6}], meta, hint }
+  // ─── 导入记录弹窗（AI 导入 + 从文件导入，同一处）─────────────
+  // ① AI 导入：复制提示词交给任意 AI（表格 / 截图 / 文本都行），把结果粘贴回来（格式再杂也能用）
+  // ② 从文件导入：选表格文件（或直接把文件拖进面板），按工作表 / 分节勾选要导入的内容
+  // 表格里有多个工作表时必须由用户勾选（默认不预选），只有一个工作表时才自动勾上 ——
+  // 猜错工作表会把整张表的内容导进来，所以这里不替用户决定。
+  // ctx: { meta, files: [{name, sheets}], cands, sheets, aiFirst, notice }
   function qcDialog(ctx) {
-    const cands = ctx.cands || [];
-    const hasCands = cands.length > 0;
+    const meta = ctx.meta || { duration: 0, fps: 25 };
     return new Promise(resolve => {
       let m = document.getElementById('mpp-qc');
       if (m) m.remove();
       m = document.createElement('div');
       m.id = 'mpp-qc';
       m.className = 'mpp-mask';
-      const items = cands.map((c, i) => {
-        const hint = c.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
-        return '<label class="qc-item" data-i="' + i + '">' +
-            '<input type="checkbox" class="chk">' +
-            '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
-            '<span class="qc-count">' + c.marks.length + ' 条</span>' +
-          '</label>' +
-          '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
-      }).join('');
-      const names = (ctx.names || []).join('、');
-      const totalRows = cands.reduce((a, c) => a + c.marks.length, 0);
       m.innerHTML =
         '<div class="mpp-modal wide qc-modal">' +
           '<div class="qc-title">导入记录</div>' +
-          (names ? '<div class="qc-file" title="' + esc(names) + '">' + esc(names) + '</div>' : '') +
-          // ① AI 导入（优先）：格式再杂也能用
-          '<div class="qc-step">① 复制提示词发给 AI，结果粘贴到这里（推荐）</div>' +
+          '<div class="qc-notice" hidden></div>' +
+          '<div class="qc-step ai-step">① AI 导入（推荐）</div>' +
           '<div class="ai-bar">' +
             '<button type="button" class="ai-copy">复制提示词</button>' +
+            '<span class="qc-tip">把表格（或截图 / 文本）连同提示词一起发给 AI，再把 AI 的输出粘贴到下面</span>' +
           '</div>' +
           '<textarea class="ai-prompt" readonly hidden></textarea>' +
           '<textarea class="ai-input" spellcheck="false" placeholder="粘贴 AI 输出的清单，例如：&#10;00:10:19:20 阿维塔 主持人口播"></textarea>' +
-          // ② 自动识别结果（默认不勾选，折叠收起）
-          (hasCands
-            ? '<details class="qc-details">' +
-                '<summary>② 或勾选自动识别结果导入<span class="qc-total"></span></summary>' +
-                '<div class="qc-head"><label class="qc-all"><input type="checkbox" class="chk">全选</label>' +
-                  '<span class="qc-count">共 ' + totalRows + ' 条</span></div>' +
-                '<div class="qc-list">' + items + '</div>' +
-              '</details>'
-            : '') +
+          '<div class="qc-step file-step">② 或从表格文件导入</div>' +
+          '<div class="qc-file-row">' +
+            '<button type="button" class="qc-choose">选择表格文件</button>' +
+            '<span class="qc-file"></span>' +
+          '</div>' +
+          '<div class="qc-cands" hidden>' +
+            '<div class="qc-pick-hint"></div>' +
+            '<div class="qc-head"><label class="qc-all"><input type="checkbox" class="chk">全选</label>' +
+              '<span class="qc-count"></span></div>' +
+            '<div class="qc-list"></div>' +
+          '</div>' +
           '<div class="qc-foot">' +
             '<div class="ai-status"></div>' +
             '<button type="button" class="mpp-cancel">取消</button>' +
@@ -1497,52 +1621,103 @@ const MPP = (() => {
           '</div>' +
         '</div>';
       document.body.appendChild(m);
-      const boxes = [...m.querySelectorAll('.qc-item input')];
+
+      const noticeEl = m.querySelector('.qc-notice');
+      const fileEl = m.querySelector('.qc-file');
+      const candsBox = m.querySelector('.qc-cands');
+      const hintEl = m.querySelector('.qc-pick-hint');
+      const listEl = m.querySelector('.qc-list');
+      const countEl = m.querySelector('.qc-count');
       const allBox = m.querySelector('.qc-all input');
-      const totalEl = m.querySelector('.qc-total');
       const input = m.querySelector('.ai-input');
       const statusEl = m.querySelector('.ai-status');
       const promptEl = m.querySelector('.ai-prompt');
       const okBtn = m.querySelector('.mpp-ok');
-      const refreshPrompt = () => { promptEl.value = aiPrompt(); };
-      refreshPrompt();
+      const picker = document.createElement('input');
+      picker.type = 'file'; picker.accept = '.xlsx'; picker.multiple = true; picker.hidden = true;
+      m.appendChild(picker);
+
+      let cands = (ctx.cands || []).slice();
+      let sheets = (ctx.sheets || []).slice();
+      let fileNames = (ctx.files || []).map(f => f && f.name).filter(Boolean);
+      let sheetHint = ctx.sheetHint || '';
       let pasted = null;
-      const sheetCount = () => {
-        let n = 0;
-        cands.forEach((c, i) => { if (boxes[i].checked) n += c.marks.length; });
-        return n;
-      };
+
+      const checkedCands = () => [...listEl.querySelectorAll('.qc-item')].filter(el => el.querySelector('input').checked);
+      const pickedCount = () => checkedCands().reduce((a, el) => a + (cands[+el.dataset.i] ? cands[+el.dataset.i].marks.length : 0), 0);
+
+      const refreshPrompt = () => { promptEl.value = aiPrompt(sheets); };
+
+      // 候选（工作表 / 分节）列表：多个时默认不勾选，要求用户明确选择
+      function renderCands() {
+        candsBox.hidden = !cands.length;
+        if (!cands.length) { listEl.innerHTML = ''; return; }
+        listEl.innerHTML = cands.map((c, i) => {
+          const hint = c.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
+          const pre = cands.length === 1 ? ' checked' : '';
+          return '<label class="qc-item" data-i="' + i + '">' +
+              '<input type="checkbox" class="chk"' + pre + '>' +
+              '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
+              '<span class="qc-count">' + c.marks.length + ' 条</span>' +
+            '</label>' +
+            '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
+        }).join('');
+        const filesTxt = fileNames.length ? '文件：' + fileNames.join('、') + '　' : '';
+        hintEl.textContent = (cands.length > 1 ? filesTxt + '检测到 ' + cands.length + ' 个可导入的工作表 / 分节，请勾选要导入的那一个（可多选）' : filesTxt + '已自动勾选识别到的内容')
+          + (sheetHint ? '　' + sheetHint : '');
+        refresh();
+      }
+
       const refresh = () => {
-        // 时间码读法始终自动判定（按视频时长排除不合理的读法），无需用户选择
         const text = input.value.trim();
-        pasted = text ? aiParse(text, ctx.meta || {}, 'auto') : null;
+        pasted = text ? aiParse(text, meta, 'auto') : null;
         const hasPaste = !!(pasted && pasted.marks.length);
-        const nSheet = sheetCount();
+        const items = [...listEl.querySelectorAll('.qc-item input')];
+        const nSheet = pickedCount();
         // 粘贴内容优先：有可解析的粘贴内容时忽略表格勾选
-        boxes.forEach(b => { b.disabled = hasPaste; });
-        if (allBox) allBox.disabled = hasPaste;
+        items.forEach(b => { b.disabled = hasPaste; });
+        allBox.disabled = hasPaste || !items.length;
         m.classList.toggle('ai-active', hasPaste);
-        if (totalEl) {
-          const allOn = boxes.length > 0 && boxes.every(b => b.checked);
-          totalEl.textContent = boxes.length ? '（已选 ' + nSheet + ' 条）' : '';
-          if (allBox) { allBox.checked = allOn; allBox.indeterminate = !allOn && boxes.some(b => b.checked); }
+        if (items.length) {
+          const allOn = items.every(b => b.checked);
+          allBox.checked = allOn;
+          allBox.indeterminate = !allOn && items.some(b => b.checked);
+        } else {
+          allBox.checked = false; allBox.indeterminate = false;
         }
+        countEl.textContent = cands.length ? '共 ' + cands.reduce((a, c) => a + c.marks.length, 0) + ' 条 / 已选 ' + nSheet + ' 条' : '';
         if (hasPaste) {
           statusEl.textContent = '共 ' + pasted.marks.length + ' 条记录';
-          okBtn.textContent = '导入';
           okBtn.disabled = false;
           return;
         }
-        if (text) {
-          statusEl.textContent = '未识别到时间码，请检查 AI 输出';
-        } else {
-          statusEl.textContent = '共 ' + nSheet + ' 条记录';
-        }
-        okBtn.textContent = '导入';
+        statusEl.textContent = text ? '未识别到时间码，请检查 AI 输出' : '共 ' + nSheet + ' 条记录';
         okBtn.disabled = nSheet === 0;
       };
-      boxes.forEach(b => b.addEventListener('change', refresh));
-      if (allBox) allBox.addEventListener('change', () => { boxes.forEach(b => { b.checked = allBox.checked; }); refresh(); });
+
+      // 弹窗内选文件（与拖拽进来的文件走同一套读取 / 候选构建）
+      const setFiles = async fileList => {
+        if (!fileList || !fileList.length) return;
+        const files = await readSheetFiles(fileList);
+        const built = buildQcCands(files, meta);
+        cands = built.cands;
+        sheets = built.sheetNames;
+        sheetHint = built.hint;
+        fileNames = files.map(f => f.name);
+        fileEl.textContent = fileNames.join('、');
+        fileEl.title = fileNames.join('、');
+        renderCands();
+        refreshPrompt();
+      };
+      m.querySelector('.qc-choose').addEventListener('click', () => picker.click());
+      picker.addEventListener('change', () => { setFiles([...picker.files]); picker.value = ''; });
+
+      // 非本插件导出的表格：引导优先用 AI（格式差异大，AI 比自动识别稳）
+      const notice = ctx.notice || '';
+      if (notice) { noticeEl.textContent = notice; noticeEl.hidden = false; m.classList.add('ai-first'); }
+      fileEl.textContent = fileNames.join('、');
+      if (fileNames.length) fileEl.title = fileNames.join('、');
+
       // 粘贴框随内容自动增高（上限 168px，超出才出现一条细滚动条）
       const growInput = () => {
         input.style.height = 'auto';
@@ -1551,6 +1726,11 @@ const MPP = (() => {
       input.addEventListener('input', () => { growInput(); refresh(); });
       input.addEventListener('paste', () => setTimeout(growInput, 0));
       input.addEventListener('keydown', e => e.stopPropagation());
+      listEl.addEventListener('change', refresh);
+      allBox.addEventListener('change', () => {
+        listEl.querySelectorAll('.qc-item input').forEach(b => { b.checked = allBox.checked; });
+        refresh();
+      });
       // 复制提示词；复制失败时展开提示词框供手动复制
       m.querySelector('.ai-copy').addEventListener('click', () => {
         const fail = () => {
@@ -1560,7 +1740,7 @@ const MPP = (() => {
           panelToast('复制失败，请在提示词框内手动复制');
         };
         try {
-          const p = aiPrompt();
+          const p = aiPrompt(sheets);
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(p).then(() => panelToast('已复制提示词，粘贴给 AI 即可')).catch(fail);
           } else fail();
@@ -1580,15 +1760,19 @@ const MPP = (() => {
       const ok = () => {
         const text = input.value.trim();
         if (text && pasted && pasted.marks.length) { finish({ items: [], mode: 'auto', text: text }); return; }
-        const picked = cands.filter((c, i) => boxes[i].checked);
-        if (!picked.length) { panelToast('请至少勾选一项，或粘贴 AI 结果'); return; }
+        const picked = checkedCands().map(el => cands[+el.dataset.i]).filter(Boolean);
+        if (!picked.length) {
+          panelToast(cands.length > 1 ? '请先勾选要导入的工作表，或粘贴 AI 结果' : '请选择表格文件，或粘贴 AI 结果');
+          return;
+        }
         finish({ items: picked, mode: 'auto', text: '' });
       };
       m.querySelector('.mpp-cancel').addEventListener('click', () => finish(null));
       okBtn.addEventListener('click', ok);
       m.addEventListener('click', e => { if (e.target === m) finish(null); });
       document.addEventListener('keydown', onKey);
-      refresh();
+      refreshPrompt();
+      renderCands();
     });
   }
 
@@ -1629,15 +1813,38 @@ const MPP = (() => {
     return true;
   }
 
-  // 记录表文件 → 候选（工作表 / 分节）+ AI 提示词 → 弹窗 → 导入当前视频
-  async function importQcFiles(files) {
-    if (!window.QcImport) return false;
-    let meta = { duration: 0, fps: 25 };
-    try { meta = (await execInPage(fnVideoMeta)) || meta; } catch (e) { }
+  // File 列表 → { name, sheets, marks, inOut, plugin }：读不出来也返回（还能走 AI 提示词）
+  async function readSheetFiles(fileList) {
+    const out = [];
+    for (const f of (fileList || [])) {
+      let data = null;
+      try {
+        const buf = await f.arrayBuffer();
+        data = window.XlsxReader ? XlsxReader.read(buf) : null;
+      } catch (e) { data = null; }
+      const marks = (data && data.marks) || [];
+      const inOut = (data && data.inOut) || [];
+      out.push({
+        name: f.name || '导入.xlsx',
+        sheets: (data && data.sheets) || [],
+        marks: marks,
+        inOut: inOut,
+        // 本插件导出的日志（标记 / 片段两张表，表头固定）→ 直接合并，不用弹窗选表
+        plugin: (marks.length > 1 || inOut.length > 1)
+      });
+    }
+    return out;
+  }
+
+  // 表格文件 → 候选（每个可导入的工作表 / 分节一项）+ 工作表名与提示文案
+  function buildQcCands(files, meta) {
     const cands = [];
-    files.forEach(f => {
+    const sheetNames = [];
+    const parsedSheets = new Set();
+    (files || []).forEach(f => {
       let scanned = [];
-      try { scanned = QcImport.scan(f.sheets || []); } catch (e) { scanned = []; }
+      try { scanned = window.QcImport ? QcImport.scan(f.sheets || []) : []; } catch (e) { scanned = []; }
+      (f.sheets || []).forEach(s => { if (s && s.name) sheetNames.push(s.name); });
       scanned.forEach((sh, si) => {
         const sheet = (f.sheets || [])[si] || { rows: [] };
         const secs = (sh.sections || []).filter(s => s.tokens > 0);
@@ -1645,48 +1852,51 @@ const MPP = (() => {
         list.forEach(sec => {
           const rows = (sheet.rows || []).slice(sec.start, sec.end + 1);
           const extra = sec.title && sec.title.indexOf(sh.name) < 0 ? ' · ' + sec.title : '';
-          const multi = files.length > 1 ? f.name + ' — ' : '';
-          cands.push({ file: f.name, sheet: sh.name, label: multi + (sh.name || 'Sheet') + extra, rows: rows });
+          const multi = (files.length > 1) ? f.name + ' — ' : '';
+          const c = { file: f.name, sheet: sh.name, label: multi + (sh.name || 'Sheet') + extra, rows: rows };
+          const r = QcImport.parse([{ name: c.sheet, rows: rows }], { fps: meta.fps, duration: meta.duration });
+          c.marks = r.marks; c.mode = r.mode; c.has6 = r.has6;
+          cands.push(c);
+          if (c.marks.length) parsedSheets.add(sh.name);
         });
       });
     });
-    // 先按自动识别解析一次：弹窗里显示每个候选的标记点数与备注预览
-    cands.forEach(c => {
-      const r = QcImport.parse([{ name: c.sheet, rows: c.rows }], { fps: meta.fps, duration: meta.duration });
-      c.marks = r.marks;
-      c.mode = r.mode;
-      c.has6 = r.has6;
-    });
     const usable = cands.filter(c => c.marks.length);
-    const pick = await qcDialog({
-      names: files.map(f => f.name),
-      cands: usable,
-      meta: meta
-    });
-    if (!pick) return false;
-    return applyQcPick(pick, meta);
+    const missed = sheetNames.filter(n => !parsedSheets.has(n)).length;
+    const bits = [];
+    if (sheetNames.length > 1) bits.push('表格共 ' + sheetNames.length + ' 个工作表');
+    if (missed) bits.push('另有 ' + missed + ' 个工作表没识别到时间码');
+    return { cands: usable, sheetNames: sheetNames, hint: bits.join('，') };
   }
 
-  // 历史栏「AI 导入」按钮：不拖文件，直接给提示词 → 粘贴 AI 结果 → 导入
-  async function aiImport() {
+  // 打开导入弹窗（历史栏「导入」按钮 / 拖入表格文件 / 非本插件导出文件都走这里）
+  // opts: { files:[{name,sheets,plugin}], aiFirst, notice }
+  async function openQcImport(opts) {
+    if (!window.QcImport) return false;
+    opts = opts || {};
     let meta = { duration: 0, fps: 25 };
     try { meta = (await execInPage(fnVideoMeta)) || meta; } catch (e) { }
+    const files = opts.files || [];
+    const built = buildQcCands(files, meta);
     const pick = await qcDialog({
-      names: [],
-      cands: [],
-      sheets: [],
       meta: meta,
-      hint: '点「复制提示词」把表格交给任意 AI 工具（表格可直接上传，或贴截图 / 文本），再把 AI 输出的清单粘贴到下面即可导入。'
+      files: files,
+      cands: built.cands,
+      sheets: built.sheetNames,
+      sheetHint: built.hint,
+      aiFirst: !!opts.aiFirst,
+      notice: opts.notice || ''
     });
     if (!pick) return false;
     return applyQcPick(pick, meta);
   }
 
-  // ─── AI 提示词 + 粘贴结果解析（记录表导入弹窗内使用）────────
+  // ─── AI 提示词 + 粘贴结果解析（导入弹窗内使用）────────
   // 记录表版本多、格式杂：把提示词连同表格交给第三方 AI，再把 AI 输出的清单粘贴回来。
   // 粘贴内容走与记录表相同的解析（时间码识别 / 备注规则 / 时长过滤），支持纯文本与 JSON
-  function aiPrompt() {
-    if (window.QcImport && typeof QcImport.buildPrompt === 'function') return QcImport.buildPrompt();
+  // sheets：已知工作表名时传入 —— 多表提示词里会让 AI 先问「要导入哪一张」
+  function aiPrompt(sheets) {
+    if (window.QcImport && typeof QcImport.buildPrompt === 'function') return QcImport.buildPrompt({ sheets: sheets || [] });
     return '请把表格整理成每行「时间码 + 空格 + 项目说明」的纯文本，时间码写成规范格式。';
   }
   function aiParse(text, meta, mode) {
@@ -1701,47 +1911,43 @@ const MPP = (() => {
     const m = String(url || '').match(/mpp=([\d.]+)/);
     return m ? parseFloat(m[1]) : null;
   }
-  async function importLogsFromFiles(files) {
+  async function importLogsFromFiles(fileList) {
+    const files = await readSheetFiles(fileList);
     const recs = [];
-    const qcFiles = [];        // 记录表格（非本插件导出）：交给导入记录流程，弹窗选择导入内容
+    const qcFiles = [];        // 记录表格（非本插件导出）：交给导入记录流程，弹窗里选工作表 / 用 AI
     let filesOk = 0;
     for (const f of files) {
-      let buf;
-      try { buf = await f.arrayBuffer(); } catch (e) { continue; }
-      let data = null;
-      try { data = window.XlsxReader ? XlsxReader.read(buf) : null; } catch (e) { data = null; }
-      if (!data) {
-        // 读不出来也交给记录表弹窗：可用 AI 提示词转换后粘贴导入
-        if (window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: [] });
+      if (!f.sheets.length && !f.marks.length && !f.inOut.length) {
+        // 读不出来（或不是本插件的两张表）也交给导入弹窗：可用 AI 提示词转换后粘贴导入
+        if (window.QcImport) qcFiles.push({ name: f.name, sheets: [] });
         continue;
       }
       filesOk++;
       let n = 0;
-      (data.marks || []).slice(1).forEach(r => {
+      (f.marks || []).slice(1).forEach(r => {
         if (!r[1]) return;
         n++;
         recs.push({ kind: 'marks', tc: r[1], color: r[2] || null, note: r[3] || null, url: r[4] || '', title: r[5] || '' });
       });
-      (data.inOut || []).slice(1).forEach(r => {
+      (f.inOut || []).slice(1).forEach(r => {
         if (!r[1] || !r[2]) return;
         n++;
         recs.push({ kind: 'inOut', inTC: r[1], outTC: r[2], dur: parseFloat(r[3]) || 0, note: r[4] || null, url: r[5] || '', title: r[6] || '' });
       });
       // 不是本插件导出格式 → 按记录表处理（工作表 / 分节由用户在弹窗里选择）
-      if (!n && window.QcImport) qcFiles.push({ name: f.name || '导入.xlsx', sheets: data.sheets || [] });
-    }
-    if (!filesOk && !qcFiles.length) {
-      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与记录表格）');
-      return;
+      if (!n && window.QcImport) qcFiles.push({ name: f.name, sheets: f.sheets || [] });
     }
     if (!recs.length) {
       if (qcFiles.length) {
-        try { await importQcFiles(qcFiles); } catch (e) { }
+        // 非本插件导出的表格：弹窗里提示优先用 AI 导入（格式差异大，AI 比自动识别稳）
+        try {
+          await openQcImport({ files: qcFiles, aiFirst: true, notice: '这个表格不是本插件导出的格式，建议优先用上面的 AI 导入：复制提示词连同表格发给 AI，把结果粘贴回来最稳。' });
+        } catch (e) { }
         loadHistory();
         load(true);
         return;
       }
-      panelToast('Excel 中没有可导入的记录（可点「AI 导入」用提示词转换后粘贴）');
+      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与记录表格，也可在导入弹窗里用 AI 提示词转换）');
       return;
     }
     // 页面校准帧率：时间码换算与导出时保持一致（FPS≠25 时避免秒数偏移）
@@ -1803,7 +2009,9 @@ const MPP = (() => {
     if (impAdded) await chrome.storage.local.set({ mpp_imported: base }).catch(() => { });
     panelToast('已导入 ' + Object.keys(groups).length + ' 个视频 · ' + (pageAdded + impAdded) + ' 条记录');
     if (qcFiles.length) {
-      try { await importQcFiles(qcFiles); } catch (e) { }
+      try {
+        await openQcImport({ files: qcFiles, aiFirst: true, notice: '这个表格不是本插件导出的格式，建议优先用上面的 AI 导入：复制提示词连同表格发给 AI，把结果粘贴回来最稳。' });
+      } catch (e) { }
     }
     loadHistory();
     load(true);
@@ -2045,5 +2253,6 @@ const MPP = (() => {
     chrome.runtime.sendMessage({ type: 'pushSettings' }).catch(() => { });
   }
 
-  return { init, load, setTab };
+  // _test：仅供开发自检脚本调用（Material/qc-dev/test-panel-ui.js），扩展运行时不使用
+  return { init, load, setTab, _test: { qcDialog, openQcImport, buildQcCands, aiPrompt } };
 })();

@@ -98,11 +98,8 @@
       <div class="hist-head">
         <span class="hist-title">历史记录</span>
         <span class="grow"></span>
-        <button type="button" id="hist-import" class="hist-act" title="导入日志 Excel">
+        <button type="button" id="hist-import" class="hist-act" title="导入记录（表格文件 / AI 导入）">
           <svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7"/><path d="M2.5 11.5v2h11v-2"/></svg>
-        </button>
-        <button type="button" id="hist-ai" class="hist-act" title="AI 导入（复制提示词给 AI，粘贴结果导入）">
-          <svg viewBox="0 0 16 16"><path d="M8 1.8l1.5 3.7L13.2 7l-3.7 1.5L8 12.2 6.5 8.5 2.8 7l3.7-1.5z"/><path d="M12.6 11.2l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z"/></svg>
         </button>
         <button type="button" id="hist-all" class="hist-act" title="全选/取消全选">
           <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
@@ -127,12 +124,13 @@
 
   <div class="search-bar" id="search-bar" hidden>
     <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L14 14"/></svg>
-    <input id="search-in" type="text" spellcheck="false" placeholder="搜索备注（回车/× 清除）">
+    <input id="search-in" type="text" spellcheck="false" placeholder="搜索备注">
     <span id="search-hit"></span>
-    <button id="search-clear" title="清除搜索">
+    <button id="search-clear" title="清除 / 关闭搜索">
       <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>
     </button>
   </div>
+  <div class="search-colors" id="search-colors" hidden></div>
 
   <footer>
     <button id="btn-search" title="搜索备注">

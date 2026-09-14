@@ -396,8 +396,12 @@
   // ─── AI 提示词 + 文本结果导入 ────────────────────────────
   // 表格版本多、格式杂：给出提示词，用户把「表格 + 提示词」交给第三方 AI，
   // 再把 AI 输出的纯文本粘贴回来，走同一套解析（时间码识别 / 备注 / 时长过滤）
-  function buildPrompt() {
-    return [
+  // opts.sheets：已知的工作表名（表格已读出来时传入）——多表时必须让 AI 先问用户导入哪一张，
+  // 否则 AI 会自己挑一张，导进来的内容就说不清是哪张表了
+  function buildPrompt(opts) {
+    const o = (opts && typeof opts === 'object' && !Array.isArray(opts)) ? opts : { sheets: opts };
+    const sheets = ((o && o.sheets) || []).map(s => String(s == null ? '' : s).trim()).filter(Boolean);
+    const lines = [
       '我在整理一份视频记录表格，请只做「时间码 → 项目说明」的提取，按下面格式输出。',
       '',
       '要求：',
@@ -420,7 +424,18 @@
       '00:10:19:20 阿维塔 主持人口播',
       '00:06:47:18 阿维塔 张泉灵 4s',
       '00:17:56:11 趣多多 张彬彬 食用'
-    ].join('\n');
+    ];
+    // 工作表提示插在「要求」之前：多表必须先确认，单表直接说明用哪张
+    let sheetAsk;
+    if (sheets.length > 1) {
+      sheetAsk = '注意：这份文件里有多个工作表 —— ' + sheets.join('、') + '。请先简单说明每张表是什么内容，然后问我「要导入哪一张（或哪几张）」，我答复后再按下面的格式输出我选的那张表；不要自己替我挑。';
+    } else if (sheets.length === 1) {
+      sheetAsk = '这份文件的工作表是「' + sheets[0] + '」，请按下面的格式输出这张表里的时间码。';
+    } else {
+      sheetAsk = '注意：如果这份文件里有多个工作表 / 分节，请先把它们的名字列出来，问我「要导入哪一张（或哪几张）」，我答复后再输出；不要自己替我挑。';
+    }
+    lines.splice(2, 0, sheetAsk, '');
+    return lines.join('\n');
   }
   // AI 有时会直接返回 JSON：容错取出数组
   function asJsonArray(text) {
