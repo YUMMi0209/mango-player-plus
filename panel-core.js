@@ -1587,44 +1587,42 @@ const MPP = (() => {
         '<div class="mpp-modal wide qc-modal">' +
           '<div class="qc-title">导入记录</div>' +
           '<div class="qc-steps">' +
-            '<span class="qc-stp" data-s="1">1 选择来源</span>' +
-            '<span class="qc-stp" data-s="2">2 工作表与方式</span>' +
-            '<span class="qc-stp" data-s="3">3 确认清单</span>' +
+            '<span class="qc-stp" data-s="1">① 来源</span>' +
+            '<span class="qc-stp" data-s="2">② 工作表与方式</span>' +
+            '<span class="qc-stp" data-s="3">③ 确认清单</span>' +
           '</div>' +
           '<div class="qc-notice" hidden></div>' +
           // ── 第一步：来源（表格 or 时间码清单）──
           '<div class="qc-stage" data-stage="1">' +
             '<div class="qc-drop">' +
-              '<div class="qc-drop-main">把 .xlsx 表格拖到这里</div>' +
+              '<div class="qc-drop-main">把 .xlsx 拖到这里</div>' +
               '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button></div>' +
               '<div class="qc-file" hidden></div>' +
             '</div>' +
             '<div class="qc-or">或直接粘贴时间码清单</div>' +
-            '<textarea class="ai-input" spellcheck="false" placeholder="每行一条：时间码 + 说明，例如&#10;00:10:19:20 阿维塔 主持人口播&#10;101920 阿维塔 主持人口播（也兼容中文冒号 / 无冒号写法）"></textarea>' +
+            '<textarea class="ai-input" spellcheck="false" placeholder="每行一条：时间码 + 说明，例如 00:10:19:20 阿维塔 主持人口播"></textarea>' +
           '</div>' +
           // ── 第二步：工作表 + 导入方式（仅从表格导入）──
           '<div class="qc-stage" data-stage="2" hidden>' +
-            '<div class="qc-step">选择要导入的工作表（一次一张）</div>' +
+            '<div class="qc-step">导入哪张表</div>' +
             '<div class="qc-pick-hint"></div>' +
-            '<div class="qc-count"></div>' +
             '<div class="qc-list"></div>' +
-            '<div class="qc-step">选择导入方式</div>' +
+            '<div class="qc-step">怎么导入</div>' +
             '<div class="qc-way-row">' +
-              '<label class="qc-way-opt"><input type="radio" name="qc-way" value="ai" checked><span>AI 导入<em>推荐</em></span></label>' +
-              '<label class="qc-way-opt"><input type="radio" name="qc-way" value="direct"><span>直接导入</span></label>' +
+              '<label class="qc-way-opt"><input type="radio" name="qc-way" value="ai" class="qc-radio" checked><span>AI 导入<em>推荐</em></span></label>' +
+              '<label class="qc-way-opt"><input type="radio" name="qc-way" value="direct" class="qc-radio"><span>直接导入</span></label>' +
             '</div>' +
             '<div class="qc-tip"></div>' +
           '</div>' +
           // ── 第三步：AI 提示词 / 清单确认 ──
           '<div class="qc-stage" data-stage="3" hidden>' +
             '<div class="qc-ai-box" hidden>' +
-              '<div class="qc-step">用 AI 转换表格</div>' +
               '<div class="ai-bar">' +
                 '<button type="button" class="ai-copy">复制提示词</button>' +
-                '<span class="qc-tip2">把表格和提示词一起发给 AI，再把结果粘贴到下面</span>' +
+                '<span class="qc-tip2">发给 AI 后，把结果粘贴到这里</span>' +
               '</div>' +
               '<textarea class="ai-prompt" readonly hidden></textarea>' +
-              '<textarea class="ai-input2" spellcheck="false" placeholder="粘贴 AI 输出的清单，例如&#10;00:10:19:20 阿维塔 主持人口播"></textarea>' +
+              '<textarea class="ai-input2" spellcheck="false" placeholder="粘贴 AI 输出的清单"></textarea>' +
             '</div>' +
             '<div class="qc-preview">' +
               '<div class="qc-preview-head"></div>' +
@@ -1648,7 +1646,6 @@ const MPP = (() => {
       const stage3 = m.querySelector('.qc-stage[data-stage="3"]');
       const hintEl = m.querySelector('.qc-pick-hint');
       const listEl = m.querySelector('.qc-list');
-      const countEl = m.querySelector('.qc-count');
       const tipEl = m.querySelector('.qc-tip');
       const input = m.querySelector('.ai-input');        // 第一步：粘贴时间码清单
       const aiInput = m.querySelector('.ai-input2');     // 第三步：粘贴 AI 结果
@@ -1703,23 +1700,20 @@ const MPP = (() => {
         dropEl.classList.toggle('has-file', !!fileNames.length);
       };
 
-      // 候选（工作表 / 分节）：单选；多个时默认不选，要求用户明确选一张
+      // 候选（工作表 / 分节）：单选；只有一张表时直接显示表名，不给多余说明
       function renderCands() {
-        if (!cands.length) { listEl.innerHTML = ''; return; }
+        if (!cands.length) { listEl.innerHTML = ''; hintEl.textContent = ''; return; }
+        const single = cands.length === 1;
         listEl.innerHTML = cands.map((c, i) => {
           const hint = c.marks.slice(0, 2).map(x => fmtMark(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
-          const pre = cands.length === 1 ? ' checked' : '';
           return '<label class="qc-item" data-i="' + i + '">' +
-              '<input type="radio" name="qc-sheet" class="chk"' + pre + '>' +
+              '<input type="radio" name="qc-sheet" class="qc-radio"' + (single ? ' checked' : '') + '>' +
               '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
               '<span class="qc-count">' + c.marks.length + ' 条</span>' +
             '</label>' +
-            '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
+            (single ? '' : '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>');
         }).join('');
-        hintEl.textContent = (cands.length > 1
-            ? '检测到 ' + cands.length + ' 个工作表 / 分节，请选择要导入的那一张'
-            : '已自动选中识别到的内容')
-          + (sheetHint ? '　' + sheetHint : '');
+        hintEl.textContent = single ? '已选中' + (sheetHint ? '（' + sheetHint + '）' : '') : '共 ' + cands.length + ' 张，选一张';
       }
 
       // 第三步：把清单以「时间码 + 说明」的形式列出来，确认后再导入
@@ -1747,23 +1741,18 @@ const MPP = (() => {
         // 提示词随状态同步（选定工作表后只针对该表；复制失败时会展开给人手动复制）
         promptEl.value = aiPrompt(sheets, sel ? sel.sheet : '');
         tipEl.textContent = way === 'ai'
-          ? (sel ? 'AI 导入：下一步给出提示词（只针对「' + sel.sheet + '」），复制后交给 AI，再把结果粘贴回来'
-                 : 'AI 导入：下一步给出提示词，复制后交给 AI，再把结果粘贴回来')
-          : '直接导入：下一步把自动识别的结果以时间码清单列出，确认后导入';
+          ? '下一步给提示词，粘回 AI 结果即可'
+          : '下一步列出自动识别的清单';
         if (stage === 3) {
           const n = refreshPreview();
-          countEl.textContent = '';
           statusEl.textContent = n ? '共 ' + n + ' 条' : '清单为空';
           okBtn.disabled = n === 0;
           return;
         }
-        countEl.textContent = (stage === 2 && cands.length)
-          ? '共 ' + cands.reduce((a, c) => a + c.marks.length, 0) + ' 条 / 已选 ' + (sel ? sel.marks.length : 0) + ' 条'
-          : '';
         const pasted = parseList(input.value);
         statusEl.textContent = stage === 1
-          ? (pasted ? '已粘贴清单 ' + pasted.length + ' 条' : (cands.length ? '已选择表格：' + cands.length + ' 个工作表 / 分节' : ''))
-          : (sel ? '已选「' + sel.sheet + '」' + sel.marks.length + ' 条' : '请选择要导入的工作表');
+          ? (pasted ? '已粘贴 ' + pasted.length + ' 条' : (cands.length ? '已选择表格' : ''))
+          : (sel ? '已选：' + sel.sheet : '');
         okBtn.disabled = false;
       };
 
@@ -1879,7 +1868,7 @@ const MPP = (() => {
           source = 'file';
           if (!cands.length) {
             // 表格里没识别到时间码：没有可选的表，直接进 AI 那一步（提示词会让 AI 先问要哪张表）
-            panelToast('表格里没识别到时间码，可改用 AI 导入');
+            panelToast('没识别到时间码，改用 AI 导入');
             stage = 3;
             if (way === 'ai') aiInput.focus();
             refresh();
@@ -2079,7 +2068,7 @@ const MPP = (() => {
       if (qcFiles.length) {
         // 非本插件导出的表格：弹窗里提示优先用 AI 导入（格式差异大，AI 比自动识别稳）
         try {
-          await openQcImport({ files: qcFiles, aiFirst: true, notice: '这个表格不是本插件导出的格式，建议优先用上面的 AI 导入：复制提示词连同表格发给 AI，把结果粘贴回来最稳。' });
+          await openQcImport({ files: qcFiles, aiFirst: true, notice: '不是本插件导出的表格，建议用 AI 导入' });
         } catch (e) { }
         loadHistory();
         load(true);
@@ -2148,7 +2137,7 @@ const MPP = (() => {
     panelToast('已导入 ' + Object.keys(groups).length + ' 个视频 · ' + (pageAdded + impAdded) + ' 条记录');
     if (qcFiles.length) {
       try {
-        await openQcImport({ files: qcFiles, aiFirst: true, notice: '这个表格不是本插件导出的格式，建议优先用上面的 AI 导入：复制提示词连同表格发给 AI，把结果粘贴回来最稳。' });
+        await openQcImport({ files: qcFiles, aiFirst: true, notice: '不是本插件导出的表格，建议用 AI 导入' });
       } catch (e) { }
     }
     loadHistory();
