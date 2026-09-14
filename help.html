@@ -4,483 +4,171 @@
 <meta charset="UTF-8">
 <title>芒着拉片 | MG Player+ v3.3 使用教程</title>
 <style>
-:root{
-  --bg:#131518; --card:#1a1c1e; --card-brd:#35353c;
-  --row:#26262b; --row-h:#313138;
-  --text:#ececef; --muted:#a0a0a8; --faint:#6e6e76;
-  --orange:#ff5f00; --orange-dk:rgba(255,95,0,.16);
-  --mono:"JetBrains Mono","Cascadia Code","Consolas",monospace;
-  --scan:rgba(255,255,255,.028);
-}
-:root[data-theme="light"]{
-  --bg:#f5f5f8; --card:#ffffff; --card-brd:#dcdce4;
-  --row:#f0f0f4; --row-h:#e6e6ec;
-  --text:#18181e; --muted:#3c3c48; --faint:#6f6f7a;
-  --orange:#e65400; --orange-dk:rgba(255,95,0,.12);
-  --scan:rgba(0,0,0,.022);
-}
+:root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
+:root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:repeating-linear-gradient(0deg,var(--scan) 0 1px,transparent 1px 3px),var(--bg);color:var(--text);font-family:"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;font-size:14px;line-height:1.7;padding:32px 16px 60px}
+body{background:repeating-linear-gradient(0deg,var(--scan) 0 1px,transparent 1px 3px),var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",sans-serif;font-size:14px;line-height:1.7;padding:32px 16px 60px}
 .wrap{max-width:760px;margin:0 auto}
-header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-.brand{display:inline-flex;align-items:center;gap:9px;font-size:22px;font-weight:800;letter-spacing:.5px}
-.brand-tape{width:22px;height:22px;border-radius:5px}
+header{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.brand{display:inline-flex;align-items:center;gap:9px;font-size:22px;font-weight:800}
+.brand-tape{width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,var(--orange),#ffa040)}
 .brand .accent{color:var(--orange)}
 .sub{color:var(--faint);font-size:13px}
-.lead{color:var(--muted);margin-bottom:28px}
-h2{display:flex;align-items:center;gap:8px;font-size:16px;margin:36px 0 14px;padding-top:4px;border-top:1px solid var(--card-brd);padding-top:20px}
-h2 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--orange);color:#fff;font-size:12px;font-weight:700;flex-shrink:0}
+h2{font-size:16px;margin:34px 0 12px;border-top:1px solid var(--card-brd);padding-top:20px}
 h2:first-of-type{border-top:0;margin-top:0;padding-top:0}
-h3{font-size:14px;color:var(--muted);margin:20px 0 8px}
-p{margin:8px 0;color:var(--text)}
-.muted{color:var(--muted)}
-kbd{display:inline-block;min-width:22px;text-align:center;padding:2px 7px;margin:0 2px;background:var(--row);border:1px solid var(--card-brd);border-bottom-width:2px;border-radius:6px;font-family:var(--mono);font-size:12px;color:var(--text);line-height:1.4}
-kbd.hot{border-color:var(--orange);color:var(--orange);background:var(--orange-dk)}
-table{width:100%;border-collapse:collapse;margin:10px 0 4px;font-size:13px}
-th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--card-brd)}
+.num{display:inline-block;width:22px;height:22px;line-height:22px;margin-right:8px;text-align:center;border-radius:6px;background:var(--orange);color:#fff;font-size:12px;font-weight:700;vertical-align:2px}
+h3{font-size:14px;color:var(--muted);margin:18px 0 6px}
+p{margin:8px 0}
+kbd{display:inline-block;text-align:center;padding:2px 7px;margin:0 2px;background:var(--row);border:1px solid var(--card-brd);border-bottom-width:2px;border-radius:6px;font-family:var(--mono);font-size:12px}
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
+th,td{padding:7px 12px;border-bottom:1px solid var(--card-brd)}
 th{color:var(--faint);font-weight:600;font-size:12px;background:var(--card)}
-td.k{white-space:nowrap;width:150px}
-td kbd{margin:1px 2px}
-tr:hover td{background:var(--card)}
+td:first-child{white-space:nowrap;width:170px}
+td:first-child kbd{border-color:var(--orange);color:var(--orange);background:var(--orange-dk)}
 .steps{counter-reset:step;list-style:none}
 .steps li{position:relative;padding:2px 0 2px 34px;margin:10px 0}
-.steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:4px;width:22px;height:22px;border-radius:50%;background:var(--orange-dk);border:1px solid var(--orange);color:var(--orange);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
-.note{background:var(--orange-dk);border-left:3px solid var(--orange);border-radius:6px;padding:10px 14px;margin:12px 0;color:var(--text)}
-.note .t{color:var(--orange);font-weight:700;margin-right:6px}
-details{background:var(--card);border:1px solid var(--card-brd);border-radius:8px;margin:8px 0;padding:0}
-summary{cursor:pointer;padding:10px 14px;font-weight:600;color:var(--text);list-style:none}
-summary::before{content:"▸";color:var(--orange);display:inline-block;margin-right:8px;transition:transform .15s}
-details[open] summary::before{transform:rotate(90deg)}
+.steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:5px;width:22px;height:22px;border-radius:50%;background:var(--orange-dk);border:1px solid var(--orange);color:var(--orange);font:700 12px/22px var(--mono);text-align:center}
+.note{background:var(--orange-dk);border-left:3px solid var(--orange);border-radius:6px;padding:9px 14px;margin:12px 0}
+.note b{color:var(--orange);margin-right:6px}
+details{background:var(--card);border:1px solid var(--card-brd);border-radius:8px;margin:8px 0}
+summary{cursor:pointer;padding:10px 14px;font-weight:600;list-style:none}
+summary::before{content:"▸ ";color:var(--orange)}
 details .body{padding:2px 14px 12px 30px;color:var(--muted);font-size:13px}
-.flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
-.flow .chip{background:var(--row);border:1px solid var(--card-brd);border-radius:8px;padding:6px 12px;font-size:13px;font-family:var(--mono)}
-.flow .arr{color:var(--orange)}
-footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--card-brd);color:var(--faint);font-size:12px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-.mono{font-family:var(--mono);font-size:12.5px;background:var(--row);border:1px solid var(--card-brd);border-radius:5px;padding:1px 6px;word-break:break-all}
-ul{padding-left:22px;margin:8px 0}
+footer{margin-top:46px;padding-top:16px;border-top:1px solid var(--card-brd);color:var(--faint);font-size:12px;display:flex;justify-content:space-between}
+.mono{font-family:var(--mono);font-size:12.5px;background:var(--row);border:1px solid var(--card-brd);border-radius:5px;padding:1px 6px}
+ul{padding-left:22px;margin:6px 0}
 li{margin:4px 0}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <span class="brand">
-      <img class="brand-tape" src="icons/icon64.png" alt="芒着拉片图标">
-      芒着拉片<span class="accent">｜</span>MG Player+
-    </span>
-    <span class="sub">使用教程 · v3.3</span>
-  </header>
-  <p class="lead">为芒果TV设计的视频辅助插件：快捷键打点、变速预览、截图录制，日志面板一键导出片段表。</p>
+<header>
+<span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
+<span class="sub">使用教程 · v3.3</span>
+</header>
 
-  <h2><span class="num">1</span>安装与启用</h2>
-  <ol class="steps">
-    <li>获取代码（任选其一）：
-      <ul>
-        <li>下载压缩包（推荐）：前往 <span class="mono">https://github.com/YUMMi0209/mango-player-plus/releases</span> 下载最新版压缩包并解压；</li>
-        <li>或 <span class="mono">git clone https://github.com/YUMMi0209/mango-player-plus.git</span> 克隆仓库。</li>
-      </ul>
-    </li>
-    <li>打开扩展管理页：Chrome 地址栏输入 <span class="mono">chrome://extensions</span>；Edge 输入 <span class="mono">edge://extensions</span>。</li>
-    <li>开启页面右上角的<strong>开发者模式</strong>。</li>
-    <li>点击「加载已解压的扩展程序」（Edge 文案为「加载解压缩的扩展」），选择项目文件夹。</li>
-    <li>打开芒果TV视频播放页即可使用；建议点击浏览器右上角插件图标，把它固定到工具栏。</li>
-  </ol>
-  <p class="muted">也可通过 Edge 加载项商店直接安装。</p>
+<h2><span class="num">1</span>快速上手</h2>
+<ol class="steps">
+<li><strong>加载扩展</strong>：地址栏打开 chrome://extensions（Edge 用 edge://extensions）→ 开启开发者模式 → 加载已解压的扩展程序，选中插件文件夹。</li>
+<li><strong>打开面板</strong>：点工具栏的插件图标。面板有弹窗 / 侧边栏 / 独立窗口三种模式，会记住上次选择。</li>
+<li><strong>打点 → 导出</strong>：视频页按 <kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd> 打入点、出点、标记点；回面板勾选记录，点「导出日志」得 Excel。</li>
+</ol>
+<div class="note"><b>适用网站</b>芒果TV 与百度网盘打开就能用；其它网站需在设置里打开「应用于当前网页」，并在浏览器弹窗中点「允许」。</div>
 
-  <h3>可用的网站</h3>
-  <table>
-    <tr><th>网站</th><th>说明</th></tr>
-    <tr><td class="k">芒果TV</td><td>默认白名单站点（<span class="mono">www.mgtv.com</span> / <span class="mono">*.mgtv.com</span>），打开播放页即可用，无需任何授权</td></tr>
-    <tr><td class="k">百度网盘</td><td>默认白名单站点（<span class="mono">pan.baidu.com</span>），同样开箱可用</td></tr>
-    <tr><td class="k">其他网站</td><td>需在设置里打开「<strong>应用于当前网页</strong>」（实验）；插件按<strong>当前网站域名</strong>申请权限，浏览器弹窗里点「允许」后生效</td></tr>
-  </table>
-  <p class="muted">「应用于当前网页」授权失败时会在网页上提示原因：拿不到页面地址会提示「无法获取当前网页地址，请刷新页面后重试」，没点允许会提示「未获得网页授权，请在浏览器弹窗中点击允许」。关掉开关会同时回收该域名的授权。</p>
+<h2><span class="num">2</span>快捷键</h2>
+<table>
+<tr><th>按键</th><th>作用</th></tr>
+<tr><td><kbd>J</kbd> / <kbd>L</kbd></td><td>减速 / 加速播放（0.25X～16X，暂停时按会先开始播放）</td></tr>
+<tr><td><kbd>K</kbd></td><td>播放 / 暂停（并恢复常速）</td></tr>
+<tr><td><kbd>空格</kbd></td><td>恢复常速，不暂停</td></tr>
+<tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>后退 / 前进一帧</td></tr>
+<tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>后退 / 前进 1 秒</td></tr>
+<tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>直播回退 / 前进 30 秒（仅芒果TV直播页）</td></tr>
+<tr><td><kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd></td><td>打入点 / 出点 / 标记点</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd></td><td>跳到最近的入点 / 出点 / 标记点</td></tr>
+<tr><td><kbd>S</kbd></td><td>截图：下载 PNG 并复制到剪贴板</td></tr>
+<tr><td><kbd>C</kbd></td><td>截图并复制，只复制不下载</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>S</kbd></td><td>标注截图：弹出标注窗口</td></tr>
+<tr><td><kbd>R</kbd></td><td>开始 / 停止录制画面（含声音）</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>取消批量任务 / 退出网页全屏 / 关闭弹窗</td></tr>
+</table>
+<div class="note"><b>注意</b>焦点在输入框里（备注、搜索、时间码编辑）时快捷键不触发。</div>
 
-  <h2><span class="num">2</span>快捷键速查</h2>
-  <table>
-    <tr><th>快捷键</th><th>作用</th><th>前置条件 / 说明</th></tr>
-    <tr><td class="k"><kbd>J</kbd></td><td>减速播放（逐级减半，最低 0.25X）</td><td>暂停状态下按会先开始播放</td></tr>
-    <tr><td class="k"><kbd>K</kbd></td><td>播放 / 暂停（并恢复常速）</td><td>—</td></tr>
-    <tr><td class="k"><kbd>L</kbd></td><td>加速播放（逐级翻倍，最高 16X）</td><td>暂停状态下按会先开始播放</td></tr>
-    <tr><td class="k"><kbd>空格</kbd></td><td>恢复常速（不暂停）</td><td>—</td></tr>
-    <tr><td class="k"><kbd class="hot">I</kbd></td><td>打<strong>入点</strong>：记录当前时刻为片段起点</td><td>录制中不响应；「日志记录」关闭时不响应</td></tr>
-    <tr><td class="k"><kbd class="hot">O</kbd></td><td>打<strong>出点</strong>：与入点组成一条「片段」记录（自动算时长）</td><td>需先打过入点；录制中不响应；出点早于入点会提示「出点早于入点，未记录」</td></tr>
-    <tr><td class="k"><kbd class="hot">M</kbd></td><td>打<strong>标记点</strong>：记录当前时刻，可后续标颜色</td><td>录制中不响应</td></tr>
-    <tr><td class="k"><kbd>Shift</kbd>+<kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd></td><td>跳转到最近打下的入点 / 出点 / 标记点</td><td>对应的点不存在时不动作；跳转后暂停并恢复常速</td></tr>
-    <tr><td class="k"><kbd>,</kbd> / <kbd>.</kbd></td><td>逐帧后退 / 前进（按视频帧率 1 帧）</td><td>帧率由插件自动校准（20～120fps）</td></tr>
-    <tr><td class="k"><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>后退 / 前进 1 秒（网页不随之翻页）</td><td>—</td></tr>
-    <tr><td class="k"><kbd>←</kbd> / <kbd>→</kbd></td><td>直播：回退 / 前进 30 秒（本地缓存 600 秒）</td><td>仅芒果TV直播页生效</td></tr>
-    <tr><td class="k"><kbd>S</kbd></td><td>截图：保存 PNG 并复制到剪贴板</td><td>页面内没有画面时提示「无画面」</td></tr>
-    <tr><td class="k"><kbd>Shift</kbd>+<kbd>S</kbd></td><td><strong>标注截图</strong>：弹出标注窗口画框 / 加字</td><td>录制中提示「录制中无法标注截图」</td></tr>
-    <tr><td class="k"><kbd>C</kbd></td><td>截图并复制到剪贴板（不下载）</td><td>需要浏览器剪贴板权限</td></tr>
-    <tr><td class="k"><kbd>R</kbd></td><td>开始 / 停止录制画面（含声音）</td><td>从入点开始录会一直录到出点自动停止</td></tr>
-    <tr><td class="k"><kbd>Esc</kbd></td><td>取消批量任务 / 退出网页全屏 / 关闭时间码输入框</td><td>标注窗口打开时优先由标注窗口接管</td></tr>
-  </table>
-  <div class="note"><span class="t">注意</span>焦点在输入框 / 文本域 / 可编辑区域（备注、时间码编辑、搜索框、粘贴框）时，所有快捷键都不触发；带 <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> / <kbd>Alt</kbd> 的组合键一律不拦截，浏览器自身快捷键照常可用。快捷键需要页面内存在视频元素、站点适用，并且「视频控制」保持开启。</div>
-  <h3>面板内的按键</h3>
-  <table>
-    <tr><th>按键</th><th>作用</th></tr>
-    <tr><td class="k"><kbd>S</kbd> / <kbd>R</kbd></td><td>对<strong>勾选</strong>的记录批量截图 / 批量录制（勾选标记点按 <kbd>S</kbd>、勾选片段按 <kbd>R</kbd>）</td></tr>
-    <tr><td class="k"><kbd>Esc</kbd></td><td>取消进行中的批量任务（焦点在面板或页面内都行）</td></tr>
-    <tr><td class="k"><kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>备注、时间码、标题就地编辑：保存 / 取消</td></tr>
-    <tr><td class="k"><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>备注编辑中换行</td></tr>
-    <tr><td class="k"><kbd>←</kbd> / <kbd>→</kbd> + <kbd>Enter</kbd></td><td>二次确认弹窗：在「取消 / 确认」间切换，<kbd>Enter</kbd> 触发当前按钮</td></tr>
-  </table>
+<h2><span class="num">3</span>面板功能</h2>
+<h3>记录列表与备注</h3>
+<ul>
+<li>分「标记点」「片段」两条列表，序号两位补零（01、02…）。</li>
+<li>标记点前面的圆点可选五种颜色，再点一次取消颜色。</li>
+<li>点记录行的空白处即可加 / 改备注：<kbd>Enter</kbd> 保存、<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行、<kbd>Esc</kbd> 取消。</li>
+<li>时间码右键单击复制、右键双击就地修改；底部显示「已选 N 条」与时长合计，另有「全选」「清除记录」。</li>
+</ul>
+<h3>搜索</h3>
+<ul>
+<li>按备注关键词搜索，命中的词会高亮。</li>
+<li>搜索框内、输入框右侧的彩色圆点可按标记颜色筛选标记点。</li>
+<li>搜索生效时「全选」上的数字变成搜索结果数，点它就是选中这批；搜索框为空时点 × 关闭搜索栏。</li>
+</ul>
+<h3>批量截图与录制</h3>
+<ul>
+<li>勾选标记点按 <kbd>S</kbd> 批量截图，勾选片段按 <kbd>R</kbd> 批量录制；类型不符会提示。</li>
+<li>弹窗里可确认并修改标题，标题决定产出文件名。</li>
+<li>逐条显示进度，<kbd>Esc</kbd> 取消（当前段作废），结束给出成功 / 失败条数。</li>
+</ul>
+<h3>导出日志</h3>
+<p>勾选记录后点「导出日志」，生成 .xlsx，含「标记 | Mark」「片段 | Clip」两张工作表。</p>
+<h3>导入记录</h3>
+<ul>
+<li>入口只有两个：历史记录栏的「导入」按钮，或把 .xlsx 拖进面板。</li>
+<li>弹窗里既能用 AI 导入，也能从表格文件导入。</li>
+<li>一次只导入一个工作表：文件导入时列表单选，多个工作表不预选、选中才能点「导入」，只有一个时自动选中。</li>
+<li>AI 导入同样要先选定工作表：选定后提示词写明「只要这张表的内容」，没选定时要求 AI 先问要导入哪一张。</li>
+<li>不是本插件导出的表格，弹窗顶部会提示优先用 AI 导入。</li>
+</ul>
+<h3>历史记录</h3>
+<p>跨网站汇总所有打过点的视频，点击某行在新标签页打开；可多选后批量清除。</p>
+<h3>设置</h3>
+<ul>
+<li>亮色模式、禁用弹幕、视频控制栏、打点自动截图、时间码显示回避、画中画保持录制（实验）、应用于当前网页、录制编码。</li>
+<li>菜单里另有三个按钮：网页全屏 / 教程帮助 / 重载插件。</li>
+</ul>
 
-  <h2><span class="num">3</span>视频控制栏</h2>
-  <p>进入适用网站的视频页后，画面顶部会出现轻量控制栏（可在设置里用「视频控制」开关关闭）。</p>
+<h2><span class="num">4</span>截图、录制与画面控制</h2>
+<h3>时间码与控制栏</h3>
+<ul>
+<li>画面顶部时间码：点击复制，右键可输入时间码跳转，双击切换网页全屏。</li>
+<li>「时间码显示回避」开启后悬浮时自动下移，避开顶部遮挡。</li>
+<li>画面两侧是截图 / 录制按钮；网页全屏铺满窗口，<kbd>Esc</kbd> 退出。</li>
+<li>「禁用弹幕」启用期间自动隐藏弹幕；「画中画保持录制」（实验）切到后台不中断录制。</li>
+</ul>
+<h3>截图与标注</h3>
+<ul>
+<li><kbd>S</kbd> 下载 PNG 并复制到剪贴板；<kbd>C</kbd> 只复制不下载。</li>
+<li><kbd>Shift</kbd>+<kbd>S</kbd> 标注截图：画框 / 加字，<kbd>Z</kbd> 撤销、<kbd>C</kbd> 复制、<kbd>Enter</kbd> 保存、<kbd>Esc</kbd> 取消。</li>
+<li>「打点自动截图」开启后，<kbd>M</kbd> 打点立即截图，<kbd>I</kbd> 打入点先暂存、<kbd>O</kbd> 打出点时保存。</li>
+</ul>
+<h3>录制与编码</h3>
+<ul>
+<li><kbd>R</kbd> 开始 / 停止录制（含声音），录完会把这段时长写进剪贴板。</li>
+<li>四档编码：H.264（默认）、低分辨率 H.264、VP8、VP9。</li>
+<li>「低分辨率 H.264」固定 720P，其余跟随源分辨率；帧率跟随源帧率，编码吃力时只降帧率、不改分辨率。</li>
+<li>录制画面已做 limited 色彩范围修正，更接近原片；截图不做这项修正，VP9 档例外。</li>
+</ul>
+<h3>文件名规则</h3>
+<ul>
+<li>截图 / 录制：<span class="mono">标题_时间码_备注</span></li>
+<li>日志导出：<span class="mono">标题_日志记录_导出时间</span></li>
+</ul>
 
-  <h3>顶部时间码</h3>
-  <p>时间码以<strong>实际渲染帧</strong>为基准，掉帧时与画面内嵌时间码仍然一致，格式为 <span class="mono">时:分:秒:帧</span>。左侧徽章显示当前状态：</p>
-  <div class="flow">
-    <span class="chip">PLAY</span><span class="chip">STOP</span><span class="chip">IN</span><span class="chip">OUT</span><span class="chip">MARK</span><span class="chip">REC</span><span class="chip">2X</span>
-  </div>
-  <ul>
-    <li>播放显示 <span class="mono">PLAY</span>，暂停显示 <span class="mono">STOP</span>，变速时显示倍速（如 <span class="mono">2X</span>）；</li>
-    <li>打入点后徽章变为 <span class="mono">IN</span>，时间码切换为<strong>距入点的计时</strong>；打出点变 <span class="mono">OUT</span>；打标记变 <span class="mono">MARK</span>（标记点已设颜色时徽章同步该颜色）；录制中变 <span class="mono">REC</span>；</li>
-    <li><strong>单击时间码</strong>：复制当前时间码，不带分隔符，如 <span class="mono">00391214</span>；</li>
-    <li><strong>双击时间码</strong>：进入 / 退出网页全屏；</li>
-    <li><strong>右键时间码</strong>：弹出输入框，输入时间码直接跳转，<kbd>Enter</kbd> 跳转、<kbd>Esc</kbd> 关闭，点输入框外也会关闭；识别失败提示「无法识别的时间码」。</li>
-  </ul>
-  <p>右键输入框与面板里「右键双击时间码」就地编辑共用同一套解析，支持六种写法：</p>
-  <table>
-    <tr><th>格式</th><th>示例</th><th>说明</th></tr>
-    <tr><td class="k"><span class="mono">hh:mm:ss:ff</span></td><td class="k"><span class="mono">00:01:12:18</span></td><td>末段为帧号，必须小于当前帧率</td></tr>
-    <tr><td class="k"><span class="mono">mm:ss:ff</span></td><td class="k"><span class="mono">01:12:18</span></td><td>同上</td></tr>
-    <tr><td class="k"><span class="mono">mm:ss</span></td><td class="k"><span class="mono">01:12</span></td><td>秒必须小于 60</td></tr>
-    <tr><td class="k"><span class="mono">hhmmssff</span></td><td class="k"><span class="mono">00011218</span></td><td>无分隔的 8 位</td></tr>
-    <tr><td class="k"><span class="mono">mmssff</span></td><td class="k"><span class="mono">011218</span></td><td>无分隔的 6 位（分:秒:帧）</td></tr>
-    <tr><td class="k"><span class="mono">mmss</span></td><td class="k"><span class="mono">0112</span></td><td>无分隔的 4 位</td></tr>
-  </table>
+<h2><span class="num">5</span>常见问题</h2>
+<details>
+<summary>面板提示「当前页面无法访问视频」？</summary>
+<div class="body">面板只在芒果TV、百度网盘或已开启「应用于当前网页」的站点可用。确认当前是视频播放页、插件已启用；其它网站请在设置里开「应用于当前网页」并点弹窗的「允许」。</div>
+</details>
+<details>
+<summary>按 I / O / M 没有反应？</summary>
+<div class="body">依次检查：焦点是否在输入框里；当前网站是否适用；设置里的「视频控制栏」是否被关掉；<kbd>O</kbd> 需要先打过入点。</div>
+</details>
+<details>
+<summary>录制的视频没有声音？</summary>
+<div class="body">多为浏览器权限问题：视频从没播放过、标签页被静音，或内容受保护不允许采集声音。先播放视频、取消静音，再录一次通常就正常了。</div>
+</details>
+<details>
+<summary>录制画面颜色偏深 / 和原片不一样？</summary>
+<div class="body">录制时已把画面修正到 limited 色彩范围，正常应与原片一致；VP9 档例外（无法修正），对颜色敏感请改用 H.264 或 VP8。截图不受影响。</div>
+</details>
+<details>
+<summary>录制帧率偏低？</summary>
+<div class="body">四档编码都靠 CPU，编码跟不上就会掉帧。在设置里把「录制编码」换成更省资源的「低分辨率 H.264」重录；插件不会中途改分辨率。</div>
+</details>
+<details>
+<summary>导出的 Excel 打不开 / 导入的表格识别不出时间码？</summary>
+<div class="body">导出的是标准 .xlsx，Excel、WPS、腾讯文档都能打开，提示损坏请先更新软件版本。识别不出时间码时改用弹窗里的 AI 导入：把提示词连同表格发给 AI，再粘贴结果。</div>
+</details>
 
-  <h3>时间码显示回避</h3>
-  <p>鼠标悬浮画面时，时间码会自动<strong>平滑下移</strong>（约视频宽度的 2.5%），避开新版播放器的顶部遮挡；移出画面回到原位。</p>
-  <ul>
-    <li>可在设置里用「时间码显示回避」关闭；未手动设置过时按站点默认：<strong>芒果TV 开启、其他站点关闭</strong>。</li>
-    <li>浏览器全屏时时间码固定下移（幅度更小、不做移动动画），并且<strong>无操作 5 秒自动隐藏</strong>，移动鼠标立即恢复。</li>
-    <li>网页全屏时时间码位置固定下移，不受该开关影响。</li>
-  </ul>
-
-  <h3>画面两侧按钮</h3>
-  <p>鼠标移到画面垂直中部的左右两侧（距边缘 70px 内）时，浮现两个圆形按钮：左侧<strong>截图</strong>（<span class="mono">截图 (S)</span>）、右侧<strong>录制</strong>（<span class="mono">录制 (R)</span>）。录制中两个按钮常驻显示，画面四周出现红色描边并呼吸闪烁。</p>
-
-  <h3>直播回退</h3>
-  <p>芒果TV直播页会保留 600 秒本地回退缓存，并禁用「落后直播边缘自动拉回」。用 <kbd>←</kbd> / <kbd>→</kbd> 回退 / 前进 30 秒，画面下方提示「回退 30s ( 时间码 )」；已经贴到最新画面时提示「已到最新画面」。切换清晰度导致缓存重建时会提示「回退缓存已重建，可重新回退」。</p>
-
-  <h3>弹幕屏蔽</h3>
-  <p>插件在适用站点启用期间<strong>自动隐藏视频弹幕</strong>（按 <span class="mono">danmu</span> / <span class="mono">danmaku</span> 类名匹配的容器），无需手动操作；关闭设置里的「禁用弹幕」或禁用插件后恢复显示。</p>
-
-  <h3>网页全屏</h3>
-  <p>视频铺满当前窗口（不是浏览器全屏），<strong>不改变播放状态</strong>。进入方式：设置菜单里的「网页全屏」按钮，或双击控制栏时间码；退出方式：按 <kbd>Esc</kbd>，或再双击一次时间码。</p>
-  <ul>
-    <li>全屏期间页面其它元素（播放器 UI、标题悬浮层、导航等）自动隐藏，后插入的元素也会被隐藏；</li>
-    <li>底部出现悬浮进度条：拖动即可实时跳转（气泡显示时间码）；按住不动 1 秒进入<strong>微调模式</strong>，进度条拉长到左右两端、范围收窄为目标位置 ±30 秒，便于精细定位；</li>
-    <li>全屏期间双击画面会被插件拦截，避免误退出或切到浏览器全屏。</li>
-  </ul>
-
-  <h2><span class="num">4</span>截图、标注与录制</h2>
-
-  <h3>截图</h3>
-  <table>
-    <tr><th>快捷键</th><th>行为</th><th>提示</th></tr>
-    <tr><td class="k"><kbd>S</kbd></td><td>保存 PNG 并复制到剪贴板</td><td>成功「截图保存 · 已复制」，复制失败「截图保存（复制失败）」</td></tr>
-    <tr><td class="k"><kbd>C</kbd></td><td>只复制到剪贴板，不下载</td><td>「已复制截图」/「复制失败，请检查浏览器剪贴板权限」</td></tr>
-    <tr><td class="k"><kbd>Shift</kbd>+<kbd>S</kbd></td><td>打开<strong>标注窗口</strong>（见下）</td><td>录制中提示「录制中无法标注截图」</td></tr>
-  </table>
-  <p class="muted">截图按视频原始分辨率保存；受版权保护、画布无法读取的内容会提示「截图失败: 内容保护」。</p>
-
-  <h3>标注截图（Shift+S）</h3>
-  <p>进入标注会先<strong>暂停视频</strong>，保证标注画面就是截图画面。窗口标题为「标注截图」，顶部提示「拖拽画框 · 点击加字 · Ctrl+C 复制 · Ctrl+Z 撤销」。</p>
-  <ul>
-    <li><strong>画框</strong>：在画面上拖拽即可画一个白边 + 主题色的矩形框；</li>
-    <li><strong>加字</strong>：在画面上点击一下，就地弹出输入框输入文字，<kbd>Enter</kbd> 确认、<kbd>Esc</kbd> 取消、点别处也会确认；文字为白边 + 主题色粗体；</li>
-    <li><strong>撤销</strong>：<kbd>Z</kbd> 或 <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销上一条标注；</li>
-    <li><strong>复制</strong>：<kbd>C</kbd> 或 <kbd>Ctrl</kbd>+<kbd>C</kbd> 把带标注的图复制到剪贴板（保存时不会自动复制）；</li>
-    <li><strong>保存 / 取消</strong>：<kbd>Enter</kbd> 保存（下载 PNG）、<kbd>Esc</kbd> 取消，也可点右上角「保存 (Enter)」「取消 (Esc)」，点击窗口外的空白区域同样取消；</li>
-    <li><strong>嵌入时间码</strong>：右上角开关，打开后在截图右上角叠加当前画面时间码；设置会被记住（默认关闭），编辑期间切换即时生效；</li>
-    <li>窗口主题跟随设置里的亮 / 暗色模式；文件命名与直接截图完全一致。</li>
-  </ul>
-
-  <h3>打点自动截图（设置开关）</h3>
-  <ul>
-    <li>开启后按 <kbd>M</kbd> 打标记点<strong>立即截图保存</strong>；</li>
-    <li>按 <kbd>I</kbd> 打入点时暂存当前画面，按 <kbd>O</kbd> 打出点时保存<strong>最后一次 I</strong> 时刻的截图（时间码与备注都取入点时刻，保证文件名两者一致）；</li>
-    <li>未手动设置过时按站点默认：<strong>百度网盘开启、其他站点关闭</strong>。</li>
-  </ul>
-
-  <h3>录制</h3>
-  <p>按 <kbd>R</kbd> 开始，再按 <kbd>R</kbd> 停止。开始时的提示为「录制开始」；如果当前播放位置正好在入点且已有出点，会提示「从入点录制 → 到出点自动停止」——这一段会自己录到出点停止。视频播放结束、画面长时间无变化（约 8 秒冻结）、编码器异常时，录制都会自动停止并提示原因。</p>
-  <h3>录制编码与分辨率</h3>
-  <p>在设置「录制编码」里选，四档，默认 <strong>H.264</strong>：</p>
-  <table>
-    <tr><th>档位</th><th>容器</th><th>分辨率规则</th></tr>
-    <tr><td class="k">H.264</td><td>MP4</td><td>跟随视频本身分辨率（不缩放、不放大）</td></tr>
-    <tr><td class="k">低分辨率 H.264</td><td>MP4</td><td>限制在 1280×720 以内（源更小则保持源尺寸），适合设备吃力时</td></tr>
-    <tr><td class="k">VP8</td><td>WebM</td><td>跟随视频本身分辨率，实时性最好</td></tr>
-    <tr><td class="k">VP9</td><td>WebM</td><td>跟随视频本身分辨率，压缩率更好但更吃 CPU</td></tr>
-  </table>
-  <ul>
-    <li>采集帧率<strong>跟随源帧率</strong>，归一化到最接近的标准档（25 / 30 / 50 / 60fps），输出文件帧率与源一致；</li>
-    <li>编码全部由 CPU 完成。编码确实跟不上时插件会<strong>自动降低帧率</strong>（60 → 50 → 30 → 25）并提示「设备编码能力不足，录制帧率已降为 N fps」；</li>
-    <li>降级<strong>只降帧率、不中途改分辨率</strong>（中途改分辨率会让 MP4/H.264 出现花屏）。想要更低分辨率，请先切到「低分辨率 H.264」再重新录制。</li>
-    <li>H.264 档录制结束后会自动把视频重封装成经典 MP4（<span class="mono">ftyp | mdat | moov</span>，无 moof），方便剪辑软件读取；重封装失败会自动回退保存原始文件；</li>
-    <li>所选编码浏览器不支持时，会按候选列表自动回退到可用的编码，文件扩展名随<strong>实际</strong>录出来的格式（<span class="mono">.mp4</span> / <span class="mono">.webm</span>）；</li>
-  </ul>
-
-  <h3>录制色彩范围</h3>
-  <p>浏览器从画布录出来的是全范围（0-255）画面，而多数播放器 / 剪辑软件默认按 limited（16-235）解释，会把画面再拉伸一次，黑位被压掉、看起来「颜色偏深」。插件的做法是从源头对齐：</p>
-  <ul>
-    <li>录制转绘时把画面压缩到 limited（对比度 85.88%，255→219）；</li>
-    <li>容器标签一并改成 limited：WebM 改 <span class="mono">Colour/Range</span>（2→1），MP4 在重封装时改 <span class="mono">SPS VUI</span> 与 <span class="mono">colr(nclx)</span> 两处；</li>
-    <li><strong>截图（S 键 PNG）不做这个处理</strong>，仍是标准 sRGB，在浏览器里看就是原色；</li>
-    <li><strong>VP9 档不做该修正</strong>：VP9 的范围写在码流内部，容器标签改不动，只改标签会造成画面与标签错配，因此 VP9 保持原样。</li>
-  </ul>
-
-  <h3>录制文件命名</h3>
-  <div class="flow"><span class="chip">标题_时间码_备注.mp4 / .webm</span></div>
-  <p class="muted">时间码固定取<strong>入点时间码</strong>（如 <span class="mono">00391214</span>），备注取同一时刻命中的标记点 / 片段备注，保证文件名里两者对应。没有备注时省略备注段；标题最长 24 字、备注最长 30 字，超出截断，非法字符会换成下划线。</p>
-
-  <h3>录制诊断日志</h3>
-  <p>录制结束 / 停止时，视频页控制台会输出一行 <span class="mono">[MGP-REC] saved {...}</span>（以及 <span class="mono">[MGP-REC] range tag ...</span>），排障时可直接看这几个字段：</p>
-  <table>
-    <tr><th>字段</th><th>含义</th></tr>
-    <tr><td class="k"><span class="mono">capFps</span></td><td>本次录制的目标帧率（跟随源帧率，降级后为降级值）</td></tr>
-    <tr><td class="k"><span class="mono">pacerTicks</span></td><td>节拍器出的拍数（≈ 录制秒数 × capFps）</td></tr>
-    <tr><td class="k"><span class="mono">pacerDrops</span></td><td>节拍器丢拍数（只在持续积压时丢）</td></tr>
-    <tr><td class="k"><span class="mono">pacerWrites</span></td><td>实际提交给编码器的帧数：<span class="mono">pacerWrites ÷ 录制秒数</span> ≈ 文件实际帧率</td></tr>
-    <tr><td class="k"><span class="mono">chunkCount</span> / <span class="mono">chunkBytes</span></td><td>编码产出的数据块数量 / 字节数（判断编码器是否跟得上）</td></tr>
-    <tr><td class="k"><span class="mono">downgrades</span></td><td>本次录制自动降帧的次数</td></tr>
-    <tr><td class="k"><span class="mono">rangeTag</span></td><td>色彩范围标签改写结果（如 <span class="mono">Range 2→1 ✓</span> / <span class="mono">off(vp9)</span>）</td></tr>
-    <tr><td class="k"><span class="mono">audioVia</span></td><td>音频采集方式：<span class="mono">audiocontext</span> / <span class="mono">capturestream</span> / <span class="mono">none</span>（没声音时看这里）</td></tr>
-    <tr><td class="k"><span class="mono">resW</span> / <span class="mono">resH</span> / <span class="mono">mimeType</span></td><td>实际输出分辨率与编码格式</td></tr>
-  </table>
-
-  <h3>录制期间的其他行为</h3>
-  <ul>
-    <li>录制中把页面切到后台：浏览器会停止渲染画面，插件会<strong>暂停录制</strong>并提示「已暂停录制（页面切到后台）」，回到前台自动继续（提示「已恢复录制」）；</li>
-    <li>开启设置里的「画中画保持录制」（实验）后，录制开始时自动进入画中画，页面切到后台视频仍在画中画窗口里渲染，录制不会暂停。批量任务期间不会进入画中画；</li>
-    <li>换集 / 播放器换了 video 元素时录制会跟随新的视频源，无需重录；</li>
-    <li>录制结束后，本段时长（秒）会写入剪贴板，提示「录制结束 — Ns」。</li>
-  </ul>
-
-  <h2><span class="num">5</span>日志面板</h2>
-  <p>点击浏览器右上角插件图标打开面板，面板顶部固定标题「日志记录」，下方显示当前视频标题。</p>
-
-  <h3>三种显示模式</h3>
-  <p>点击右上角「模式」按钮切换：</p>
-  <div class="flow">
-    <span class="chip">弹窗</span><span class="arr">→</span>
-    <span class="chip">侧边栏</span><span class="arr">→</span>
-    <span class="chip">独立窗口</span>
-  </div>
-  <ul>
-    <li><strong>弹窗</strong>：紧凑窗口，用页签切换「标记 | Mark」「片段 | Clip」，只显示当前页签的列表（页签选择会被记住）；</li>
-    <li><strong>侧边栏</strong>：浏览器右侧侧边栏，两组记录上下堆叠，每组标题左侧的箭头可收起 / 展开（收起一组会自动展开另一组）；</li>
-    <li><strong>独立窗口</strong>：430×680 的小窗，可脱离浏览器使用，跟随打开时记忆的来源视频标签页；弹窗 / 侧边栏则跟随当前激活标签页，切换网页后记录自动同步。</li>
-  </ul>
-  <p class="muted">插件会<strong>记忆上次使用的模式</strong>：下次打开浏览器，点击插件图标仍按该模式打开面板（弹窗模式直接弹出；侧边栏 / 独立窗口模式会清空弹窗、以对应方式打开）。切换模式时当前面板会关闭。</p>
-
-  <h3>面板标题与重命名</h3>
-  <p>面板顶部的网页标题可直接<strong>就地改名</strong>：点击标题 → 输入新标题 → <kbd>Enter</kbd> 保存 / <kbd>Esc</kbd> 取消（失焦也会保存），最长 80 字。改名后同步到：历史记录列表、导出表格的标题列、之后截图 / 录制的文件名。只有在面板可用的页面（芒果TV、百度网盘或已授权的站点）才能改名。</p>
-
-  <h3>记录列表</h3>
-  <ul>
-    <li><strong>标记点列表</strong>：序号、时间码、五色圆点、备注；<strong>片段列表</strong>：序号、入点 → 出点、时长（按 0.5 秒取整）、备注。两者都按时间先后排列；</li>
-    <li><strong>勾选</strong>记录用于导出、删除或批量截图 / 录制；未勾选时底部「清除记录」「导出日志」按钮为禁用状态；</li>
-    <li><strong>点击时间码</strong>跳转到视频对应时刻（片段可分别点入点、出点）；</li>
-    <li><strong>右键单击时间码</strong>：复制紧凑时间码，如 <span class="mono">00391214</span>（提示「已复制时间码 ( 00391214 )」）；</li>
-    <li><strong>右键双击时间码</strong>：就地编辑该时间码（<kbd>Enter</kbd> 保存 / <kbd>Esc</kbd> 取消 / 失焦保存）。支持与控制栏右键输入相同的六种格式；片段可分别编辑入点、出点，<strong>时长自动重算</strong>，改完按时间重新排序；写法不合法会提示「无法识别的时间码：xxx」且不写入；</li>
-    <li><strong>点击记录行的空白区域</strong>：为该条记录添加 / 编辑备注（没有备注时显示「添加备注…」入口）；</li>
-    <li><strong>标记点颜色</strong>：点击行右侧的五个色圆点设置颜色（红 / 橙 / 蓝 / 绿 / 灰），再次点击同一个点取消。颜色会写入导出表格的「颜色」列；</li>
-    <li><strong>备注</strong>：有备注的记录始终显示备注行（与时间码左对齐，无需选中），多行备注完整展示。<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行（输入框自动增高）、<kbd>Enter</kbd> 保存并退出编辑（<strong>不影响勾选状态</strong>）、<kbd>Esc</kbd> 取消、点其他位置也会保存；</li>
-    <li><strong>底部统计</strong>：显示「已选N条记录」，勾选了片段时追加 <span class="mono">| 3.5s</span>，统计已选片段的入点到出点总时长（没勾选片段时只显示条数）。</li>
-  </ul>
-
-  <h3>搜索备注</h3>
-  <ul>
-    <li>底部「全选」左侧的<strong>放大镜按钮</strong>：点击展开搜索行（输入框提示「搜索备注」），输入即按<strong>备注文本</strong>过滤两个列表，不区分大小写；<strong>命中的关键词会在备注里高亮</strong>显示；</li>
-    <li>搜索行下方多出一排<strong>颜色圆点</strong>：点某个颜色就只留下该颜色的标记点，可多选（再点一次取消）；右侧「清除颜色」一键还原；颜色筛选只对<strong>标记点</strong>生效（片段没有颜色）；</li>
-    <li>右侧显示「匹配 N 条」/「无匹配」，列表无结果时给出「没有备注含「xxx」的标记点 / 片段」（同时按颜色筛选时会写明两个条件）；</li>
-    <li>搜索生效时，<strong>标记 / 片段右侧「全选」上的数字会变成搜索结果数</strong>，此时点它选中的就是这批搜索结果；</li>
-    <li><kbd>Esc</kbd> 清除并收起；右侧 <span class="mono">×</span>：<strong>搜索栏为空时点它直接关闭搜索栏</strong>，有内容时先清空内容（再点一次才关闭）；输入框里按回车只是退出输入状态，不清除；有筛选时放大镜按钮高亮；</li>
-    <li>过滤只影响列表显示，不改变记录与勾选状态——可以「搜某品牌 → 全选 → 批量截图 / 录制」。</li>
-  </ul>
-
-  <h3>全选与清除</h3>
-  <ul>
-    <li>底部「全选」按钮：搜索 / 颜色筛选生效时只作用于当前可见记录；弹窗模式下只作用于当前页签；</li>
-    <li>侧边栏里，每组标题右侧的<strong>计数标签</strong>也可以点击一键全选该组；搜索生效时它显示的是搜索结果数，点它选中的也就是这批搜索结果；</li>
-    <li>列表中每条记录左侧的序号固定两位（<span class="mono">01</span>、<span class="mono">02</span>…），超过两位按实际位数显示（<span class="mono">100</span>）；</li>
-    <li>底部垃圾桶按钮「清除记录」：删除所有勾选的记录，会先弹出二次确认「确认删除选中的 N 条记录？此操作不可恢复。」（确认按钮为「删除」，默认焦点停在「取消」）。</li>
-  </ul>
-
-  <h3>批量截图 / 批量录制</h3>
-  <p>在面板中勾选记录（焦点保持在面板内），然后：</p>
-  <ul>
-    <li>勾选<strong>标记点</strong>后按 <kbd>S</kbd>：<strong>批量截图</strong>，只对标记点生效；</li>
-    <li>勾选<strong>片段</strong>后按 <kbd>R</kbd>：<strong>批量录制</strong>，只对片段生效，逐段录制入点到出点；</li>
-    <li>勾选类型与按键不符时不执行，提示「批量录制只对片段生效，请勾选片段」（截图同理提示标记点）；完全没勾选时按键不拦截；</li>
-    <li>弹出二次确认弹窗：标题「确认操作」，正文「确认对选中的 N 条标记点依次自动截图？」，按钮「取消 / 开始」；</li>
-    <li>弹窗里还有一个<strong>标题输入框</strong>（提示「标题（写入文件名）」）：默认填当前面板标题，可以直接改成这次批量要用的标题 —— 它决定这一批截图 / 录制文件名的「标题」部分（文件名格式 <span class="mono">标题_时间码_备注</span>）。改完的标题会同步到面板标题，所以后续单张截图 / 单段录制也用新标题；</li>
-    <li>键盘操作：<kbd>←</kbd> / <kbd>→</kbd> 在「取消 / 开始」间切换焦点、<kbd>Enter</kbd> 触发当前按钮、<kbd>Esc</kbd> 取消；打开时焦点落在标题输入框上（光标在框内时左右键移光标，不会切按钮）；删除类操作的默认焦点停在「取消」，避免误按 <kbd>Enter</kbd>；</li>
-    <li>开始后面板提示「已开始批量截图（N 条）· 按 Esc 取消」，页面右下角逐条显示进度，如 <span class="mono">批量录制 2/5 · Esc 取消</span>；</li>
-    <li>任务进行中按 <kbd>Esc</kbd>（焦点在面板或页面内都可以）<strong>取消</strong>：立即停止当前录制，<strong>正在录制的那一段作废不保存</strong>（避免留下半截文件），已完成的条目保留，最后提示「批量录制已取消 — 已完成 N 条」；</li>
-    <li>全部完成后提示「批量截图完成 — 成功 N 条 · 失败 M 条」（失败为 0 时省略后半句）；单条异常、录不出内容（空录制）都只记为该条失败，不会中断整批；被取消的那一条既不算成功也不算失败；</li>
-    <li>任务逐条可靠执行：每段录制严格停在设定的出点；换集 / 播放器重建导致控制栏重建后任务仍继续；批量期间不进入画中画；任务进行中再次触发会提示「批量任务进行中，请稍候」；</li>
-    <li>批量任务结束后，页面原有的入点 / 出点 / 标记点状态会自动恢复。</li>
-  </ul>
-
-  <h2><span class="num">6</span>导出日志</h2>
-  <p>勾选需要的记录后点击底部「导出日志」，生成标准 <span class="mono">.xlsx</span> 文件，包含两个工作表：</p>
-  <table>
-    <tr><th>工作表</th><th>字段</th></tr>
-    <tr><td class="k">标记 | Mark</td><td>序号 / 时间码 / 颜色 / 备注 / 链接 / 标题</td></tr>
-    <tr><td class="k">片段 | Clip</td><td>序号 / 入点时间码 / 出点时间码 / 时长 / 备注 / 入点链接 / 标题</td></tr>
-  </table>
-  <ul>
-    <li>只导出<strong>已勾选</strong>的记录，序号按导出顺序重新从 1 开始；颜色列写入颜色名（红 / 橙 / 蓝 / 绿 / 灰），未设色写「无」；</li>
-    <li>链接列写入记录所属页面的地址：芒果TV 页面的链接会带上定位参数（<span class="mono">#mpp=时间</span>），点开即自动跳到该时刻；其他站点写入的只是页面地址，不会自动定位；</li>
-    <li>导出成功提示「已导出记录」。</li>
-  </ul>
-  <h3>导出文件命名</h3>
-  <div class="flow"><span class="chip">标题_日志记录_导出时间.xlsx</span></div>
-  <p class="muted">标题取选中记录里的标题（面板上重命名过的优先），清洗非法字符并截断 24 字；中段固定为「日志记录」；导出时间为本机导出时刻的 14 位 <span class="mono">YYYYMMDDHHMMSS</span>。<strong>不含</strong>记录的时间码与备注。例如：<span class="mono">乘风2026_日志记录_20260913023512.xlsx</span></p>
-
-  <h2><span class="num">7</span>导入记录</h2>
-  <p>支持两类文件：<strong>本插件导出的日志</strong>，以及<strong>各类记录表格</strong>（露出表、植入 / 权益清单等）。入口只有一个：历史记录栏的「<strong>导入</strong>」按钮（下箭头图标）；也可以把 <span class="mono">.xlsx</span> 直接<strong>拖进插件窗口</strong>（弹窗 / 侧边栏 / 独立窗口都行，支持多文件）。</p>
-  <ul>
-    <li>点「导入」按钮：直接打开「导入记录」弹窗，弹窗里<strong>既能用 AI 导入，也能从文件导入</strong>（点「选择表格文件」现选）；</li>
-    <li>拖入的如果<strong>就是本插件导出的日志</strong>，仍然按原逻辑直接按时间码合并进对应视频的记录，不弹窗；</li>
-    <li>拖入的如果<strong>不是本插件导出的格式</strong>，会打开弹窗，并在顶部提示「建议优先用 AI 导入」（这类表格格式差异大，AI 比自动识别稳）。</li>
-  </ul>
-
-  <h3>导入记录弹窗</h3>
-  <p>弹窗标题「导入记录」，分成两块：</p>
-  <table>
-    <tr><th>区域</th><th>说明</th></tr>
-    <tr><td class="k">① AI 导入（推荐）</td><td>点「复制提示词」→ 把表格（或截图、文本）连同提示词一起交给任意 AI 工具 → 把 AI 输出整段粘贴到下面的框里</td></tr>
-    <tr><td class="k">② 或从表格文件导入</td><td>点「选择表格文件」选 <span class="mono">.xlsx</span>，列表里勾选要导入的工作表 / 分节</td></tr>
-  </table>
-  <ul>
-    <li>粘贴框提示语为「粘贴 AI 输出的清单，例如：00:10:19:20 阿维塔 主持人口播」，输入框随内容自动增高（上限 168px）；底部状态行显示「共 N 条记录」，识别不到时显示「未识别到时间码，请检查 AI 输出」；</li>
-    <li><strong>粘贴内容优先</strong>：粘贴框里有可解析内容时，文件候选区会自动置灰忽略；两者都没有时点「导入」会提示「请选择表格文件，或粘贴 AI 结果」；</li>
-    <li><strong>表格里有多个工作表时必须自己选</strong>：弹窗会写明「检测到 N 个可导入的工作表 / 分节，请勾选要导入的那一个（可多选）」，列表<strong>默认不勾选</strong>、不勾选时「导入」按钮是禁用的；只有一个工作表时才自动勾上。文件里没识别出时间码的工作表也会在提示里说明（避免以为表没读到）；</li>
-    <li>候选里每一项显示名称、「N 条」和两条备注预览；顶部有「全选」和「共 N 条 / 已选 N 条」；同一工作表里遇到表名 / 总时长这类<strong>标题行</strong>会被拆成多项（分节标题追加在名称后面），多文件时名称前带文件名；</li>
-    <li>复制提示词失败时，提示词文本框会自动展开并全选，可手动复制（提示「复制失败，请在提示词框内手动复制」）；</li>
-    <li>关闭方式：<kbd>Esc</kbd>、点「取消」或点弹窗外的遮罩（提示词框展开时，第一次 <kbd>Esc</kbd> 只收起提示词框）。</li>
-  </ul>
-
-  <h3>AI 提示词的内容</h3>
-  <p>提示词会要求 AI 只做「时间码 → 项目说明」的提取，主要约定：</p>
-  <ul>
-    <li>逐条提取表中每一个时间码，每条一行，格式为「时间码 + 空格 + 项目说明」；</li>
-    <li>时间码统一写成规范格式（英文冒号）：带帧号写 <span class="mono">时:分:秒:帧</span>（如 <span class="mono">00:07:10:21</span>），不带帧号写 <span class="mono">时:分:秒</span>（如 <span class="mono">00:07:10</span>）；原表的中文冒号、分号、缺前导零、纯数字等写法由 AI 统一转换；</li>
-    <li>项目说明按「品牌 → 艺人 → 权益 → 时长」拼接，没有的部分省略（如 <span class="mono">阿维塔 张泉灵 4s</span>、<span class="mono">趣多多 张彬彬 食用</span>）；</li>
-    <li>不写列名（植入 / 包装 / 空镜…）、分线编号（P1 / P2）；一个单元格里有多个时间码时各占一行；</li>
-    <li>按时间排序，只输出纯文本，不要表头、标题、合计、解释，也不要 markdown 表格或代码块；</li>
-    <li><strong>工作表先说清楚</strong>：弹窗已经读到文件时，提示词里会列出工作表名，并要求 AI 先说明每张表是什么、<strong>问你要导入哪一张</strong>再输出；没读到文件（直接点「复制提示词」）时，也会要求 AI 发现有多个工作表就先列出来问你，不要自己替你挑。</li>
-  </ul>
-  <p class="muted">粘贴回来的内容兼容纯文本与 JSON 数组；纯文本会自动忽略列表符号、序号、markdown 表格外框。插件本身也兼容中文冒号 / 分号的时间码，表格原文直接粘进来同样能识别。</p>
-
-  <h3>自动识别规则</h3>
-  <ul>
-    <li><strong>时间码识别</strong>：6～9 位纯数字串（兼容多打 / 漏打一位、5 个 0 的手写零点），带分隔符的写法中英文冒号与分号都算；</li>
-    <li><strong>读法自动判定</strong>（无需手动选择）：8 位按 <span class="mono">时:分:秒:帧</span>，4 位按 <span class="mono">分:秒</span>，6 位按首位是否大于 23、再结合视频时长区分 <span class="mono">时:分:秒</span> 与 <span class="mono">分:秒:帧</span>；</li>
-    <li><strong>备注只写该条对应的项目</strong>：单元格里紧跟时间码的说明与【品牌】标记（如 <span class="mono">00295306趣多多空镜</span> → 备注 <span class="mono">趣多多空镜</span>、<span class="mono">【阿维塔】013218</span> → <span class="mono">阿维塔</span>），不带列分类、分线等额外信息；单元格里只有时间码时（露出表这类）退化为品牌 / 秒数（如 <span class="mono">阿维塔 4s</span>）；</li>
-    <li>表名、总时长等标题行整行跳过，不提取时间码；</li>
-    <li>超出视频时长的行自动丢弃；同一时刻的重复记录自动合并备注；</li>
-    <li>两种方式都按<strong>标记点</strong>导入到<strong>当前打开的视频</strong>，与已有记录按时间码去重（重复的跳过）。</li>
-  </ul>
-
-  <h3>导入结果提示</h3>
-  <table>
-    <tr><th>情况</th><th>提示</th></tr>
-    <tr><td class="k">导入成功</td><td>「已导入 N 条记录」（同时刻合并会补「（M 条同时刻已合并）」，重复跳过会补「（K 条重复已跳过）」）</td></tr>
-    <tr><td class="k">没有可用时间码</td><td>「没有可导入的时间码」</td></tr>
-    <tr><td class="k">页面不可用 / 全部重复</td><td>「未导入：当前页面无法访问视频，或时间码与已有记录重复」</td></tr>
-    <tr><td class="k">本插件日志导入</td><td>「已导入 N 个视频 · M 条记录」；与当前视频匹配的合并进页面日志，其他视频的记录进入导入明细并在历史记录里合并计数</td></tr>
-    <tr><td class="k">Excel 读不出内容</td><td>「无法解析 Excel（支持本插件导出的 xlsx 与记录表格，也可在导入弹窗里用 AI 提示词转换）」</td></tr>
-    <tr><td class="k">文件完全无法解析</td><td>同上；<strong>非本插件导出的表格</strong>会在导入弹窗顶部提示优先用 AI 导入</td></tr>
-  </table>
-
-  <h2><span class="num">8</span>历史记录</h2>
-  <p>点击面板右上角的<strong>历史按钮</strong>（时钟图标），列出所有打过点的分集 / 视频——<strong>跨网站全局汇总</strong>（在任意网站打过的点都会出现在这里），按记录数从多到少排序。</p>
-  <ul>
-    <li>每行显示节目标题（与面板上改过的标题同步）与「N标记·N片段」；鼠标悬浮标题会变成主题色；</li>
-    <li><strong>点击该行</strong>即在新标签页打开对应视频；</li>
-    <li>勾选时可连续选择多项，菜单不会关闭；勾选状态在面板重开后仍保留；</li>
-    <li>顶部三个按钮：「导入」（表格文件 / AI 导入同一入口）、「全选」、「清除选中」；</li>
-    <li>「清除选中」会先二次确认：清除部分时问「确认清除选中的 N 个视频的标记记录？此操作不可恢复。」（按钮「清除」），全选后清除时问「确认清除所有历史记录？此操作不可恢复。」（按钮「清除所有」）；清除后同步移除全局历史索引与导入明细，并提示「已清除 N 个视频的记录」；</li>
-    <li>记录被删除后（面板删除或历史清除），历史列表会实时同步移除。</li>
-  </ul>
-
-  <h2><span class="num">9</span>设置说明</h2>
-  <p>点击面板右上角的<strong>设置按钮</strong>（齿轮图标）展开设置菜单：</p>
-  <table>
-    <tr><th>设置项</th><th>说明</th></tr>
-    <tr><td class="k">亮色模式</td><td>切换面板亮色 / 暗色主题，立即生效并记住；标注截图窗口的主题也会跟着变</td></tr>
-    <tr><td class="k">禁用弹幕</td><td>插件启用期间自动隐藏视频弹幕（默认开启，关闭后恢复显示）</td></tr>
-    <tr><td class="k">视频控制</td><td>控制画面内的控制栏（时间码、截图 / 录制按钮）。关闭后画面里不再显示控制栏，页面内快捷键也随之失效</td></tr>
-    <tr><td class="k">打点自动截图</td><td>开启后 M 打点立即自动截图保存；I 打入点暂存、O 打出点时保存最后一次 I 时刻的截图（默认：百度网盘开启、其他站点关闭）</td></tr>
-    <tr><td class="k">时间码显示回避</td><td>悬浮画面时时间码自动下移避开顶部遮挡；关闭后时间码不再向下移动（默认：芒果TV开启、其他站点关闭）</td></tr>
-    <tr><td class="k">画中画保持录制 <span class="mono">实验</span></td><td>开启后录制时自动进入画中画，页面切到后台视频继续渲染、录制不中断（默认关闭）</td></tr>
-    <tr><td class="k">应用于当前网页 <span class="mono">实验</span></td><td>在非默认白名单站点启用打点与记录，需要授予该网站权限（默认白名单站点不显示这一行）</td></tr>
-    <tr><td class="k">录制编码</td><td>四档（默认 <strong>H.264</strong>）：H.264 / 低分辨率 H.264（MP4）· VP8 / VP9（WebM）。除「低分辨率 H.264」限制在 720P 内之外都跟随视频本身分辨率，帧率跟随源帧率，详见第 4 节</td></tr>
-  </table>
-  <h3>设置菜单里的三个按钮</h3>
-  <table>
-    <tr><th>按钮</th><th>说明</th></tr>
-    <tr><td class="k">网页全屏</td><td>让视频铺满当前窗口（非浏览器全屏），按 <kbd>Esc</kbd> 退出；页面没有视频时提示「当前页面无视频」</td></tr>
-    <tr><td class="k">教程帮助</td><td>在新标签页打开本教程页</td></tr>
-    <tr><td class="k">重载插件</td><td>重新加载整个插件，修改代码后一键生效（面板会随之关闭）</td></tr>
-  </table>
-  <h3>关于「日志记录」</h3>
-  <p>打点与记录写入由独立的「日志记录」开关控制（默认开启），画面内的控制栏由「视频控制」开关控制，两者互不影响。关闭「日志记录」后按 <kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd> 会提示「日志记录已关闭」，面板也会替换为「日志记录已关闭 / 点击右上角设置按钮重新开启」。这两个开关来自旧版总开关的拆分，当前设置菜单里只保留「视频控制」一项，「日志记录」按已保存的开关值生效。</p>
-  <h3>备注写入文件名</h3>
-  <p>截图与录制的文件名默认会在时间码后附加该时刻命中的备注（默认开启，当前设置菜单里没有对应开关）；日志导出的文件名始终不含备注。</p>
-
-  <h2><span class="num">10</span>常见问题</h2>
-  <details>
-    <summary>面板提示「当前页面无法访问视频」怎么办？</summary>
-    <div class="body">面板只能在芒果TV视频播放页、百度网盘，或已开启「应用于当前网页」的站点使用。弹窗 / 侧边栏会自动跟随当前激活的标签页，切到视频页即可恢复；独立窗口跟随打开时记忆的来源视频标签页。确认插件已启用，并在设置里给当前网站打开「应用于当前网页」（需要允许浏览器弹出的权限申请）。</div>
-  </details>
-  <details>
-    <summary>按 I / O / M 没有反应？</summary>
-    <div class="body">依次确认：① 焦点不在输入框、备注编辑框或可编辑区域里；② 当前站点适用（芒果TV、百度网盘或已授权的网页）；③ 打点没有被「日志记录」开关挡掉（被关闭时按 <kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd> 会提示「日志记录已关闭」）；④ 「视频控制」没有被关闭——控制栏关闭后页面内的快捷键也不再响应，重新打开即可。另外 <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> 变速需要页面里有视频，暂停状态按 <kbd>J</kbd> / <kbd>L</kbd> 会先开始播放。</div>
-  </details>
-  <details>
-    <summary>录制的视频没有声音？</summary>
-    <div class="body">浏览器对录制声音有权限限制。先看控制台 <span class="mono">[MGP-REC] saved {...}</span> 里的 <span class="mono">audioVia</span>：<span class="mono">none</span> 表示完全没取到音轨。常见原因：视频还没有播放过（浏览器认为你没有播放权限，音频上下文处于挂起状态）；浏览器把标签页静音了；部分加密内容被浏览器禁止采集声音。播放一下视频、解除静音后再录通常就能恢复。</div>
-  </details>
-  <details>
-    <summary>录制帧率偏低 / 画面发顿？</summary>
-    <div class="body">录制编码在设置里选，默认 H.264，全部由 CPU 完成。先看 <span class="mono">[MGP-REC] saved {...}</span>：<span class="mono">pacerWrites ÷ 录制秒数</span> ≈ 文件实际帧率。<br>· <span class="mono">pacerDrops</span> 很小而帧率仍低 → 瓶颈在编码器内部丢帧，换更省 CPU 的档位（「低分辨率 H.264」或 VP8）重录；<br>· <span class="mono">pacerDrops</span> 很大 → 编码器长期吃不住，同样建议降档。<br>编码确实跟不上时插件会自动降帧（60→50→30→25）并弹提示；不会中途改分辨率（改分辨率会让 MP4/H.264 花屏），需要更低分辨率请改用「低分辨率 H.264」重新录制。</div>
-  </details>
-  <details>
-    <summary>录制出来的视频颜色偏深 / 和原片不一样？</summary>
-    <div class="body">插件已经在录制转绘时把画面压到 limited（16-235），并把容器标签一并声明为 limited（WebM 改 <span class="mono">Colour/Range</span>；MP4 重封装时改 <span class="mono">SPS VUI</span> 与 <span class="mono">colr</span>），正常情况下不会偏深。<br>例外是 <strong>VP9 档</strong>：它的范围写在码流内部，容器标签改不动，所以 VP9 保持「全范围画面 + 全范围标签」不变；对颜色敏感时请改用 H.264 或 VP8。截图（<kbd>S</kbd> 键 PNG）不做压缩，仍是标准 sRGB。<br>想核对文件的实际色彩信息，可用 <span class="mono">ffprobe</span> 看 <span class="mono">color_range</span>，正常应为 <span class="mono">tv</span>（limited）；控制台 <span class="mono">rangeTag</span> 也会记录本次标签改写结果。</div>
-  </details>
-  <details>
-    <summary>导出的 Excel 打不开？</summary>
-    <div class="body">导出的文件是标准 <span class="mono">.xlsx</span>，可以用 Excel、WPS、腾讯文档打开。若提示损坏，请更新软件版本后重试。</div>
-  </details>
-  <details>
-    <summary>换集后记录会丢失吗？</summary>
-    <div class="body">不会。每条记录都挂在对应分集的 key 下，面板会自动切换显示当前分集的记录；「历史记录」里可以随时跳回任意分集查看。</div>
-  </details>
-  <details>
-    <summary>批量截图 / 录制按了没反应，或提示「只对标记点 / 片段生效」？</summary>
-    <div class="body">批量截图只对<strong>标记点</strong>生效、批量录制只对<strong>片段</strong>生效：勾选标记点后按 <kbd>S</kbd>、勾选片段后按 <kbd>R</kbd>。如果勾选的类型和按键不符会有提示且不执行；完全没勾选时按键不会被拦截。任务进行中再按会提示「批量任务进行中，请稍候」，按 <kbd>Esc</kbd> 可取消。</div>
-  </details>
-  <details>
-    <summary>右键输入时间码提示「无法识别的时间码」？</summary>
-    <div class="body">只支持第 3 节列出的六种写法，且帧号必须小于当前帧率（例如 25fps 时帧号不能大于等于 25）、秒不能大于等于 60。带分隔符时数字之间不能空缺（<span class="mono">12:</span>、<span class="mono">:12</span>、<span class="mono">1::2</span> 都会失败）。</div>
-  </details>
-
-  <footer>
-    <span>芒着拉片 | MG Player+ v3.3</span>
-    <span>YUMMi</span>
-  </footer>
+<footer>
+<span>芒着拉片 | MG Player+ v3.3</span>
+<span>YUMMi</span>
+</footer>
 </div>
 <script>
 // 跟随插件设置中的亮色/暗色主题
