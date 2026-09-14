@@ -816,7 +816,7 @@
     if (old) old.remove();
     const box = document.createElement('div');
     box.id = 'mgp-seek';
-    box.innerHTML = '<input id="mgp-seek-in" spellcheck="false" placeholder="输入时间码，按 Enter 跳转">';
+    box.innerHTML = '<input id="mgp-seek-in" spellcheck="false" title="支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss；中英文冒号、有无分隔符都可以" placeholder="输入时间码，按 Enter 跳转">';
     tcEl.appendChild(box);
     tcEl.classList.add('seek-open');
     const input = box.querySelector('#mgp-seek-in');

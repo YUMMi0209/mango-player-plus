@@ -176,11 +176,28 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 /* 非本插件导出的表格：顶部提示 + 把 AI 一段前置强调 */
 .qc-notice{font-size:11px;line-height:1.5;color:var(--orange);background:rgba(255,95,0,.10);border:1px solid rgba(255,95,0,.35);border-radius:8px;padding:6px 8px;margin-top:8px}
 #mpp-qc.ai-first .ai-step{color:var(--orange);font-weight:600}
-/* 从文件导入 */
-.qc-file-row{display:flex;align-items:center;gap:8px;margin-top:2px}
-.qc-file-row button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0;transition:all .12s}
-.qc-file-row button:hover{border-color:var(--orange);color:var(--orange)}
-.qc-file-row .qc-file{margin-top:0;flex:1;min-width:0}
+/* ① 上传表格：拖放引导区 */
+.qc-drop{display:flex;flex-direction:column;align-items:center;gap:5px;padding:16px 10px;border:1px dashed var(--card-brd);border-radius:10px;background:var(--row);text-align:center;transition:border-color .12s,background .12s}
+.qc-drop.over{border-color:var(--orange);background:var(--orange-dk)}
+.qc-drop.has-file{border-style:solid;border-color:var(--orange);padding:10px}
+.qc-drop-main{font-size:12px;color:var(--text)}
+.qc-drop-sub{font-size:11px;color:var(--faint)}
+.qc-drop .qc-choose{height:24px;padding:0 10px;border-radius:6px;border:1px solid var(--card-brd);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
+.qc-drop .qc-choose:hover{border-color:var(--orange);color:var(--orange)}
+.qc-drop .qc-file{max-width:100%;font-size:11px;color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qc-drop .qc-file[hidden]{display:none}
+/* ③ 导入方式：AI 导入（推荐）/ 直接导入 */
+.qc-ways{margin-top:8px}
+.qc-ways[hidden]{display:none}
+.qc-way-row{display:flex;gap:8px;margin-top:2px}
+.qc-way{flex:1;height:30px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;transition:all .12s}
+.qc-way:hover{border-color:var(--orange)}
+.qc-way.ai-way{background:var(--orange-dk);border-color:var(--orange);font-weight:600}
+.qc-way.ai-way:hover{background:var(--orange);color:#fff}
+.qc-way:disabled{opacity:.45;cursor:not-allowed}
+.qc-way:disabled:hover{border-color:var(--card-brd);background:var(--row);color:var(--text)}
+.qc-ways .qc-tip{margin-top:6px;font-size:10px;color:var(--faint);line-height:1.5}
+.qc-step.paste-step{margin-top:12px}
 .qc-cands{margin-top:7px;border-top:1px solid var(--card-brd);padding-top:7px}
 .qc-pick-hint{font-size:10px;color:var(--faint);line-height:1.5;padding:2px 2px 4px}
 /* AI 提示词 / 粘贴区 */
@@ -375,14 +392,11 @@ footer button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-wi
 #search-clear{width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--faint);cursor:pointer;flex-shrink:0;border-radius:5px}
 #search-clear:hover{color:var(--orange);background:var(--card)}
 #search-clear svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round}
-/* 输入框内侧靠右的颜色筛选圆点（紧凑排列） */
-.search-bar .search-colors{display:flex;align-items:center;gap:5px;flex-shrink:0}
-.search-colors .sc-dot{width:12px;height:12px;border-radius:50%;box-sizing:border-box;border:1.5px solid var(--dc,#999);background:transparent;cursor:pointer;flex-shrink:0;transition:transform .12s,background .12s}
-.search-colors .sc-dot:hover{transform:scale(1.2)}
+/* 输入框内侧靠右的颜色筛选圆点（更小、紧凑；再点一次取消，无需重置按钮） */
+.search-bar .search-colors{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.search-colors .sc-dot{width:9px;height:9px;border-radius:50%;box-sizing:border-box;border:1.5px solid var(--dc,#999);background:transparent;cursor:pointer;flex-shrink:0;transition:transform .12s,background .12s}
+.search-colors .sc-dot:hover{transform:scale(1.25)}
 .search-colors .sc-dot.on{background:var(--dc,#999)}
-.search-colors .sc-reset{font-size:12px;line-height:1;color:var(--faint);cursor:pointer;flex-shrink:0}
-.search-colors .sc-reset:hover{color:var(--orange)}
-.search-colors .sc-reset[hidden]{display:none}
 /* 搜索命中关键词高亮 */
 .note-text mark.hl{background:rgba(255,95,0,.28);color:var(--text);border-radius:3px;padding:0 1px}
 

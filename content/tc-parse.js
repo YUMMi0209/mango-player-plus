@@ -6,6 +6,7 @@
      hhmmssff      00011218（无分隔）
      mmssff        011218  （无分隔）
      mmss          0112    （无分隔）
+   分隔符兼容中英文冒号与分号（: ： ; ；），有无分隔符都可以；
    解析失败返回 null（调用方提示「无法识别的时间码」） */
 'use strict';
 (function (root, factory) {
@@ -15,12 +16,15 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  const SEP_RE = /[:：;；]/;                 // 英文冒号 / 中文全角冒号 / 分号（中英文）
+  const ONLY_CHARS_RE = /^[0-9:：;；]+$/;    // 只允许数字与这些分隔符
+
   function parseTCInput(raw, fps) {
     const F = fps > 0 ? fps : 25;
     const s = String(raw == null ? '' : raw).trim();
-    if (!s || !/^[0-9:]+$/.test(s)) return null;
-    if (s.indexOf(':') !== -1) {
-      const parts = s.split(':');
+    if (!s || !ONLY_CHARS_RE.test(s)) return null;
+    if (SEP_RE.test(s)) {
+      const parts = s.split(SEP_RE);
       if (parts.length < 2 || parts.length > 4) return null;
       if (parts.some(p => p === '')) return null;   // 12: / :12 / 1::2 这类残缺写法
       const n = parts.map(Number);

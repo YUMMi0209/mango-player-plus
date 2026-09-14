@@ -795,14 +795,12 @@ const MPP = (() => {
     if (els.cntMk) els.cntMk.textContent = on ? filteredIdx('mk').length : logs.marks.length;
     if (els.cntIo) els.cntIo.textContent = on ? filteredIdx('io').length : logs.inOut.length;
   }
-  // 颜色筛选圆点（在搜索框内、输入框右侧）：按当前选中态刷新高亮
+  // 颜色筛选圆点（在搜索输入框内部靠右）：按当前选中态刷新高亮
   function syncColorChips() {
     if (!els.searchColors) return;
     els.searchColors.querySelectorAll('.sc-dot').forEach(d => {
       d.classList.toggle('on', colorQuery.has(d.dataset.c));
     });
-    const reset = els.searchColors.querySelector('.sc-reset');
-    if (reset) reset.hidden = colorQuery.size === 0;
   }
   function openSearch(open) {
     searchOpen = open;
@@ -826,23 +824,19 @@ const MPP = (() => {
   }
   function bindSearch() {
     if (els.btnSearch) els.btnSearch.addEventListener('click', () => openSearch(els.searchBar ? els.searchBar.hidden : true));
-    // 颜色筛选圆点（搜索框内、输入框右侧）：按 MARK_COLORS 生成，避免两个页面各写一份
+    // 颜色筛选圆点（搜索输入框内部靠右）：按 MARK_COLORS 生成，避免两个页面各写一份
+    // 再点一次即取消该颜色，因此不需要「清除」按钮
     if (els.searchColors && !els.searchColors.querySelector('.sc-dot')) {
-      els.searchColors.innerHTML =
-        MARK_COLORS.map(([name, v]) =>
-          '<span class="sc-dot" data-c="' + v + '" style="--dc:' + v + '" title="只看' + name + '色标记点"></span>'
-        ).join('') +
-        '<span class="sc-reset" hidden title="清除颜色筛选">↺</span>';
+      els.searchColors.innerHTML = MARK_COLORS.map(([name, v]) =>
+        '<span class="sc-dot" data-c="' + v + '" style="--dc:' + v + '" title="只看' + name + '色标记点（再点取消）"></span>'
+      ).join('');
       els.searchColors.addEventListener('click', e => {
         const dot = e.target.closest('.sc-dot');
-        if (dot) {
-          const c = dot.dataset.c;
-          if (colorQuery.has(c)) colorQuery.delete(c); else colorQuery.add(c);
-          syncColorChips();
-          render();
-          return;
-        }
-        if (e.target.closest('.sc-reset')) { colorQuery.clear(); syncColorChips(); render(); }
+        if (!dot) return;
+        const c = dot.dataset.c;
+        if (colorQuery.has(c)) colorQuery.delete(c); else colorQuery.add(c);
+        syncColorChips();
+        render();
       });
     }
     syncColorChips();
@@ -1004,7 +998,7 @@ const MPP = (() => {
     inp.className = 'tc-edit';
     inp.spellcheck = false;
     inp.value = cur || '';
-    inp.title = '修改时间码，Enter 保存，Esc 取消（支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss）';
+    inp.title = '修改时间码，Enter 保存，Esc 取消（支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss；中英文冒号、有无分隔符都可以）';
     tcEl.appendChild(inp);
     inp.focus();
     try { inp.select(); } catch (e) { }
@@ -1593,23 +1587,33 @@ const MPP = (() => {
         '<div class="mpp-modal wide qc-modal">' +
           '<div class="qc-title">导入记录</div>' +
           '<div class="qc-notice" hidden></div>' +
-          '<div class="qc-step ai-step">① AI 导入（推荐）</div>' +
-          '<div class="ai-bar">' +
-            '<button type="button" class="ai-copy">复制提示词</button>' +
-            '<span class="qc-tip">把表格（或截图 / 文本）连同提示词一起发给 AI，再把 AI 的输出粘贴到下面</span>' +
+          // ① 先让用户把表格交进来（拖入区），或者直接贴时间码清单
+          '<div class="qc-step">① 上传表格</div>' +
+          '<div class="qc-drop">' +
+            '<div class="qc-drop-main">把 .xlsx 表格拖到这里</div>' +
+            '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button></div>' +
+            '<div class="qc-file" hidden></div>' +
           '</div>' +
-          '<textarea class="ai-prompt" readonly hidden></textarea>' +
-          '<textarea class="ai-input" spellcheck="false" placeholder="粘贴 AI 输出的清单，例如：&#10;00:10:19:20 阿维塔 主持人口播"></textarea>' +
-          '<div class="qc-step file-step">② 或从表格文件导入</div>' +
-          '<div class="qc-file-row">' +
-            '<button type="button" class="qc-choose">选择表格文件</button>' +
-            '<span class="qc-file"></span>' +
-          '</div>' +
+          // ② 读到表格后：选要导入哪一张工作表（单选，一次只导一张）
           '<div class="qc-cands" hidden>' +
+            '<div class="qc-step">② 选择要导入的工作表</div>' +
             '<div class="qc-pick-hint"></div>' +
             '<div class="qc-count"></div>' +
             '<div class="qc-list"></div>' +
           '</div>' +
+          // ③ 选定工作表后：两种导入方式（AI 导入推荐 / 直接导入）
+          '<div class="qc-ways" hidden>' +
+            '<div class="qc-step">③ 选择导入方式</div>' +
+            '<div class="qc-way-row">' +
+              '<button type="button" class="qc-way ai-way">AI 导入（推荐）</button>' +
+              '<button type="button" class="qc-way direct-way">直接导入</button>' +
+            '</div>' +
+            '<div class="qc-tip"></div>' +
+            '<textarea class="ai-prompt" readonly hidden></textarea>' +
+          '</div>' +
+          // 或直接贴清单（手写时间码 / AI 输出都走这里）
+          '<div class="qc-step paste-step">或直接粘贴时间码清单</div>' +
+          '<textarea class="ai-input" spellcheck="false" placeholder="每行一条：时间码 + 说明，例如&#10;00:10:19:20 阿维塔 主持人口播&#10;101920 阿维塔 主持人口播（也兼容中文冒号 / 无冒号写法）"></textarea>' +
           '<div class="qc-foot">' +
             '<div class="ai-status"></div>' +
             '<button type="button" class="mpp-cancel">取消</button>' +
@@ -1620,15 +1624,18 @@ const MPP = (() => {
 
       const noticeEl = m.querySelector('.qc-notice');
       const fileEl = m.querySelector('.qc-file');
+      const dropEl = m.querySelector('.qc-drop');
       const candsBox = m.querySelector('.qc-cands');
       const hintEl = m.querySelector('.qc-pick-hint');
       const listEl = m.querySelector('.qc-list');
       const countEl = m.querySelector('.qc-count');
+      const waysBox = m.querySelector('.qc-ways');
+      const aiWayBtn = m.querySelector('.qc-way.ai-way');
+      const directWayBtn = m.querySelector('.qc-way.direct-way');
       const input = m.querySelector('.ai-input');
       const statusEl = m.querySelector('.ai-status');
       const promptEl = m.querySelector('.ai-prompt');
       const okBtn = m.querySelector('.mpp-ok');
-      const copyBtn = m.querySelector('.ai-copy');
       const tipEl = m.querySelector('.qc-tip');
       const picker = document.createElement('input');
       picker.type = 'file'; picker.accept = '.xlsx'; picker.multiple = true; picker.hidden = true;
@@ -1646,6 +1653,12 @@ const MPP = (() => {
         return el ? cands[+el.closest('.qc-item').dataset.i] : null;
       };
       const pickedCount = () => { const c = selectedCand(); return c ? c.marks.length : 0; };
+      const showFile = () => {
+        fileEl.hidden = !fileNames.length;
+        fileEl.textContent = fileNames.length ? '已选择：' + fileNames.join('、') : '';
+        fileEl.title = fileNames.join('、');
+        dropEl.classList.toggle('has-file', !!fileNames.length);
+      };
 
       const refreshPrompt = () => {
         const c = selectedCand();
@@ -1655,7 +1668,7 @@ const MPP = (() => {
       // 候选（工作表 / 分节）列表：单选；多个时默认不选，要求用户明确选一张
       function renderCands() {
         candsBox.hidden = !cands.length;
-        if (!cands.length) { listEl.innerHTML = ''; return; }
+        if (!cands.length) { listEl.innerHTML = ''; refresh(); return; }
         listEl.innerHTML = cands.map((c, i) => {
           const hint = c.marks.slice(0, 2).map(x => fmtSec(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
           const pre = cands.length === 1 ? ' checked' : '';
@@ -1666,10 +1679,9 @@ const MPP = (() => {
             '</label>' +
             '<div class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</div>';
         }).join('');
-        const filesTxt = fileNames.length ? '文件：' + fileNames.join('、') + '　' : '';
         hintEl.textContent = (cands.length > 1
-            ? filesTxt + '检测到 ' + cands.length + ' 个工作表 / 分节，请选择要导入的那一张（一次只能导入一张）'
-            : filesTxt + '已自动选中识别到的内容')
+            ? '检测到 ' + cands.length + ' 个工作表 / 分节，请选择要导入的那一张（一次只能导入一张）'
+            : '已自动选中识别到的内容')
           + (sheetHint ? '　' + sheetHint : '');
         refresh();
       }
@@ -1678,32 +1690,29 @@ const MPP = (() => {
         const text = input.value.trim();
         pasted = text ? aiParse(text, meta, 'auto') : null;
         const hasPaste = !!(pasted && pasted.marks.length);
-        const itemInputs = [...listEl.querySelectorAll('.qc-item input')];
         const sel = selectedCand();
         const nSheet = pickedCount();
+        const itemInputs = [...listEl.querySelectorAll('.qc-item input')];
         // 粘贴内容优先：有可解析的粘贴内容时忽略文件候选
         itemInputs.forEach(b => { b.disabled = hasPaste; });
         m.classList.toggle('ai-active', hasPaste);
         countEl.textContent = cands.length
           ? '共 ' + cands.reduce((a, c) => a + c.marks.length, 0) + ' 条 / 已选 ' + nSheet + ' 条'
           : '';
-        // 多个工作表还没选定时：先选定才能复制提示词 —— 提示词要写明只提取哪张表，
-        // 选之前复制的提示词只能让 AI 反问你，不如先定下来
-        const needPick = cands.length > 1 && !sel;
-        copyBtn.disabled = needPick;
-        copyBtn.title = needPick ? '请先在下面选择要导入的工作表' : '复制提示词给 AI';
-        if (tipEl) {
-          tipEl.textContent = needPick
-            ? '先在下面②里选择要导入的工作表，再复制提示词'
-            : '把表格（或截图 / 文本）连同提示词一起发给 AI，再把 AI 的输出粘贴到下面';
-        }
+        // ③ 导入方式：选好工作表才出现；还没交文件时只留 AI 导入（让 AI 先问你要哪张表）
+        waysBox.hidden = !(sel || !cands.length);
+        directWayBtn.hidden = !sel;
+        aiWayBtn.disabled = cands.length > 1 && !sel;
+        tipEl.textContent = sel
+          ? '推荐 AI 导入：点它会复制提示词（只针对「' + sel.sheet + '」），把表格和提示词一起发给 AI，再把结果粘贴到下面；也可以直接导入自动识别结果'
+          : '把表格直接发给 AI 也可以：点它会复制提示词，AI 会先问你要导入哪一张表';
         refreshPrompt();
         if (hasPaste) {
           statusEl.textContent = '共 ' + pasted.marks.length + ' 条记录';
           okBtn.disabled = false;
           return;
         }
-        statusEl.textContent = text ? '未识别到时间码，请检查 AI 输出' : (sel ? '共 ' + nSheet + ' 条记录' : '');
+        statusEl.textContent = text ? '未识别到时间码，请检查粘贴内容' : (sel ? '共 ' + nSheet + ' 条记录' : '');
         okBtn.disabled = !sel;
       };
 
@@ -1716,19 +1725,33 @@ const MPP = (() => {
         sheets = built.sheetNames;
         sheetHint = built.hint;
         fileNames = files.map(f => f.name);
-        fileEl.textContent = fileNames.join('、');
-        fileEl.title = fileNames.join('、');
+        showFile();
         renderCands();
         refreshPrompt();
       };
       m.querySelector('.qc-choose').addEventListener('click', () => picker.click());
       picker.addEventListener('change', () => { setFiles([...picker.files]); picker.value = ''; });
+      // 拖放区：把表格拖进来即读取（阻止冒泡，避免面板的全局 drop 再开一个弹窗）
+      ['dragenter', 'dragover'].forEach(ev => dropEl.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation();
+        dropEl.classList.add('over');
+      }));
+      ['dragleave', 'dragend'].forEach(ev => dropEl.addEventListener(ev, e => {
+        e.stopPropagation();
+        dropEl.classList.remove('over');
+      }));
+      dropEl.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        dropEl.classList.remove('over');
+        const files = [...((e.dataTransfer && e.dataTransfer.files) || [])].filter(f => /\.xlsx?$/i.test(f.name));
+        if (!files.length) { panelToast('请拖入 .xlsx 表格文件'); return; }
+        setFiles(files);
+      });
 
       // 非本插件导出的表格：引导优先用 AI（格式差异大，AI 比自动识别稳）
       const notice = ctx.notice || '';
       if (notice) { noticeEl.textContent = notice; noticeEl.hidden = false; m.classList.add('ai-first'); }
-      fileEl.textContent = fileNames.join('、');
-      if (fileNames.length) fileEl.title = fileNames.join('、');
+      showFile();
 
       // 粘贴框随内容自动增高（上限 168px，超出才出现一条细滚动条）
       const growInput = () => {
@@ -1739,9 +1762,11 @@ const MPP = (() => {
       input.addEventListener('paste', () => setTimeout(growInput, 0));
       input.addEventListener('keydown', e => e.stopPropagation());
       listEl.addEventListener('change', refresh);
-      // 复制提示词；复制失败时展开提示词框供手动复制
-      m.querySelector('.ai-copy').addEventListener('click', () => {
-        if (copyBtn.disabled) { panelToast('请先选择要导入的工作表'); return; }
+
+      // AI 导入：把（只针对选中表的）提示词复制到剪贴板，并引导粘贴结果
+      const copyPrompt = () => {
+        const c = selectedCand();
+        const p = aiPrompt(sheets, c ? c.sheet : '');
         const fail = () => {
           refreshPrompt();
           promptEl.hidden = false;
@@ -1749,13 +1774,26 @@ const MPP = (() => {
           panelToast('复制失败，请在提示词框内手动复制');
         };
         try {
-          const c = selectedCand();
-          const p = aiPrompt(sheets, c ? c.sheet : '');
           if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(p).then(() => panelToast('已复制提示词，粘贴给 AI 即可')).catch(fail);
+            navigator.clipboard.writeText(p).then(() => {
+              panelToast(c ? '已复制提示词（只针对「' + c.sheet + '」）' : '已复制提示词，AI 会先问你要哪张表');
+              input.focus();
+            }).catch(fail);
           } else fail();
         } catch (e) { fail(); }
+        input.focus();
+      };
+      aiWayBtn.addEventListener('click', () => {
+        if (aiWayBtn.disabled) { panelToast('请先在②里选择要导入的工作表'); return; }
+        copyPrompt();
       });
+      // 直接导入：用自动识别结果，不做 AI 转换
+      directWayBtn.addEventListener('click', () => {
+        const sel = selectedCand();
+        if (!sel) { panelToast('请先在②里选择要导入的工作表'); return; }
+        finish({ items: [sel], mode: 'auto', text: '' });
+      });
+
       const finish = val => {
         document.removeEventListener('keydown', onKey);
         m.remove();
@@ -1769,10 +1807,11 @@ const MPP = (() => {
       };
       const ok = () => {
         const text = input.value.trim();
+        // 粘贴的清单优先（手写时间码 / AI 输出都能直接导）
         if (text && pasted && pasted.marks.length) { finish({ items: [], mode: 'auto', text: text }); return; }
         const sel = selectedCand();
         if (!sel) {
-          panelToast(cands.length ? '请先选择要导入的工作表，或粘贴 AI 结果' : '请选择表格文件，或粘贴 AI 结果');
+          panelToast(text ? '没识别到时间码，请检查粘贴内容' : (cands.length ? '请先在②里选择要导入的工作表' : '请先上传表格，或粘贴时间码清单'));
           return;
         }
         finish({ items: [sel], mode: 'auto', text: '' });
