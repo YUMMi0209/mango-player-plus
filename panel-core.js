@@ -1742,8 +1742,10 @@ const MPP = (() => {
         stage3.hidden = stage !== 3;
         prevBtn.hidden = stage === 1;
         okBtn.textContent = stage === 3 ? '确认导入' : '下一步';
-        aiBox.hidden = !(stage === 3 && source === 'file' && way === 'ai' && cands.length > 0);
+        aiBox.hidden = !(stage === 3 && source === 'file' && way === 'ai');
         const sel = selectedCand();
+        // 提示词随状态同步（选定工作表后只针对该表；复制失败时会展开给人手动复制）
+        promptEl.value = aiPrompt(sheets, sel ? sel.sheet : '');
         tipEl.textContent = way === 'ai'
           ? (sel ? 'AI 导入：下一步给出提示词（只针对「' + sel.sheet + '」），复制后交给 AI，再把结果粘贴回来'
                  : 'AI 导入：下一步给出提示词，复制后交给 AI，再把结果粘贴回来')
@@ -1876,8 +1878,12 @@ const MPP = (() => {
           if (!fileNames.length) { panelToast('请先上传表格文件，或粘贴时间码清单'); return; }
           source = 'file';
           if (!cands.length) {
-            // 表格里没识别到时间码：直接进 AI 那一步（提示词会让 AI 先问要哪张表）
+            // 表格里没识别到时间码：没有可选的表，直接进 AI 那一步（提示词会让 AI 先问要哪张表）
             panelToast('表格里没识别到时间码，可改用 AI 导入');
+            stage = 3;
+            if (way === 'ai') aiInput.focus();
+            refresh();
+            return;
           }
           stage = 2;
           refresh();
