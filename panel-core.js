@@ -1628,6 +1628,8 @@ const MPP = (() => {
       const statusEl = m.querySelector('.ai-status');
       const promptEl = m.querySelector('.ai-prompt');
       const okBtn = m.querySelector('.mpp-ok');
+      const copyBtn = m.querySelector('.ai-copy');
+      const tipEl = m.querySelector('.qc-tip');
       const picker = document.createElement('input');
       picker.type = 'file'; picker.accept = '.xlsx'; picker.multiple = true; picker.hidden = true;
       m.appendChild(picker);
@@ -1685,6 +1687,16 @@ const MPP = (() => {
         countEl.textContent = cands.length
           ? '共 ' + cands.reduce((a, c) => a + c.marks.length, 0) + ' 条 / 已选 ' + nSheet + ' 条'
           : '';
+        // 多个工作表还没选定时：先选定才能复制提示词 —— 提示词要写明只提取哪张表，
+        // 选之前复制的提示词只能让 AI 反问你，不如先定下来
+        const needPick = cands.length > 1 && !sel;
+        copyBtn.disabled = needPick;
+        copyBtn.title = needPick ? '请先在下面选择要导入的工作表' : '复制提示词给 AI';
+        if (tipEl) {
+          tipEl.textContent = needPick
+            ? '先在下面②里选择要导入的工作表，再复制提示词'
+            : '把表格（或截图 / 文本）连同提示词一起发给 AI，再把 AI 的输出粘贴到下面';
+        }
         refreshPrompt();
         if (hasPaste) {
           statusEl.textContent = '共 ' + pasted.marks.length + ' 条记录';
@@ -1729,6 +1741,7 @@ const MPP = (() => {
       listEl.addEventListener('change', refresh);
       // 复制提示词；复制失败时展开提示词框供手动复制
       m.querySelector('.ai-copy').addEventListener('click', () => {
+        if (copyBtn.disabled) { panelToast('请先选择要导入的工作表'); return; }
         const fail = () => {
           refreshPrompt();
           promptEl.hidden = false;
