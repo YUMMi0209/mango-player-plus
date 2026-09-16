@@ -299,12 +299,13 @@
 	#mgp-tc.seek-open::after{display:none}
 	#mgp-seek{
 	  position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
-	  z-index:2147483647;display:flex;align-items:center;gap:6px;
+	  z-index:2147483647;display:flex;flex-direction:column;align-items:stretch;gap:6px;
 	  background:rgba(20,20,26,.96);
 	  border:1px solid rgba(255,255,255,.15);border-radius:6px;
 	  padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.5);
 	  pointer-events:auto;white-space:nowrap;
 	}
+	#mgp-seek .mgp-seek-row{display:flex;align-items:center;gap:6px}
 	#mgp-seek-in{
 	  width:168px;height:24px;padding:0 8px;
 	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:4px;
@@ -319,6 +320,26 @@
 	  font-size:12px;font-family:inherit;cursor:pointer;
 	}
 	#mgp-seek-go:hover{background:#ff6a1a}
+	/* 6 位数字两种读法：居中弹窗确认（默认分:秒:帧，点一下即跳转） */
+	#mgp-tc-modal{position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:auto}
+	#mgp-tc-modal .mgp-tc-card{
+	  min-width:200px;max-width:min(320px,90%);box-sizing:border-box;
+	  background:rgba(20,20,26,.98);border:1px solid rgba(255,255,255,.15);border-radius:8px;
+	  padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,.6);
+	  font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#fff;
+	}
+	#mgp-tc-modal .mgp-tc-title{font-size:13px;font-weight:600;margin-bottom:6px}
+	#mgp-tc-modal .mgp-tc-msg{font-size:11px;color:#9a9aa5;line-height:1.5;margin-bottom:10px}
+	#mgp-tc-modal .mgp-tc-opts{display:flex;flex-direction:column;gap:6px}
+	#mgp-tc-modal .mgp-tc-opt{
+	  display:flex;align-items:center;justify-content:space-between;gap:12px;
+	  padding:7px 9px;cursor:pointer;
+	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:5px;
+	}
+	#mgp-tc-modal .mgp-tc-opt:hover{border-color:#ff5f00}
+	#mgp-tc-modal .mgp-tc-opt.on{border-color:#ff5f00;background:rgba(255,95,0,.14)}
+	#mgp-tc-modal .mgp-tc-opt em{font-style:normal;font-size:11px;color:#cfcfd6}
+	#mgp-tc-modal .mgp-tc-opt b{font-weight:600;font-size:11px;color:#ff9d5c;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace}
 @keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
 `;
 
@@ -801,12 +822,66 @@
   }
 
   // ─── 右键时间码：输入时间码跳转 ───────────────
-  // 兼容 hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss
+  // 兼容 hh:mm:ss:ff / mm:ss:ff / mm:ss / hhmmssff / mmssff / mmss，中英文冒号、有无分隔符都可以
   // （解析实现见 content/tc-parse.js，与面板「右键双击时间码」就地编辑共用同一套逻辑）
+  // 6 位紧凑写法（011218）两种读法都成立时，弹窗让用户选一个（时:分:秒 / 分:秒:帧）
+  function tcLib() { return (typeof window !== 'undefined') ? window.MPGTcParse : null; }
   function parseTCInput(raw) {
-    const lib = (typeof window !== 'undefined') ? window.MPGTcParse : null;
+    const lib = tcLib();
     if (lib && typeof lib.parseTCInput === 'function') return lib.parseTCInput(raw, FPS);
     return null;
+  }
+
+  // 读法确认弹窗（居中卡片，盖住画面）：默认选中「分:秒:帧」——
+  // 点某个读法即跳转 / ↑↓ 选择后 Enter 跳转 / 点弹窗以外或 Esc 取消
+  let tcFormOpen = null;
+  function askTCForm(res, onPick) {
+    if (!shadow) { onPick(res.options[0].sec); return; }
+    if (tcFormOpen) tcFormOpen.close();
+    const wrap = document.createElement('div');
+    wrap.id = 'mgp-tc-modal';
+    wrap.innerHTML =
+      '<div class="mgp-tc-card">' +
+        '<div class="mgp-tc-title">确认时间码读法</div>' +
+        '<div class="mgp-tc-msg">' + res.raw + ' 有两种读法，点一下跳转</div>' +
+        '<div class="mgp-tc-opts">' +
+          res.options.map((o, i) => '<div class="mgp-tc-opt' + (i === 0 ? ' on' : '') + '" data-i="' + i + '">' +
+            '<em>' + o.formName + '</em><b>' + fmtTC(o.sec) + '</b></div>').join('') +
+        '</div>' +
+      '</div>';
+    shadow.appendChild(wrap);
+    const rows = [...wrap.querySelectorAll('.mgp-tc-opt')];
+    const close = () => {
+      document.removeEventListener('keydown', onKey, true);
+      // 注意：shadow root 的直接子节点没有 parentElement，必须用 parentNode / remove()
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      tcFormOpen = null;
+    };
+    const pick = i => {
+      const o = res.options[i] || res.options[0];
+      close();
+      onPick(o ? o.sec : null);
+    };
+    const sel = () => Math.max(0, rows.findIndex(r => r.classList.contains('on')));
+    const mark = i => rows.forEach((r, j) => r.classList.toggle('on', j === i));
+    // 捕获阶段拦截：Esc / Enter / 上下键不要漏到页面播放器与网页全屏处理里
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); onPick(null); return; }
+      if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); pick(sel()); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        mark((sel() + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length);
+        return;
+      }
+      if (/^[1-9]$/.test(e.key)) {
+        const i = Number(e.key) - 1;
+        if (rows[i]) { e.preventDefault(); e.stopImmediatePropagation(); pick(i); }
+      }
+    };
+    rows.forEach((r, i) => r.addEventListener('click', () => pick(i)));
+    wrap.addEventListener('click', e => { if (e.target === wrap) { close(); onPick(null); } });
+    document.addEventListener('keydown', onKey, true);
+    tcFormOpen = { close: () => { close(); onPick(null); } };
   }
 
   function openSeek() {
@@ -816,7 +891,11 @@
     if (old) old.remove();
     const box = document.createElement('div');
     box.id = 'mgp-seek';
-    box.innerHTML = '<input id="mgp-seek-in" spellcheck="false" title="支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss；中英文冒号、有无分隔符都可以" placeholder="输入时间码，按 Enter 跳转">';
+    box.innerHTML =
+      '<div class="mgp-seek-row">' +
+        '<input id="mgp-seek-in" spellcheck="false" title="支持 hh:mm:ss:ff / mm:ss:ff / mm:ss，或紧凑写法 hhmmssff / mmssff / mmss；中英文冒号、有无分隔符都可以" placeholder="输入时间码，按 Enter 跳转">' +
+        '<button id="mgp-seek-go" type="button">跳转</button>' +
+      '</div>';
     tcEl.appendChild(box);
     tcEl.classList.add('seek-open');
     const input = box.querySelector('#mgp-seek-in');
@@ -824,22 +903,42 @@
       box.remove();
       tcEl.classList.remove('seek-open');
     };
-    const jump = () => {
-      const t = parseTCInput(input.value);
-      if (t == null) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
-      if (!video) return;
+    const jump = t => {
+      if (t == null || !video) return;
       try { video.currentTime = Math.max(0, Math.min(alignToFrame(t), video.duration || t)); } catch (e) { }
       mgpToast('已跳转 ' + fmtTC(dispTime()));
       close();
     };
+    const go = () => {
+      const raw = input.value.trim();
+      const lib = tcLib();
+      const res = (lib && typeof lib.analyzeTCInput === 'function') ? lib.analyzeTCInput(raw, FPS) : null;
+      if (!res) { jump(parseTCInput(raw)); return; }
+      if (!res.ok) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
+      // 6 位两种读法都成立 → 弹窗确认（默认分:秒:帧）；取消则回到输入框继续改
+      if (res.ambiguous) {
+        askTCForm({ raw: raw, options: res.options }, sec => {
+          if (sec == null) { input.focus(); input.select(); return; }
+          jump(sec);
+        });
+        return;
+      }
+      jump(res.sec);
+    };
+    const goBtn = box.querySelector('#mgp-seek-go');
+    goBtn.addEventListener('mousedown', e => e.preventDefault());
+    goBtn.addEventListener('click', go);
     input.addEventListener('keydown', e => {
       // 阻止事件冒泡到页面：输入框在 Shadow DOM 内，页面按键监听会把宿主当目标
       e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); jump(); }
+      if (e.isComposing) return;
+      if (e.key === 'Enter') { e.preventDefault(); go(); }
       else if (e.key === 'Escape') { e.preventDefault(); close(); }
     });
     input.addEventListener('blur', () => setTimeout(() => {
-      if (box.isConnected) close();
+      if (!box.isConnected) return;
+      if (tcFormOpen) { input.focus(); return; }   // 读法弹窗开着：输入框别收起，取消后还能接着改
+      close();
     }, 150));
     input.focus();
   }

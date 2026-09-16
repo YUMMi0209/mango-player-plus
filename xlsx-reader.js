@@ -312,20 +312,26 @@
     return out.filter(s => entries[s.path]);
   }
 
-  // 本插件导出格式识别（严格，避免把记录表误判成本插件导出）：
-  //   标记点表：时间码 + 颜色 + 备注
-  //   片段表  ：入点时间码 + 出点时间码 + 时长（兼容旧表头「时间码 / 时间码」）
-  function tableFor(rows) {
+  // 本插件格式识别：
+  //   ① 完整导出：标记点表 时间码 + 颜色 + 备注；片段表 入点时间码 + 出点时间码 + 时长
+  //      （兼容旧表头「时间码 / 时间码」）
+  //   ② 「日志记录空表」的简化列：表名带「标记 |」/「片段 |」时，只认 时间码 + 备注
+  //      （片段为 入点时间码 + 出点时间码 + 备注）—— 表名是本插件专有的，用来避免把
+  //      第三方记录表误判成本插件导出
+  function tableFor(rows, sheetName) {
+    const nm = String(sheetName == null ? '' : sheetName);
+    const ourMk = /标记/.test(nm) && /Mark/i.test(nm);
+    const ourIo = /片段/.test(nm) && /Clip/i.test(nm);
     for (let i = 0; i < Math.min(rows.length, 10); i++) {
       const header = (rows[i] || []).map(s => String(s == null ? '' : s).trim());
       const at = t => header.indexOf(t);
       const tcs = []; header.forEach((h, k) => { if (h === '时间码') tcs.push(k); });
       let idx = null, kind = null;
-      if (at('时间码') >= 0 && at('颜色') >= 0 && at('备注') >= 0) {
+      if (at('时间码') >= 0 && at('备注') >= 0 && (at('颜色') >= 0 || ourMk)) {
         kind = 'marks';
         idx = { tc: at('时间码'), color: at('颜色'), note: at('备注'), url: at('链接'), title: at('标题') };
-      } else if ((at('入点时间码') >= 0 && at('出点时间码') >= 0) || tcs.length >= 2) {
-        if (at('时长') < 0 || at('备注') < 0) continue;
+      } else if (((at('入点时间码') >= 0 && at('出点时间码') >= 0) || tcs.length >= 2) &&
+                 at('备注') >= 0 && (at('时长') >= 0 || ourIo)) {
         kind = 'inOut';
         idx = {
           tc: at('入点时间码') >= 0 ? at('入点时间码') : tcs[0],
@@ -338,7 +344,7 @@
       if (!kind) continue;
       const data = rows.slice(i + 1).filter(r => r && String(r[idx.tc] == null ? '' : r[idx.tc]).trim() !== '');
       if (!data.length) continue;
-      return { kind, idx, data };
+      return { kind, idx, data, sn: at('序号') };
     }
     return null;
   }
@@ -362,16 +368,16 @@
     });
     const out = { sheets: sheets, marks: null, inOut: null };
     sheets.forEach(s => {
-      const t = tableFor(s.rows);
+      const t = tableFor(s.rows, s.name);
       if (!t) return;
       const cell = (r, i) => (i >= 0 && r[i] != null) ? String(r[i]).trim() : '';
       if (t.kind === 'marks' && !out.marks) {
         out.marks = [['序号', '时间码', '颜色', '备注', '链接', '标题']].concat(t.data.map(r => [
-          cell(r, 0), cell(r, t.idx.tc), cell(r, t.idx.color), cell(r, t.idx.note), cell(r, t.idx.url), cell(r, t.idx.title)
+          cell(r, t.sn), cell(r, t.idx.tc), cell(r, t.idx.color), cell(r, t.idx.note), cell(r, t.idx.url), cell(r, t.idx.title)
         ]));
       } else if (t.kind === 'inOut' && !out.inOut) {
         out.inOut = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']].concat(t.data.map(r => [
-          cell(r, 0), cell(r, t.idx.tc), cell(r, t.idx.outTC), cell(r, t.idx.dur), cell(r, t.idx.note), cell(r, t.idx.url), cell(r, t.idx.title)
+          cell(r, t.sn), cell(r, t.idx.tc), cell(r, t.idx.outTC), cell(r, t.idx.dur), cell(r, t.idx.note), cell(r, t.idx.url), cell(r, t.idx.title)
         ]));
       }
     });

@@ -317,6 +317,14 @@ const MPP = (() => {
 
   // ─── 工具 ───────────────────────────────────
   function fmtDur(s) { return String(Math.round(s * 2) / 2); }
+  // 片段时长（秒）：优先用记录的 dur，缺 / 为 0 时按入出点自动算间隔——
+  // 导入的片段表可能没填时长，这里兜底，面板与导出都显示算出来的秒数
+  function durOf(u) {
+    const d = Number(u && u.dur);
+    if (isFinite(d) && d > 0) return d;
+    const inT = Number(u && u.inTime) || 0, outT = Number(u && u.outTime) || 0;
+    return Math.max(0, outT - inT);
+  }
   // 列表序号：固定两位（1 → 01），超过两位按实际位数（100 → 100）
   function seqNo(i) { const n = (Number(i) || 0) + 1; return n < 10 ? '0' + n : String(n); }
   function esc(s) {
@@ -463,6 +471,87 @@ const MPP = (() => {
     const value = (field && !field.hidden) ? field.querySelector('input').value : '';
     if (m) m.hidden = true;
     if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r({ ok: val === true, value: value }); }
+  }
+
+  // ─── 6 位紧凑时间码：让用户确认读法 ─────────────
+  // 「011218」既能读作 时:分:秒（01:12:18:00），也能读作 分:秒:帧（00:01:12:18），
+  // 两种都成立时弹出这个弹窗由用户选定；导入路径整批用同一种读法，不逐条打断。
+  // opts = { raw, options:[{form,formName,sec}], fps, title, message }
+  // 返回 Promise：选中的选项对象 { form, formName, sec }；取消 → null
+  let tcFormResolve = null, tcFormOpts = null;
+  function tcFormText(sec, fps) { return fmtTcStd(sec, fps); }
+  // 秒 → 标准时间码 HH:MM:SS:FF：导入的记录统一按这个形式呈现 / 存储，
+  // 表里手填的紧凑写法（011218）与中文冒号也会归一化成标准形式
+  function fmtTcStd(sec, fps) {
+    const lib = window.MPGTcParse;
+    const F = fps > 0 ? fps : 25;
+    if (lib && typeof lib.fmtTC === 'function') return lib.fmtTC(sec, F);
+    return fmtSec(sec) + ':00';
+  }
+  function chooseTcForm(opts) {
+    opts = opts || {};
+    return new Promise(resolve => {
+      let m = document.getElementById('mpp-tcform');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'mpp-tcform';
+        m.className = 'mpp-mask';
+        m.innerHTML =
+          '<div class="mpp-modal">' +
+            '<div class="mpp-modal-title">时间码读法</div>' +
+            '<div class="mpp-modal-msg"></div>' +
+            '<div class="mpp-tc-opts"></div>' +
+            '<div class="mpp-modal-actions">' +
+              '<button type="button" class="mpp-cancel">取消</button>' +
+              '<button type="button" class="mpp-ok">确定</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(m);
+        const okEl = m.querySelector('.mpp-ok');
+        m.querySelector('.mpp-cancel').addEventListener('click', () => finishTcForm(null));
+        okEl.addEventListener('click', () => {
+          const on = m.querySelector('.mpp-tc-opts input:checked');
+          finishTcForm(on ? Number(on.value) : null);
+        });
+        m.addEventListener('click', e => { if (e.target === m) finishTcForm(null); });
+        // 捕获阶段拦截键盘：避免 Esc 同时被底下的导入弹窗接走（那会直接把导入弹窗退一步）
+        document.addEventListener('keydown', e => {
+          if (m.hidden) return;
+          if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); finishTcForm(null); return; }
+          if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); okEl.click(); return; }
+          if (/^[1-9]$/.test(e.key)) {
+            const t = m.querySelectorAll('.mpp-tc-opts input')[Number(e.key) - 1];
+            if (t) { e.preventDefault(); e.stopImmediatePropagation(); t.checked = true; }
+          }
+        }, true);
+      }
+      const list = m.querySelector('.mpp-tc-opts');
+      tcFormOpts = (opts.options || []).slice();
+      tcFormResolve = resolve;
+      m.querySelector('.mpp-modal-title').textContent = opts.title || '时间码读法';
+      m.querySelector('.mpp-modal-msg').textContent = opts.message ||
+        ('「' + opts.raw + '」有两种读法，请选择一种');
+      list.innerHTML = tcFormOpts.map((o, i) =>
+        '<label class="mpp-tc-opt">' +
+          '<input type="radio" name="mpp-tcform" value="' + i + '"' + (i === 0 ? ' checked' : '') + '>' +
+          '<span class="mpp-tc-name">' + o.formName + '</span>' +
+          '<span class="mpp-tc-val">' + tcFormText(o.sec, opts.fps) + '</span>' +
+        '</label>').join('');
+      m.hidden = false;
+      setTimeout(() => {
+        if (m.hidden) return;
+        const r = list.querySelector('input:checked') || list.querySelector('input');
+        if (r) r.focus();
+      }, 0);
+    });
+  }
+  function finishTcForm(idx) {
+    const m = document.getElementById('mpp-tcform');
+    if (m) m.hidden = true;
+    const opts = tcFormOpts || [];
+    tcFormOpts = null;
+    const picked = (idx == null || !opts[idx]) ? null : opts[idx];
+    if (tcFormResolve) { const r = tcFormResolve; tcFormResolve = null; r(picked); }
   }
 
   // ─── 初始化 ─────────────────────────────────
@@ -738,7 +827,7 @@ const MPP = (() => {
         '<span class="tc in">' + esc(u.inTC) + '</span>' +
         '<span class="sep">&rarr;</span>' +
         '<span class="tc out">' + esc(u.outTC) + '</span>' +
-        '<span class="dur">' + fmtDur(u.dur) + 's</span>' +
+        '<span class="dur">' + fmtDur(durOf(u)) + 's</span>' +
         noteLineHTML(!!u.note);
       list.appendChild(row);
     });
@@ -1010,12 +1099,20 @@ const MPP = (() => {
       if (inp.parentElement) inp.parentElement.removeChild(inp);
       if (!save || !val) return;
       execInPage(fnGetFps).catch(() => 25).then(fps => {
-        const sec = parseTcInput(val, fps || 25);
-        if (sec == null) { panelToast('无法识别的时间码：' + val); return; }
-        return execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec]).then(ok => {
+        const F = fps || 25;
+        const apply = sec => execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec]).then(ok => {
           if (ok) { panelToast('已更新时间码'); load(true); }
           else panelToast('时间码更新失败');
         });
+        const a = analyzeTcInput(val, F);
+        if (a && !a.ok) { panelToast('无法识别的时间码：' + val); return; }
+        if (a && a.ambiguous) {
+          // 6 位紧凑写法：让用户确认是 时:分:秒 还是 分:秒:帧
+          return chooseTcForm({ raw: val, options: a.options, fps: F }).then(o => o ? apply(o.sec) : null);
+        }
+        const sec = a ? a.sec : parseTcInput(val, F);
+        if (sec == null) { panelToast('无法识别的时间码：' + val); return; }
+        return apply(sec);
       }).catch(() => { });
     };
     inp.addEventListener('keydown', e => {
@@ -1311,7 +1408,7 @@ const MPP = (() => {
     const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
     ioIdx.forEach((i, n) => {
       const u = logs.inOut[i];
-      ioRows.push([String(n + 1), u.inTC, u.outTC, fmtDur(u.dur), u.note || '', linkFor(u.inTime, u.url), u.title || '']);
+      ioRows.push([String(n + 1), u.inTC, u.outTC, fmtDur(durOf(u)), u.note || '', linkFor(u.inTime, u.url), u.title || '']);
     });
     const mkRows = [['序号', '时间码', '颜色', '备注', '链接', '标题']];
     mkIdx.forEach((i, n) => {
@@ -1552,6 +1649,20 @@ const MPP = (() => {
     if (lib && typeof lib.parseTCInput === 'function') return lib.parseTCInput(raw, fps);
     return tcToSec(raw, fps);
   }
+  // 带歧义信息的时间码解析：6 位紧凑写法会给出两种读法 candidate，由调用方让用户确认
+  function analyzeTcInput(raw, fps) {
+    const lib = window.MPGTcParse;
+    if (lib && typeof lib.analyzeTCInput === 'function') return lib.analyzeTCInput(raw, fps);
+    return null;
+  }
+  // 按指定读法（form）解析：整批导入时用户选定的读法要套到每一条上
+  function parseTcAs(raw, fps, form) {
+    const a = analyzeTcInput(raw, fps);
+    if (!a || !a.ok) return null;
+    if (!form) return a.sec;
+    const o = a.options.filter(x => x.form === form)[0];
+    return o ? o.sec : parseTcInput(raw, fps);
+  }
   // 页面校准帧率（control-bar 暴露；导出/导入按同一帧率换算）
   function fnGetFps() {
     try { return window.__mgpFps || 25; } catch (e) { return 25; }
@@ -1596,8 +1707,7 @@ const MPP = (() => {
           '<div class="qc-stage" data-stage="1">' +
             '<div class="qc-drop">' +
               '<div class="qc-drop-main">把 .xlsx 拖到这里</div>' +
-              '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button>' +
-                ' · <button type="button" class="qc-tpl" title="下载日志记录空表：填上时间码即可，链接留空就导入当前视频">下载空表</button></div>' +
+              '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button></div>' +
               '<div class="qc-file" hidden></div>' +
             '</div>' +
             '<div class="qc-or">或直接粘贴时间码清单</div>' +
@@ -1631,6 +1741,7 @@ const MPP = (() => {
             '</div>' +
           '</div>' +
           '<div class="qc-foot">' +
+            '<a class="qc-tpl" href="javascript:void(0)" title="下载日志记录空表：只需填时间码和备注，导入到当前视频">下载空表</a>' +
             '<div class="ai-status"></div>' +
             '<button type="button" class="mpp-cancel">取消</button>' +
             '<button type="button" class="qc-prev" hidden>上一步</button>' +
@@ -1775,10 +1886,10 @@ const MPP = (() => {
       // 下载「日志记录空表」：只填时间码即可 —— 有链接按链接归属，链接留空就导入当前视频
       m.querySelector('.qc-tpl').addEventListener('click', () => {
         if (!window.XlsxWriter) { panelToast('无法生成空表'); return; }
-        const mkRows = [['序号', '时间码', '颜色', '备注', '链接', '标题']];
-        const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
-        for (let i = 0; i < 30; i++) { mkRows.push(['', '', '', '', '', '']); ioRows.push(['', '', '', '', '', '', '']); }
-        const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const mkRows = [['时间码', '备注']];
+        const ioRows = [['入点时间码', '出点时间码', '备注']];
+        for (let i = 0; i < 30; i++) { mkRows.push(['', '']); ioRows.push(['', '', '']); }
+        const blob = new Blob([XlsxWriter.build(mkRows, ioRows, { mk: [16, 46], io: [16, 16, 46] })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = '日志记录空表.xlsx';
@@ -1854,6 +1965,9 @@ const MPP = (() => {
       };
       const onKey = e => {
         if (e.key !== 'Escape') return;
+        // 读法弹窗开着时 Esc 归它管（那边是捕获阶段，这里只是兜底）
+        const tcDlg = document.getElementById('mpp-tcform');
+        if (tcDlg && !tcDlg.hidden) return;
         e.preventDefault();
         if (!promptEl.hidden) { promptEl.hidden = true; return; }
         if (stage > 1) { goPrev(); return; }
@@ -1869,11 +1983,47 @@ const MPP = (() => {
         const marks = currentMarks();
         if (!marks.length) { panelToast('没有可导入的时间码'); return; }
         const existing = (logs.marks ? logs.marks.length : 0) + (logs.inOut ? logs.inOut.length : 0);
-        const go = () => finish({ marks: marks, mode: 'auto' });
-        if (existing > 0) {
-          confirmDlg('当前视频已有 ' + existing + ' 条记录，确认把 ' + marks.length + ' 条导入到当前视频？', '导入')
-            .then(ok => { if (ok) go(); });
-        } else go();
+        // 有 6 位紧凑时间码（011218：时:分:秒 / 分:秒:帧两种读法都成立）
+        // → 导入前先让用户确认读法，再按该读法把整批重新解析一遍
+        const askForm = () => {
+          const direct = (source === 'file' && way === 'direct');
+          const c = direct ? selectedCand() : null;
+          if (direct && (!c || !c.has6)) return Promise.resolve({ needed: false });
+          const text = direct ? '' : (source === 'paste' ? input.value : aiInput.value);
+          const raw = direct ? firstSixDigit(c.rows) : firstSixDigit([[text]]);
+          if (!raw) return Promise.resolve({ needed: false });
+          const F = meta.fps > 0 ? meta.fps : 25;
+          const a = analyzeTcInput(raw, F);
+          if (!a || !a.ok || !a.ambiguous) return Promise.resolve({ needed: false });
+          return chooseTcForm({
+            raw: raw, options: a.options, fps: F,
+            message: (direct ? '表里' : '清单里') + '有 6 位紧凑时间码（如「' + raw + '」），请确认读法'
+          }).then(o => ({ needed: true, opt: o }));
+        };
+        const go = list => {
+          if (!list.length) { panelToast('没有可导入的时间码'); return; }
+          if (existing > 0) {
+            confirmDlg('当前视频已有 ' + existing + ' 条记录，确认把 ' + list.length + ' 条导入到当前视频？', '导入')
+              .then(ok => { if (ok) finish({ marks: list, mode: 'auto' }); });
+          } else finish({ marks: list, mode: 'auto' });
+        };
+        askForm().then(res => {
+          if (res.needed && !res.opt) return;      // 用户在读法弹窗里取消 → 整体不导入
+          if (!res.opt) { go(marks); return; }
+          let list = marks;
+          try {
+            if (source === 'file' && way === 'direct') {
+              const c = selectedCand();
+              const r = QcImport.parse([{ name: c.sheet, rows: c.rows }],
+                { fps: meta.fps, duration: meta.duration, mode: res.opt.form });
+              if (r && r.marks && r.marks.length) list = r.marks;
+            } else {
+              const r = aiParse(source === 'paste' ? input.value : aiInput.value, meta, res.opt.form);
+              if (r && r.marks && r.marks.length) list = r.marks;
+            }
+          } catch (e) { }
+          go(list);
+        });
       };
       const goNext = () => {
         if (stage === 1) {
@@ -1977,6 +2127,17 @@ const MPP = (() => {
       });
     }
     return out;
+  }
+
+  // 表格里第一个 6 位紧凑数字（作为读法确认弹窗的样例）
+  function firstSixDigit(rows) {
+    for (const r of (rows || [])) {
+      for (const cell of (r || [])) {
+        const m = String(cell == null ? '' : cell).match(/(?:^|[^0-9])(\d{6})(?![0-9])/);
+        if (m) return m[1];
+      }
+    }
+    return null;
   }
 
   // 表格文件 → 候选（每个可导入的工作表 / 分节一项）+ 工作表名与提示文案
@@ -2098,6 +2259,25 @@ const MPP = (() => {
     let importFps = 25, pageKey = null;
     try { importFps = (await execInPage(fnGetFps)) || 25; } catch (e) { }
     try { pageKey = await execInPage(fnPageKey); } catch (e) { }
+    // 表里若有 6 位紧凑时间码（011218）→ 整批问一次读法（时:分:秒 / 分:秒:帧），不逐条打断
+    let sixForm = null;
+    const sixVals = [];
+    recs.forEach(r => {
+      [r.tc, r.inTC, r.outTC].forEach(v => { if (v) sixVals.push(String(v).trim()); });
+    });
+    const ambVals = sixVals.filter(v => {
+      const a = analyzeTcInput(v, importFps);
+      return a && a.ok && a.ambiguous;
+    });
+    if (ambVals.length) {
+      const a = analyzeTcInput(ambVals[0], importFps);
+      const picked = await chooseTcForm({
+        raw: ambVals[0], options: a.options, fps: importFps,
+        message: '表里有 ' + ambVals.length + ' 条 6 位紧凑时间码（如「' + ambVals[0] + '」），请确认读法'
+      });
+      if (!picked) return;      // 取消 → 不导入
+      sixForm = picked.form;
+    }
     // 归属：**优先按链接**；链接为空（或读不出关键信息）→ 当作当前视频导入
     const groups = {};
     recs.forEach(r => {
@@ -2105,24 +2285,36 @@ const MPP = (() => {
       (groups[key] = groups[key] || []).push(r);
     });
     // 时间码容错：日志表里手填的紧凑写法（00011218 / 011218 / 0112）与中文冒号也要认；
-    // 认不出再退回原来的严格换算
+    // 认不出再退回原来的严格换算；6 位写法按用户选定的读法算
     const tcSec = (tc, fps) => {
+      if (sixForm) {
+        const v = parseTcAs(tc, fps, sixForm);
+        if (v != null) return v;
+      }
       const v = parseTcInput(tc, fps);
       return v == null ? tcToSec(tc, fps) : v;
     };
     // 与当前视频页匹配的记录 → 合并进页面日志（去重后追加，日志面板实时可见）
     const pageRecs = pageKey ? (groups[pageKey] || []) : [];
     let pageAdded = 0;
+    // 导入的记录统一归一化：时间码写成标准 HH:MM:SS:FF，片段时长按入出点自动算间隔秒数
+    const mkOf = r => {
+      const t = timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.tc, importFps);
+      return { time: t, tc: fmtTcStd(t, importFps), color: r.color, note: r.note };
+    };
+    const ioOf = r => {
+      const inT = timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.inTC, importFps);
+      const outT = tcSec(r.outTC, importFps);
+      return {
+        inTime: inT, inTC: fmtTcStd(inT, importFps),
+        outTime: outT, outTC: fmtTcStd(outT, importFps),
+        dur: Math.max(0, (outT || 0) - (inT || 0)), note: r.note
+      };
+    };
     if (pageRecs.length) {
       try {
-        const mk = pageRecs.filter(r => r.kind === 'marks').map(r => ({
-          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.tc, importFps),
-          tc: r.tc, color: r.color, note: r.note
-        }));
-        const io = pageRecs.filter(r => r.kind === 'inOut').map(r => ({
-          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.inTC, importFps),
-          inTC: r.inTC, outTime: tcSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
-        }));
+        const mk = pageRecs.filter(r => r.kind === 'marks').map(mkOf);
+        const io = pageRecs.filter(r => r.kind === 'inOut').map(ioOf);
         pageAdded = (await execInPage(fnImportLogs, [mk, io])) || 0;
       } catch (e) { }
     }
@@ -2139,16 +2331,15 @@ const MPP = (() => {
       const ioTcs = new Set((entry.inOut || []).map(u => u.inTC + '|' + u.outTC));
       rs.forEach(r => {
         if (r.kind === 'marks') {
-          if (mkTcs.has(r.tc)) return;
-          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.tc, importFps), tc: r.tc, color: r.color, note: r.note });
-          mkTcs.add(r.tc); impAdded++;
+          const m = mkOf(r);
+          if (mkTcs.has(m.tc)) return;
+          entry.marks.push(m);
+          mkTcs.add(m.tc); impAdded++;
         } else {
-          const k2 = r.inTC + '|' + r.outTC;
+          const u = ioOf(r);
+          const k2 = u.inTC + '|' + u.outTC;
           if (ioTcs.has(k2)) return;
-          entry.inOut.push({
-            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.inTC, importFps),
-            inTC: r.inTC, outTime: tcSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
-          });
+          entry.inOut.push(u);
           ioTcs.add(k2); impAdded++;
         }
       });
@@ -2404,5 +2595,5 @@ const MPP = (() => {
   }
 
   // _test：仅供开发自检脚本调用（Material/qc-dev/test-panel-ui.js），扩展运行时不使用
-  return { init, load, setTab, _test: { qcDialog, openQcImport, buildQcCands, aiPrompt } };
+  return { init, load, setTab, _test: { qcDialog, openQcImport, buildQcCands, aiPrompt, chooseTcForm, analyzeTcInput, firstSixDigit } };
 })();

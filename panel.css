@@ -167,6 +167,15 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 :root[data-theme="light"] .mpp-modal-actions .danger{color:#c0392b;background:rgba(231,76,60,.12);border-color:#e74c3c}
 :root[data-theme="light"] .mpp-modal-actions .danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 
+/* ─── 6 位紧凑时间码：读法确认（叠在导入弹窗之上）── */
+#mpp-tcform{z-index:130}
+.mpp-tc-opts{display:flex;flex-direction:column;gap:6px;margin:-6px 0 16px}
+.mpp-tc-opt{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);cursor:pointer;transition:all .12s}
+.mpp-tc-opt:hover{border-color:var(--orange)}
+.mpp-tc-opt input{accent-color:var(--orange);flex-shrink:0;margin:0}
+.mpp-tc-opt .mpp-tc-name{flex:1;min-width:0;font-size:12px;color:var(--text)}
+.mpp-tc-opt .mpp-tc-val{font-family:var(--mono);font-size:11px;color:var(--orange);letter-spacing:.5px}
+
 /* ─── 记录表导入弹窗（三步：①来源 → ②工作表与方式 → ③确认清单）── */
 .mpp-modal.wide{width:344px}
 .qc-modal{padding:14px}
@@ -188,8 +197,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-drop.has-file{border-style:solid;border-color:var(--orange);padding:10px}
 .qc-drop-main{font-size:12px;color:var(--text)}
 .qc-drop-sub{font-size:11px;color:var(--faint)}
-.qc-drop .qc-choose,.qc-drop .qc-tpl{height:24px;padding:0 10px;border-radius:6px;border:1px solid var(--card-brd);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
-.qc-drop .qc-choose:hover,.qc-drop .qc-tpl:hover{border-color:var(--orange);color:var(--orange)}
+.qc-drop .qc-choose{height:24px;padding:0 10px;border-radius:6px;border:1px solid var(--card-brd);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
+.qc-drop .qc-choose:hover{border-color:var(--orange);color:var(--orange)}
 .qc-drop .qc-file{max-width:100%;font-size:11px;color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qc-drop .qc-file[hidden]{display:none}
 .qc-or{margin:10px 0 6px;font-size:11px;color:var(--faint);text-align:center}
@@ -242,7 +251,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 #mpp-qc.ai-active .qc-cands{opacity:.45;pointer-events:none}
 /* 底部：状态 + 操作同一行 */
 .qc-foot{display:flex;align-items:center;gap:8px;margin-top:11px}
-.qc-foot .ai-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 空表下载：超链接样式，固定在底部最左 */
+.qc-foot .qc-tpl{flex:0 0 auto;font-size:11px;line-height:1.4;color:var(--orange);text-decoration:underline;text-underline-offset:2px;cursor:pointer;white-space:nowrap}
+.qc-foot .qc-tpl:hover{color:var(--text)}
+.qc-foot .ai-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .qc-foot button{height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;flex-shrink:0;transition:all .12s}
 .qc-foot button:hover{border-color:var(--orange)}
 .qc-foot button[hidden]{display:none}
