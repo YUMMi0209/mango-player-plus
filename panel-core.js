@@ -1596,7 +1596,8 @@ const MPP = (() => {
           '<div class="qc-stage" data-stage="1">' +
             '<div class="qc-drop">' +
               '<div class="qc-drop-main">把 .xlsx 拖到这里</div>' +
-              '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button></div>' +
+              '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">点击选择文件</button>' +
+                ' · <button type="button" class="qc-tpl" title="下载日志记录空表：填上时间码即可，链接留空就导入当前视频">下载空表</button></div>' +
               '<div class="qc-file" hidden></div>' +
             '</div>' +
             '<div class="qc-or">或直接粘贴时间码清单</div>' +
@@ -1771,6 +1772,20 @@ const MPP = (() => {
       };
       m.querySelector('.qc-choose').addEventListener('click', () => picker.click());
       picker.addEventListener('change', () => { setFiles([...picker.files]); picker.value = ''; });
+      // 下载「日志记录空表」：只填时间码即可 —— 有链接按链接归属，链接留空就导入当前视频
+      m.querySelector('.qc-tpl').addEventListener('click', () => {
+        if (!window.XlsxWriter) { panelToast('无法生成空表'); return; }
+        const mkRows = [['序号', '时间码', '颜色', '备注', '链接', '标题']];
+        const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
+        for (let i = 0; i < 30; i++) { mkRows.push(['', '', '', '', '', '']); ioRows.push(['', '', '', '', '', '', '']); }
+        const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = '日志记录空表.xlsx';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        panelToast('已下载空表：填好时间码后拖回来即可导入');
+      });
       // 拖放区：把表格拖进来即读取（阻止冒泡，避免面板的全局 drop 再开一个弹窗）
       ['dragenter', 'dragover'].forEach(ev => dropEl.addEventListener(ev, e => {
         e.preventDefault(); e.stopPropagation();
@@ -1949,13 +1964,16 @@ const MPP = (() => {
       } catch (e) { data = null; }
       const marks = (data && data.marks) || [];
       const inOut = (data && data.inOut) || [];
+      const sheetNames = ((data && data.sheets) || []).map(s => (s && s.name) || '');
+      // 表名带「标记 |」/「片段 |」就是本插件导出的两张表（可能还没填记录，只有表头）
+      const ourSheets = sheetNames.some(n => /标记\s*\|/.test(n) || /片段\s*\|/.test(n));
       out.push({
         name: f.name || '导入.xlsx',
         sheets: (data && data.sheets) || [],
         marks: marks,
         inOut: inOut,
-        // 本插件导出的日志（标记 / 片段两张表，表头固定）→ 直接合并，不用弹窗选表
-        plugin: (marks.length > 1 || inOut.length > 1)
+        // 本插件格式 → 直接按链接归属合并，不用弹窗选表
+        plugin: (marks.length >= 1 || inOut.length >= 1 || ourSheets)
       });
     }
     return out;
@@ -2042,14 +2060,8 @@ const MPP = (() => {
     const files = await readSheetFiles(fileList);
     const recs = [];
     const qcFiles = [];        // 记录表格（非本插件导出）：交给导入记录流程，弹窗里选工作表 / 用 AI
-    let filesOk = 0;
+    let pluginEmpty = false;   // 本插件格式但还没填记录（如刚下载的空表）
     for (const f of files) {
-      if (!f.sheets.length && !f.marks.length && !f.inOut.length) {
-        // 读不出来（或不是本插件的两张表）也交给导入弹窗：可用 AI 提示词转换后粘贴导入
-        if (window.QcImport) qcFiles.push({ name: f.name, sheets: [] });
-        continue;
-      }
-      filesOk++;
       let n = 0;
       (f.marks || []).slice(1).forEach(r => {
         if (!r[1]) return;
@@ -2061,8 +2073,11 @@ const MPP = (() => {
         n++;
         recs.push({ kind: 'inOut', inTC: r[1], outTC: r[2], dur: parseFloat(r[3]) || 0, note: r[4] || null, url: r[5] || '', title: r[6] || '' });
       });
-      // 不是本插件导出格式 → 按记录表处理（工作表 / 分节由用户在弹窗里选择）
-      if (!n && window.QcImport) qcFiles.push({ name: f.name, sheets: f.sheets || [] });
+      if (n) continue;
+      // 本插件格式（含只有表头的空表）：没记录就说清楚，不要丢给记录表弹窗
+      if (f.plugin) { pluginEmpty = true; continue; }
+      // 其它情况按记录表处理（工作表 / 分节由用户在弹窗里选择）
+      if (window.QcImport) qcFiles.push({ name: f.name, sheets: f.sheets || [] });
     }
     if (!recs.length) {
       if (qcFiles.length) {
@@ -2074,31 +2089,39 @@ const MPP = (() => {
         load(true);
         return;
       }
-      panelToast('无法解析 Excel（支持本插件导出的 xlsx 与记录表格，也可在导入弹窗里用 AI 提示词转换）');
+      panelToast(pluginEmpty
+        ? '空表里还没有记录：填好时间码后再导入'
+        : '无法解析 Excel（支持本插件导出的 xlsx 与记录表格，也可在导入弹窗里用 AI 提示词转换）');
       return;
     }
-    // 页面校准帧率：时间码换算与导出时保持一致（FPS≠25 时避免秒数偏移）
-    let importFps = 25;
+    // 页面的校准帧率与视频 key：时间码换算与导出时保持一致；key 用于「没填链接」的记录
+    let importFps = 25, pageKey = null;
     try { importFps = (await execInPage(fnGetFps)) || 25; } catch (e) { }
+    try { pageKey = await execInPage(fnPageKey); } catch (e) { }
+    // 归属：**优先按链接**；链接为空（或读不出关键信息）→ 当作当前视频导入
     const groups = {};
     recs.forEach(r => {
-      const key = keyFromUrl(r.url) || 'unknown';
+      const key = keyFromUrl(r.url) || pageKey || 'unknown';
       (groups[key] = groups[key] || []).push(r);
     });
+    // 时间码容错：日志表里手填的紧凑写法（00011218 / 011218 / 0112）与中文冒号也要认；
+    // 认不出再退回原来的严格换算
+    const tcSec = (tc, fps) => {
+      const v = parseTcInput(tc, fps);
+      return v == null ? tcToSec(tc, fps) : v;
+    };
     // 与当前视频页匹配的记录 → 合并进页面日志（去重后追加，日志面板实时可见）
-    let pageKey = null;
-    try { pageKey = await execInPage(fnPageKey); } catch (e) { }
     const pageRecs = pageKey ? (groups[pageKey] || []) : [];
     let pageAdded = 0;
     if (pageRecs.length) {
       try {
         const mk = pageRecs.filter(r => r.kind === 'marks').map(r => ({
-          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc, importFps),
+          time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.tc, importFps),
           tc: r.tc, color: r.color, note: r.note
         }));
         const io = pageRecs.filter(r => r.kind === 'inOut').map(r => ({
-          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC, importFps),
-          inTC: r.inTC, outTime: tcToSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
+          inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.inTC, importFps),
+          inTC: r.inTC, outTime: tcSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
         }));
         pageAdded = (await execInPage(fnImportLogs, [mk, io])) || 0;
       } catch (e) { }
@@ -2117,14 +2140,14 @@ const MPP = (() => {
       rs.forEach(r => {
         if (r.kind === 'marks') {
           if (mkTcs.has(r.tc)) return;
-          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.tc, importFps), tc: r.tc, color: r.color, note: r.note });
+          entry.marks.push({ time: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.tc, importFps), tc: r.tc, color: r.color, note: r.note });
           mkTcs.add(r.tc); impAdded++;
         } else {
           const k2 = r.inTC + '|' + r.outTC;
           if (ioTcs.has(k2)) return;
           entry.inOut.push({
-            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcToSec(r.inTC, importFps),
-            inTC: r.inTC, outTime: tcToSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
+            inTime: timeFromUrl(r.url) != null ? timeFromUrl(r.url) : tcSec(r.inTC, importFps),
+            inTC: r.inTC, outTime: tcSec(r.outTC, importFps), outTC: r.outTC, dur: r.dur, note: r.note
           });
           ioTcs.add(k2); impAdded++;
         }
