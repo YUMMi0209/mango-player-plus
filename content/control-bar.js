@@ -320,16 +320,14 @@
 	  font-size:12px;font-family:inherit;cursor:pointer;
 	}
 	#mgp-seek-go:hover{background:#ff6a1a}
-	/* 6 位数字两种读法：居中弹窗确认（默认分:秒:帧，点一下即跳转） */
+	/* 6 位数字两种读法：居中弹窗，只有两个选项（默认分:秒:帧，点一下即跳转） */
 	#mgp-tc-modal{position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:auto}
 	#mgp-tc-modal .mgp-tc-card{
 	  min-width:200px;max-width:min(320px,90%);box-sizing:border-box;
 	  background:rgba(20,20,26,.98);border:1px solid rgba(255,255,255,.15);border-radius:8px;
-	  padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,.6);
+	  padding:10px;box-shadow:0 12px 32px rgba(0,0,0,.6);
 	  font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#fff;
 	}
-	#mgp-tc-modal .mgp-tc-title{font-size:13px;font-weight:600;margin-bottom:6px}
-	#mgp-tc-modal .mgp-tc-msg{font-size:11px;color:#9a9aa5;line-height:1.5;margin-bottom:10px}
 	#mgp-tc-modal .mgp-tc-opts{display:flex;flex-direction:column;gap:6px}
 	#mgp-tc-modal .mgp-tc-opt{
 	  display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -832,7 +830,7 @@
     return null;
   }
 
-  // 读法确认弹窗（居中卡片，盖住画面）：默认选中「分:秒:帧」——
+  // 读法确认弹窗（居中卡片，盖住画面）：只有两个读法选项，默认选中「分:秒:帧」——
   // 点某个读法即跳转 / ↑↓ 选择后 Enter 跳转 / 点弹窗以外或 Esc 取消
   let tcFormOpen = null;
   function askTCForm(res, onPick) {
@@ -842,8 +840,6 @@
     wrap.id = 'mgp-tc-modal';
     wrap.innerHTML =
       '<div class="mgp-tc-card">' +
-        '<div class="mgp-tc-title">确认时间码读法</div>' +
-        '<div class="mgp-tc-msg">' + res.raw + ' 有两种读法，点一下跳转</div>' +
         '<div class="mgp-tc-opts">' +
           res.options.map((o, i) => '<div class="mgp-tc-opt' + (i === 0 ? ' on' : '') + '" data-i="' + i + '">' +
             '<em>' + o.formName + '</em><b>' + fmtTC(o.sec) + '</b></div>').join('') +
@@ -917,7 +913,7 @@
       if (!res.ok) { mgpToast('无法识别的时间码', true); input.focus(); input.select(); return; }
       // 6 位两种读法都成立 → 弹窗确认（默认分:秒:帧）；取消则回到输入框继续改
       if (res.ambiguous) {
-        askTCForm({ raw: raw, options: res.options }, sec => {
+        askTCForm({ options: res.options }, sec => {
           if (sec == null) { input.focus(); input.select(); return; }
           jump(sec);
         });

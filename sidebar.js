@@ -44,6 +44,7 @@
     histList: '#hist-list',
     histImport: '#hist-import',
     histAll: '#hist-all',
+    histExport: '#hist-export',
     histClear: '#hist-clear'
   });
 

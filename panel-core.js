@@ -259,6 +259,27 @@ const MPP = (() => {
     out.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
     return { items: out, zeroKeys };
   }
+  // 历史批量导出：按 videoKey 取本地记录明细（同一站点所有视频的记录都在本页 localStorage 里）
+  // 只取需要的那几个 key，避免把整份记录都传回面板
+  function fnLogsFor(keys) {
+    let map = {}, titles = {};
+    try { map = JSON.parse(localStorage.getItem('mpp_logs') || '{}') || {}; } catch (e) { }
+    try { titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {}; } catch (e) { }
+    if (map && Array.isArray(map.inOut)) map = {};
+    const out = {};
+    (Array.isArray(keys) ? keys : []).forEach(k => {
+      const e = map[k];
+      if (!e) return;
+      const t = titles[k] || {};
+      out[k] = {
+        marks: Array.isArray(e.marks) ? e.marks : [],
+        inOut: Array.isArray(e.inOut) ? e.inOut : [],
+        title: String(t.title || '').trim(),
+        url: t.url || ''
+      };
+    });
+    return out;
+  }
   // v2.0 历史：按 videoKey 批量清除；若包含当前视频则同时重置页面端状态
   function fnRemoveHistory(keys) {
     function vkey() {
@@ -597,6 +618,7 @@ const MPP = (() => {
     els.histList = $(cfg.histList);
     els.histImport = $(cfg.histImport);
     els.histAll = $(cfg.histAll);
+    els.histExport = $(cfg.histExport);
     els.histClear = $(cfg.histClear);
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
     bindList(els.mkList);
@@ -1400,6 +1422,16 @@ const MPP = (() => {
     if (els.historyMenu && !els.historyMenu.hidden) loadHistory();
   }
 
+  // 触发一次浏览器下载（导出日志 / 下载空表 / 历史批量导出共用）
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   async function exportExcel() {
     const ioIdx = [...sel.io].sort((a, b) => a - b);
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
@@ -1416,13 +1448,7 @@ const MPP = (() => {
       const hex = markColor(m);
       mkRows.push([String(n + 1), m.tc, hex ? colorName(hex) : '无', m.note || '', linkFor(m.time, m.url), m.title || '']);
     });
-    const blob = new Blob([XlsxWriter.build(mkRows, ioRows)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = fileName();
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([XlsxWriter.build(mkRows, ioRows)], { type: XLSX_MIME }), fileName());
     panelToast('已导出记录');
   }
 
@@ -1564,6 +1590,7 @@ const MPP = (() => {
           const chk = item.querySelector('.chk');
           if (chk) chk.checked = histSel.has(key);
           if (els.histClear) els.histClear.disabled = histSel.size === 0;
+          if (els.histExport) els.histExport.disabled = histSel.size === 0;
           saveHistSel();
           return;
         }
@@ -1619,6 +1646,115 @@ const MPP = (() => {
       load(true);
       panelToast('已清除 ' + keys.length + ' 个视频的记录');
     });
+    if (els.histExport) els.histExport.addEventListener('click', () => {
+      exportHistory().catch(e => panelToast('导出失败：' + ((e && e.message) || e)));
+    });
+  }
+
+  // ─── 历史批量导出：多选视频 → 每个视频一份日志表（两个以上打包成一个 zip）────
+  // 记录来源：① 页面本地记录（同一站点所有视频都在 localStorage.mpp_logs 里）
+  //          ② 导入明细（mpp_imported，跨站点汇总的导入记录）
+  // 两者按时间码去重合并；只有计数、拿不到明细的视频会跳过并先告知
+  // 导出的表格与「导出日志」同一套列与文本格式，链接带 #mpp= 定位，可再导回来
+  function buildLogRows(title, url, marks, inOut, fps) {
+    const F = fps > 0 ? fps : 25;
+    const link = t => {
+      const base = String(url || '').split('#')[0];
+      try { return /mgtv\.com$/.test(new URL(base).hostname) ? base + '#mpp=' + t : base; } catch (e) { return base; }
+    };
+    // 时间码统一成标准形式；识别不了就原样保留
+    const tcOf = (tc, t) => {
+      const sec = (t != null && isFinite(t)) ? Number(t) : parseTcInput(tc, F);
+      return sec == null ? (tc || '') : fmtTcStd(sec, F);
+    };
+    const mkRows = [['序号', '时间码', '颜色', '备注', '链接', '标题']];
+    const ioRows = [['序号', '入点时间码', '出点时间码', '时长', '备注', '入点链接', '标题']];
+    inOut.forEach((u, i) => {
+      ioRows.push([String(i + 1), tcOf(u.inTC, u.inTime), tcOf(u.outTC, u.outTime), fmtDur(durOf(u)),
+        u.note || '', link(Number(u.inTime) || 0), title]);
+    });
+    marks.forEach((m, i) => {
+      const hex = markColor(m);
+      mkRows.push([String(i + 1), tcOf(m.tc, m.time), hex ? colorName(hex) : '无', m.note || '',
+        link(Number(m.time) || 0), title]);
+    });
+    return { mkRows, ioRows, count: marks.length + inOut.length };
+  }
+
+  async function exportHistory() {
+    const keys = histItems.filter(it => histSel.has(it.key)).map(it => it.key);
+    if (!keys.length) return;
+    let fps = 25;
+    try { fps = (await execInPage(fnGetFps)) || 25; } catch (e) { }
+    let localMap = {};
+    try { localMap = (await execInPage(fnLogsFor, [keys])) || {}; } catch (e) { }
+    const impMap = await chrome.storage.local.get('mpp_imported').then(({ mpp_imported }) =>
+      (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {}
+    ).catch(() => ({}));
+
+    const normMk = m => {
+      const t = (m && m.time != null && isFinite(m.time)) ? Number(m.time) : parseTcInput(m && m.tc, fps);
+      const sec = t == null ? 0 : t;
+      return { time: sec, tc: fmtTcStd(sec, fps), color: (m && m.color) || null, note: (m && m.note) || null };
+    };
+    const normIo = u => {
+      const a = (u && u.inTime != null && isFinite(u.inTime)) ? Number(u.inTime) : (parseTcInput(u && u.inTC, fps) || 0);
+      const b = (u && u.outTime != null && isFinite(u.outTime)) ? Number(u.outTime) : (parseTcInput(u && u.outTC, fps) || 0);
+      return { inTime: a, outTime: b, inTC: fmtTcStd(a, fps), outTC: fmtTcStd(b, fps), dur: Math.max(0, b - a), note: (u && u.note) || null };
+    };
+
+    const packs = [], missing = [];
+    keys.forEach(key => {
+      const it = histItems.filter(x => x.key === key)[0] || {};
+      const marks = [], inOut = [];
+      const seenMk = new Set(), seenIo = new Set();
+      [localMap[key], impMap[key]].forEach(src => {
+        if (!src) return;
+        (src.marks || []).forEach(m => { const n = normMk(m); if (!seenMk.has(n.tc)) { seenMk.add(n.tc); marks.push(n); } });
+        (src.inOut || []).forEach(u => {
+          const n = normIo(u), k2 = n.inTC + '|' + n.outTC;
+          if (!seenIo.has(k2)) { seenIo.add(k2); inOut.push(n); }
+        });
+      });
+      marks.sort((a, b) => a.time - b.time);
+      inOut.sort((a, b) => a.inTime - b.inTime);
+      const title = (it.title || (localMap[key] && localMap[key].title) || (impMap[key] && impMap[key].title) || key).toString();
+      const url = it.url || (localMap[key] && localMap[key].url) || (impMap[key] && impMap[key].url) || '';
+      if (!marks.length && !inOut.length) { missing.push(title); return; }
+      packs.push({ key, title, url, marks, inOut });
+    });
+
+    if (!packs.length) { panelToast('选中的视频只有记录条数，没有可导出的记录明细'); return; }
+    if (missing.length) {
+      const ok = await confirmDlg(
+        '选中的 ' + keys.length + ' 个视频里有 ' + missing.length + ' 个只有记录条数（本地已无明细），导出其余 ' + packs.length + ' 个视频的日志？',
+        '导出');
+      if (!ok) return;
+    }
+
+    const stamp = stampNow();
+    const used = new Set();
+    const files = packs.map(p => {
+      let base = sanitizeName(p.title).replace(/\s+/g, '_').slice(0, 24) || '日志记录';
+      let name = base + '_日志记录_' + stamp + '.xlsx';
+      let n = 2;
+      while (used.has(name)) name = base + '_日志记录_' + stamp + '_' + (n++) + '.xlsx';
+      used.add(name);
+      const r = buildLogRows(p.title, p.url, p.marks, p.inOut, fps);
+      return { name: name, data: new Uint8Array(XlsxWriter.build(r.mkRows, r.ioRows)), count: r.count };
+    });
+    const total = files.reduce((s, f) => s + f.count, 0);
+    const skipped = missing.length ? '，另有 ' + missing.length + ' 个没有明细已跳过' : '';
+
+    if (files.length === 1) {
+      downloadBlob(new Blob([files[0].data], { type: XLSX_MIME }), files[0].name);
+      panelToast('已导出「' + sanitizeName(packs[0].title).slice(0, 16) + '」的日志（' + total + ' 条）' + skipped);
+      return;
+    }
+    if (!XlsxWriter.zip) { panelToast('无法打包 zip，请单个导出'); return; }
+    const zipName = '日志记录_批量导出' + files.length + '个_' + stamp + '.zip';
+    downloadBlob(new Blob([XlsxWriter.zip(files.map(f => ({ name: f.name, data: f.data })))], { type: 'application/zip' }), zipName);
+    panelToast('已导出 ' + files.length + ' 个视频的日志（' + total + ' 条），已打包为 zip' + skipped);
   }
 
   // ─── 日志 Excel 导入（仅支持本插件导出的 xlsx）──
@@ -1889,12 +2025,7 @@ const MPP = (() => {
         const mkRows = [['时间码', '备注']];
         const ioRows = [['入点时间码', '出点时间码', '备注']];
         for (let i = 0; i < 30; i++) { mkRows.push(['', '']); ioRows.push(['', '', '']); }
-        const blob = new Blob([XlsxWriter.build(mkRows, ioRows, { mk: [16, 46], io: [16, 16, 46] })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = '日志记录空表.xlsx';
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadBlob(new Blob([XlsxWriter.build(mkRows, ioRows, { mk: [16, 46], io: [16, 16, 46] })], { type: XLSX_MIME }), '日志记录空表.xlsx');
         panelToast('已下载空表：填好时间码后拖回来即可导入');
       });
       // 拖放区：把表格拖进来即读取（阻止冒泡，避免面板的全局 drop 再开一个弹窗）
@@ -2420,6 +2551,7 @@ const MPP = (() => {
     if (!list) return;
     list.innerHTML = '';
     if (els.histClear) els.histClear.disabled = histSel.size === 0;
+    if (els.histExport) els.histExport.disabled = histSel.size === 0;
     if (!histItems.length) {
       list.innerHTML = '<div class="hist-empty">暂无历史记录</div>';
       return;
@@ -2595,5 +2727,5 @@ const MPP = (() => {
   }
 
   // _test：仅供开发自检脚本调用（Material/qc-dev/test-panel-ui.js），扩展运行时不使用
-  return { init, load, setTab, _test: { qcDialog, openQcImport, buildQcCands, aiPrompt, chooseTcForm, analyzeTcInput, firstSixDigit } };
+  return { init, load, setTab, _test: { qcDialog, openQcImport, buildQcCands, aiPrompt, chooseTcForm, analyzeTcInput, firstSixDigit, exportHistory } };
 })();
