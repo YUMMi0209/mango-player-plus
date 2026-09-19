@@ -319,8 +319,8 @@
   letter-spacing:.5px;
 }
 .b-pl{background:#ff5f00;color:#fff}
-/* 实时时间模式：播放中显示 LIVE（红色，一眼能看出当前是系统时间码） */
-.b-lv{background:#e74c3c;color:#fff}
+/* 实时时间模式：播放中显示 LIVE（与 PLAY 同色，仅文案不同） */
+.b-lv{background:#ff5f00;color:#fff}
 .b-st{background:#555;color:#ddd}
 .b-rec{background:#e74c3c;color:#fff}
 .b-in{background:#3498db;color:#fff}
@@ -543,10 +543,67 @@
     }
     return video ? video.currentTime : 0;
   }
-  // 跳转目标对齐到帧起点（+ 浮点 epsilon）：直接 seek 到帧边界间的连续值会渲染
-  // mediaTime ≤ 目标 的最近帧，导致显示比标记时间码早一帧
-  function alignToFrame(t) {
-    return Math.round(t * FPS) / FPS + 1e-4;
+  // 跳转 + 自动校正：站点自己的播放器（芒果TV 等）会把 seek 吸附到更早的位置，
+  // 表现为「点日志时间码跳过去，画面比记录的时间码早几帧」。做法是 seek 之后核对
+  // **实际渲染帧**（rVFC 的 mediaTime）与目标帧的差，偏早就按实测误差补偿后再 seek 一次
+  // （最多两轮）。第一个目标取帧起点 + 极小 epsilon，补偿轮取「目标帧 + 误差 + 半帧」，
+  // 这样即使播放器固定往前吸附若干帧，也能落到目标帧上。
+  function jumpAligned(t, opts) {
+    // opts.video：页面首次加载时控制栏的 video 可能还没挂上，允许调用方直接传元素
+    // opts.keepPlaying：不暂停（用于链接定位，保持原来的「跳过去继续播」行为）
+    // opts.onDone：校正结束（落点已定）后回调，用于提示里显示真实落点
+    // opts.cancelled：返回 true 时立即放弃（批量任务被 Esc 取消）
+    const v = (opts && opts.video) || video;
+    if (!v || t == null || !isFinite(t) || t < 0) return false;
+    const F = FPS > 0 ? FPS : 25;
+    const dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
+    let frameStart = Math.round(t * F) / F;   // 帧起点
+    if (dur > 0) frameStart = Math.min(frameStart, Math.max(0, dur - 1 / F));
+    const pauseAfter = !(opts && opts.keepPlaying);
+    const done = opts && opts.onDone;
+    const cancelled = opts && opts.cancelled;
+    const isCancelled = () => { try { return !!(cancelled && cancelled()); } catch (e) { return false; } };
+    let tries = 0, ended = false;
+    const finish = () => { ended = true; if (done) { try { done(); } catch (e) { } } };
+    const seek = extra => {
+      if (ended || isCancelled()) { ended = true; return; }
+      tries++;
+      let target = frameStart + (extra || 0);
+      if (tries === 1) target = frameStart + 1e-4;
+      if (dur > 0) target = Math.min(target, Math.max(0, dur - 1 / F / 2));
+      if (pauseAfter) { try { v.pause(); resetSpeed(); } catch (e) { } }
+      let settled = false;
+      let fallback = 0;
+      const verify = () => {
+        if (settled || ended) return;
+        settled = true;
+        try { v.removeEventListener('seeked', onSeeked); } catch (e) { }
+        clearTimeout(fallback);
+        if (isCancelled()) { ended = true; return; }
+        const mt = lastFrameMediaTime;
+        const err = (mt == null) ? 0 : (frameStart - mt);       // >0：落早了
+        // 偏早就按实测误差补偿再 seek 一次（最多两轮）；误差在 1 帧内即认为落点正确
+        if (err > 0.6 / F && tries < 3) { seek(err + 0.5 / F); return; }
+        finish();
+      };
+      const onSeeked = () => {
+        // seeked 之后还要等新的一帧真正渲染出来，rVFC 是最可靠的信号
+        if (typeof v.requestVideoFrameCallback === 'function') {
+          try { v.requestVideoFrameCallback(() => setTimeout(verify, 60)); } catch (e) { setTimeout(verify, 200); }
+        } else setTimeout(verify, 200);
+      };
+      try {
+        v.addEventListener('seeked', onSeeked);
+        v.currentTime = target;
+      } catch (e) {
+        try { v.removeEventListener('seeked', onSeeked); } catch (x) { }
+        finish();
+        return;
+      }
+      fallback = setTimeout(verify, 900);
+    };
+    seek(0);
+    return true;
   }
 
   function inject(v) {
@@ -944,8 +1001,7 @@
     };
     const jump = t => {
       if (t == null || !video) return;
-      try { video.currentTime = Math.max(0, Math.min(alignToFrame(t), video.duration || t)); } catch (e) { }
-      mgpToast('已跳转 ' + fmtTC(dispTime()));
+      jumpAligned(t, { onDone: () => { try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { } } });
       close();
     };
     const go = () => {
@@ -2019,10 +2075,10 @@
   // 网络波动/播放器重建可能把 playbackRate 重置为 1，但状态仍应保持设定倍速：
   // 每帧校验实际倍速，偏离时按 curSpeed 重新应用，避免"标签显示 8X 实际却 1X"
   function enforceSpeed() { if (!video) return; if (curSpeed !== 1 && Math.abs(video.playbackRate - curSpeed) > 0.01) video.playbackRate = curSpeed; }
-  // 跳转到记录时刻：统一经 alignToFrame 对齐到帧起点（直接 seek 到帧边界之间
-  // 会渲染出比目标早一帧的画面，导致跳转后画面与记录时间码不符）
-  function jumpIn() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.inPoint); video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
-  function jumpOut() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.outPoint); video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  // 跳转到记录时刻：统一走 jumpAligned（帧对齐 + 落点核对补偿），避免跳转后
+  // 画面与记录时间码不符（站点播放器会把 seek 吸附到更早的位置）
+  function jumpIn() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.inPoint === null || !video) return; recStopTime = null; jumpAligned(state.inPoint); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpOut() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.outPoint === null || !video) return; recStopTime = null; jumpAligned(state.outPoint); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
@@ -2041,7 +2097,7 @@
     // Shift combos
     if (e.shiftKey && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); jumpIn(); return; }
     if (e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); jumpOut(); return; }
-    if (e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); if (state.markTime !== null) { video.currentTime = alignToFrame(state.markTime); video.pause(); resetSpeed(); state.tcMode = 'mk'; mgpToast('标记点 ( ' + fmtTC(state.markTime) + ' )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); } return; }
+    if (e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); if (state.markTime !== null) { jumpAligned(state.markTime); state.tcMode = 'mk'; mgpToast('标记点 ( ' + fmtTC(state.markTime) + ' )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); } return; }
     // Shift+S：截图并在标注窗口中标注（红框 / 白边红字文本），Enter 保存 / Esc 取消
     if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); openAnnotate(); return; }
     if (e.shiftKey) return;
@@ -2198,6 +2254,14 @@
       ctx.fillStyle = ANN_THEME;
       ctx.fillText(annTC, tx, ty);
     }
+  }
+
+  // 文本标注字号（按截图原始尺寸换算）：跟着画面宽度走，1080p 约 51px、720p 约 34px。
+  // 用户反馈偏小，这里把系数从 width/50 提到 width/38、下限从 18 提到 28
+  // （输入框预览字号按 annScale 同比例换算，所以框里框外一致）
+  function annTextFontSize() {
+    const w = (annSource && annSource.width) || 1280;
+    return Math.max(28, Math.round(w / 38));
   }
 
   // 确认文本标注：绘制到截图并关闭输入框
@@ -2389,7 +2453,7 @@
         }
       } else {
         // 点击 → 在该位置打开文本标注输入框
-        annPendingText = { x: p.x, y: p.y, fs: Math.max(18, Math.round(annSource.width / 50)) };
+        annPendingText = { x: p.x, y: p.y, fs: annTextFontSize() };
         inp.value = '';
         inp.style.left = Math.round(p.x * annScale + 10) + 'px';
         inp.style.top = Math.round(p.y * annScale + 10) + 'px';
@@ -2538,7 +2602,7 @@
       if (m) {
         const t = parseFloat(m[1]);
         // 对齐到帧起点，保证链接打开后画面与记录的时间码一致
-        if (!isNaN(t) && isFinite(t)) v.currentTime = alignToFrame(t);
+        if (!isNaN(t) && isFinite(t)) jumpAligned(t, { video: v, keepPlaying: true });
       }
     } catch (e) { }
   }
@@ -2559,33 +2623,22 @@
     mgpToast('正在取消批量任务…', true);
     return true;
   }
-  // 跳转并等待画面稳定：seeked 事件 + 一帧实际渲染（保证取到目标帧而非旧帧）
+  // 跳转并等待画面稳定：走 jumpAligned 的帧级校正（站点播放器会把 seek 吸附到更早的
+  // 位置），落点确定后才 resolve —— 批量截图 / 批量录制取到的就是目标帧
   function seekAndSettle(t) {
     return new Promise(resolve => {
       if (!video || batchCancel) { resolve(); return; }
       let done = false;
       let timer = null;
-      // 取消轮询：等待期间按 Esc 立即结束等待，不再空等 seeked / 超时
+      // 取消轮询：等待期间按 Esc 立即结束等待，不再空等
       const cancelTimer = setInterval(() => { if (batchCancel) finish(); }, 80);
       const cleanup = () => {
-        try { video.removeEventListener('seeked', onSeeked); } catch (e) { }
         clearTimeout(timer);
         clearInterval(cancelTimer);
       };
       const finish = () => { if (done) return; done = true; cleanup(); resolve(); };
-      const onSeeked = () => {
-        if (typeof video.requestVideoFrameCallback === 'function') {
-          try {
-            video.requestVideoFrameCallback(() => finish());
-            setTimeout(finish, 600);   // 兜底：视频暂停时 rVFC 可能不再触发
-          } catch (e) { setTimeout(finish, 150); }
-        } else {
-          setTimeout(finish, 150);
-        }
-      };
       try { video.pause(); } catch (e) { }
-      try { video.currentTime = alignToFrame(Math.max(0, t)); } catch (e) { finish(); return; }
-      video.addEventListener('seeked', onSeeked);
+      jumpAligned(Math.max(0, t), { cancelled: () => batchCancel, onDone: finish });
       timer = setTimeout(finish, 5000);   // 整体超时兜底
     });
   }
@@ -2710,10 +2763,8 @@
     jumpTo(t) {
       if (rtOn()) { try { mgpToast('实时时间模式：已停用按时间码跳转', true); } catch (e) { } return false; }
       if (!video) return false;
-      video.currentTime = alignToFrame(t);
-      video.pause();
-      resetSpeed();
-      try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { }
+      // 提示在落点确定后再读：dispTime() 才是校正后的真实画面时间
+      jumpAligned(t, { onDone: () => { try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { } } });
       return true;
     },
     removeLogs(selObj) {
