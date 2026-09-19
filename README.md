@@ -476,12 +476,22 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 ```text
 video.requestVideoFrameCallback  →  源视频每来一个新帧才绘制一次（按 mediaTime 去重）
 canvas.captureStream()           →  画布每画一次产一帧，时间戳就是真实绘制时刻
-MediaRecorder                    →  H.264 + AAC（码率 1080p 16Mbps / 720p 10Mbps / 4K 45Mbps）
+MediaRecorder                    →  H.264 + AAC（请求码率 4K 80 / 1080p 40 / 720p 24 Mbps）
 ```
 
 - **不做定时重绘**：全尺寸 `drawImage`（1080p 每帧约 8MB 像素搬运）是主线程最大开销，画得越少留给编码器的 CPU 越多
 - **不做定帧率重打时间戳**：帧数 ≈ 源帧数、没有重复帧也没有时间戳重排，播放最顺（此前的「定帧率采集 + 节拍器重打时间戳」会因网格与源节奏抖动插重复帧或丢帧，反而发顿）
 - **不再中途自动降级**：改帧率要重建时间戳网格，反而引入卡顿；编码吃力时只在诊断日志里标注 `encoderSlow`
+- **码率**：`MediaRecorder` 的 `videoBitsPerSecond` 只是目标值，Chromium 的 H.264 编码器实测**只按约 42% 兑现**（1080p 请求 16Mbps → 实得 7.6Mbps；请求 48Mbps → 实得 20Mbps，线性关系、不会饱和）。所以按「想要多少 ÷ 0.42」反推请求值：
+
+  | 分辨率 | 请求码率 | 实测实得 |
+  | --- | --- | --- |
+  | 4K（≥2160p） | 80 Mbps | ≈34 Mbps |
+  | 1080p | 40 Mbps | ≈17 Mbps |
+  | 720p | 24 Mbps | ≈10 Mbps |
+  | 更小 | 16 Mbps | ≈6.7 Mbps |
+
+  实测脚本：`Material/qc-dev/probe-rec-bitrate.js`（真机录制 + ffprobe 读实际码率）
 - 排障时可在视频页控制台看录制诊断：`[MGP-REC] saved {...}` 里的 `fps` / `draws` / `chunkCount` / `videoBits` / `encoderSlow` 能看出实际绘制与编码情况
 
 ---

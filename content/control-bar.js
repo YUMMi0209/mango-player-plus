@@ -1289,13 +1289,18 @@
     const mt = pickRecMime();
     if (!/mp4a/.test(mt)) console.info('[MGP-REC] 本机不支持 MP4+AAC，本次录制可能没有声音：' + mt);
 
-    // 目标码率：按画布分辨率档位取值（对齐 v1.0 的偏高码率，画面明显更实）。
-    // MediaRecorder 中途无法改码率，必须一次到位；H.264 走硬件编码时高码率几乎不增加 CPU
+    // 目标码率：按画布分辨率档位取值。
+    // ⚠️ MediaRecorder 的 videoBitsPerSecond 只是「目标值」，Chromium 的 H.264 编码器
+    // 实测只按约 42% 兑现（1080p 请求 16Mbps → 实际约 7.6Mbps，请求 48Mbps → 实际约 20Mbps，
+    // 线性关系、不会饱和）。所以这里按「想要的实得码率 ÷ 0.42」反推请求值：
+    //   4K → 请求 80Mbps（实得约 34Mbps）· 1080p → 40Mbps（约 17Mbps）
+    //   720p → 24Mbps（约 10Mbps）· 更小 → 16Mbps（约 6.7Mbps）
+    // 实测见 Material/qc-dev/probe-rec-bitrate.js。H.264 走硬件编码，提高码率几乎不增加 CPU
     const recPx = recCanvas.width * recCanvas.height;
-    const videoBits = recPx >= 3840 * 2160 ? 45000000
-      : recPx >= 1920 * 1080 ? 16000000
-      : recPx >= 1280 * 720 ? 10000000
-      : 6000000;
+    const videoBits = recPx >= 3840 * 2160 ? 80000000
+      : recPx >= 1920 * 1080 ? 40000000
+      : recPx >= 1280 * 720 ? 24000000
+      : 16000000;
     try {
       recMediaRecorder = new MediaRecorder(recStream, {
         mimeType: mt,
