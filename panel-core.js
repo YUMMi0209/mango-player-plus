@@ -594,7 +594,6 @@ const MPP = (() => {
     els.togShot = $(cfg.togShot);
     els.togAvoid = $(cfg.togAvoid);
     els.togPip = $(cfg.togPip);
-    els.selCodec = $(cfg.selCodec);
     els.togBar = $(cfg.togBar);
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
@@ -2639,23 +2638,12 @@ const MPP = (() => {
         els.settingsMenu.hidden = true;
       }
     });
-    // 录制编码：新值 h264 / h264-low / vp8 / vp9（默认 h264）；兼容旧值（1080p-* / 720p-*）
-    const LEGACY_CODEC = {
-      '1080p-vp8': 'vp8', '720p-vp8': 'vp8',
-      '1080p-vp9': 'vp9', '720p-vp9': 'vp9',
-      '1080p-h264': 'h264', '720p-h264': 'h264-low'
-    };
-    const CODECS = ['h264', 'h264-low', 'vp8', 'vp9'];
-    function normalizeCodec(v) {
-      const raw = String(v || '');
-      const mapped = LEGACY_CODEC[raw] || raw;
-      return CODECS.indexOf(mapped) >= 0 ? mapped : 'h264';
-    }
+    // 录制编码已固定为 MP4 / H.264 + AAC（下拉已移除）：容器与音频编码最通用。
+    // 旧的 recCodec 设置留着不影响，代码不再消费
     getSettings().then(s => {
       if (els.togBar) els.togBar.checked = s.barEnabled !== false;
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
-      if (els.selCodec) els.selCodec.value = normalizeCodec(s.recCodec);
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
@@ -2665,7 +2653,6 @@ const MPP = (() => {
     if (els.togShot) els.togShot.addEventListener('change', e => savePatch({ autoShot: e.target.checked }));
     if (els.togAvoid) els.togAvoid.addEventListener('change', e => savePatch({ avoidTimecode: e.target.checked }));
     if (els.togPip) els.togPip.addEventListener('change', e => savePatch({ pipRecord: e.target.checked }));
-    if (els.selCodec) els.selCodec.addEventListener('change', e => savePatch({ recCodec: e.target.value }));
     if (els.togBar) els.togBar.addEventListener('change', e => savePatch({ barEnabled: e.target.checked }));
     if (els.togDanmu) els.togDanmu.addEventListener('change', e => savePatch({ danmuBlock: e.target.checked }));
     // 网页全屏按钮：视频铺满当前窗口（非浏览器全屏），ESC 退出；反馈提示统一显示在网页

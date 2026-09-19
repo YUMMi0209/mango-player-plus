@@ -12,7 +12,7 @@
 Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
 1. 获取代码（任选其一）：
-   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v3.4.zip` 并解压；
+   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v3.5.zip` 并解压；
    - 或 `git clone https://github.com/YUMMi0209/mango-player-plus.git` 克隆仓库。
 2. 打开扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
@@ -417,7 +417,7 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 | 打点自动截图 | 开启后 M 打点立即自动截图保存；I 打入点自动截图，O 打出点时保存最后一次 I 时刻的截图 |
 | 时间码显示回避 | 悬浮画面时时间码自动下移避开顶部遮挡；关闭后时间码不再向下移动（默认：芒果TV开启、其他网站关闭） |
 | 文件名包含备注 | 截图 / 录制文件名在时间码后附加该时刻记录的备注（默认启用；日志导出文件名不含备注） |
-| 录制编码 | 四档（默认 **H.264**）：H.264 / 低分辨率 H.264（MP4）· VP8 / VP9（WebM）。除「低分辨率 H.264」固定 720P 外，其余都**跟随视频本身分辨率**；采集帧率跟随源帧率，编码不足时只降帧率（60→50→30→25），不会中途改分辨率 |
+| 录制编码 | 固定 **MP4 · H.264 + AAC**（无选项）：容器与音频编码在播放器 / 剪辑软件里最通用。分辨率**跟随视频本身**（不缩放），画面尺寸与帧率都不做中途调整 |
 | 应用于当前网页（实验） | 在其他非芒果TV网站启用打点与记录，需授予站点权限；授权失败或无法获取页面地址时面板会提示原因 |
 | 网页全屏 | 视频铺满当前窗口（非浏览器全屏），按 ESC 退出 |
 | 重载插件 | 重新加载整个插件：修改代码后一键生效，面板会随之关闭 |
@@ -471,22 +471,18 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
 ### 录制帧率不足 / 画面发顿？
 
-录制编码在设置里选择，**默认 H.264**：
+录制编码固定为 **MP4 · H.264 + AAC**，分辨率跟随视频本身，采集链路与 v1.0 一致（实测最顺）：
 
 ```text
-H.264            ← 默认（MP4，剪辑友好，跟随视频分辨率）
-低分辨率 H.264    （MP4，固定 720P，适合设备吃力时）
-VP8              （WebM，实时性最好）
-VP9              （WebM，压缩率更好，但软件编码更吃 CPU）
+video.requestVideoFrameCallback  →  源视频每来一个新帧才绘制一次（按 mediaTime 去重）
+canvas.captureStream()           →  画布每画一次产一帧，时间戳就是真实绘制时刻
+MediaRecorder                    →  H.264 + AAC（码率 1080p 16Mbps / 720p 10Mbps / 4K 45Mbps）
 ```
 
-分辨率规则：除**低分辨率 H.264 固定 720P** 外，其余三档都**跟随视频本身分辨率**（不缩放、不放大）。
-
-编码全部由 CPU 完成（浏览器不向 MediaRecorder 暴露硬件编码开关），所以：
-
-- **采集帧率跟随源帧率**：源 25 / 30 / 50 / 60fps 就按标准档位采集，输出文件帧率与源一致；编码跟不上时由时间戳节拍器**丢拍**（不挂起、不重复帧）
-- 编码确实跟不上时扩展会**自动降低帧率**（60→50→30→25）并弹出提示；**不会中途改变分辨率**（中途改分辨率会让 MP4/H.264 出现花屏，需要更低分辨率请改用「低分辨率 H.264」重新录制）
-- 排障时可在视频页控制台看录制诊断：`[MGP-REC] saved {...}` 里的 `capFps` / `pacerTicks` / `chunkCount` / `downgrades` 能看出实际帧率与是否降级
+- **不做定时重绘**：全尺寸 `drawImage`（1080p 每帧约 8MB 像素搬运）是主线程最大开销，画得越少留给编码器的 CPU 越多
+- **不做定帧率重打时间戳**：帧数 ≈ 源帧数、没有重复帧也没有时间戳重排，播放最顺（此前的「定帧率采集 + 节拍器重打时间戳」会因网格与源节奏抖动插重复帧或丢帧，反而发顿）
+- **不再中途自动降级**：改帧率要重建时间戳网格，反而引入卡顿；编码吃力时只在诊断日志里标注 `encoderSlow`
+- 排障时可在视频页控制台看录制诊断：`[MGP-REC] saved {...}` 里的 `fps` / `draws` / `chunkCount` / `videoBits` / `encoderSlow` 能看出实际绘制与编码情况
 
 ---
 
@@ -502,20 +498,18 @@ VP9              （WebM，压缩率更好，但软件编码更吃 CPU）
 
 ### 录制出来的视频帧率偏低（如源 25fps 只有 15fps）？
 
-先看控制台 `[MGP-REC] saved {...}` 里的四个数：
+先看控制台 `[MGP-REC] saved {...}`：
 
 | 字段 | 含义 |
 | --- | --- |
-| `capFps` | 目标帧率（跟随源帧率） |
-| `pacerTicks` | 节拍器出的拍数（≈ 录制秒数 × capFps） |
-| `pacerDrops` | 节拍器丢拍数（持续积压才丢） |
-| `pacerWrites` | **实际提交给编码器的帧数** |
+| `fps` | 源视频校准帧率 |
+| `draws` | 实际绘制（= 产出帧）次数；`draws ÷ 录制秒数` ≈ 文件实际帧率 |
+| `chunkCount` / `chunkBytes` | 编码产出的数据块数与字节数（越大说明编码越跟得上） |
+| `encoderSlow` | `ok` / `lowThroughput` / `stalled`：编码器是否吃紧 |
 
-- `pacerWrites ÷ 录制秒数` ≈ 文件的实际帧率
-- 若 `pacerDrops` 很小而帧率仍低 → 瓶颈在**编码器内部丢帧**：换更省 CPU 的档位（如「低分辨率 H.264」或 VP8）重录
-- 若 `pacerDrops` 很大 → 编码器长期吃不住，同样建议降档
-
-已做的优化：绘制频率降到约 1.25× 采样帧率、活性检测改为小画布回读（不再卡主线程）、节拍器只在**持续积压**时丢拍，把 CPU 尽量留给编码器。
+- `draws ÷ 录制秒数` 明显低于 `fps` → 画面源本身没在产新帧（视频卡住 / 页面后台未渲染）
+- `encoderSlow` 非 `ok` → 机器编码能力吃紧：关掉其他吃 CPU 的程序，或降低录制分辨率（本版不提供档位，可用较低清晰度播放后录制）
+- 录制现在**一源帧画一次、不做定时重绘**，也不定时重打时间戳，主线程开销最低
 
 ---
 
@@ -527,23 +521,20 @@ VP9              （WebM，压缩率更好，但软件编码更吃 CPU）
 现在的做法是从源头对齐：
 
 1. 录制转绘时把画面压缩到 limited（`contrast(85.88%)`，255→219），落在 16-235；
-2. 容器标签一并改成 limited：WebM 改 `Colour/Range`（2→1），MP4 改 `SPS VUI` 的
-   `video_full_range_flag` 与 `colr(nclx)` 的 `full_range_flag`（两处一起改，避免不同软件各按各的解释）。
+2. 容器标签一并改成 limited：重封装成经典 MP4 时改 `SPS VUI` 的 `video_full_range_flag`
+   与 `colr(nclx)` 的 `full_range_flag`（两处一起改，避免不同软件各按各的解释）。
 
-这样**看标签的播放器**和**默认按 limited 的剪辑软件**都能还原出原片颜色。注意：
-
-- 截图（`S` 键 PNG）不做压缩，仍是标准 sRGB，在浏览器里看就是原色；
-- **VP9 档不做该修正**：VP9 的范围写在码流内部（uncompressed header 的 `color_range`），
-  容器标签改不动它，只改标签会造成画面与标签错配。VP9 保持「全范围画面 + 全范围标签」不变。
+这样**看标签的播放器**和**默认按 limited 的剪辑软件**都能还原出原片颜色。截图（`S` 键 PNG）
+不做压缩，仍是标准 sRGB，在浏览器里看就是原色。
 
 想核对某个文件的实际色彩信息：
 
 ```bash
-ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt,color_range,color_space -of default=nw=1 "录制文件.webm"
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt,color_range,color_space -of default=nw=1 "录制文件.mp4"
 ```
 
-正常应看到 `color_range=tv`（limited）。控制台 `[MGP-REC] saved {...}` 里的 `rangeTag`
-也会记录本次录制改写标签的结果（`Range 2→1 ✓` / `limited×1` / `off(vp9)`）。
+正常应看到 `color_range=tv`（limited）。控制台 `[MGP-REC] remux ok {...}` 里的 `rangeTag`
+也会记录本次录制改写标签的结果（`limited×1` / `unchanged`）。
 
 如果换到别的软件里仍然偏色，把 `ffprobe` 输出与「原片截图 / 录制画面截图」发我，可以直接定位是
 画布环节还是编码标签环节。
@@ -564,5 +555,5 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,heigh
 
 ---
 
-芒着拉片 | MG Player+ v3.4  
+芒着拉片 | MG Player+ v3.5  
 YUMMi

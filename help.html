@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v3.4 使用教程</title>
+<title>芒着拉片 | MG Player+ v3.5 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v3.4</span>
+<span class="sub">使用教程 · v3.5</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -115,7 +115,7 @@ li{margin:4px 0}
 <p><b>批量导出</b>：勾选多个视频后点「<b>导出选中</b>」—— 只选 1 个直接给一份日志表（同名 <span class="mono">标题_日志记录_导出时间</span>）；选多个则每个视频一份、<b>一起打包成 zip</b>。表格里的链接带定位，可以直接拖回插件再导入。只有条数、已拿不到明细的视频会跳过，导出提示里会写明。</p>
 <h3>设置</h3>
 <ul>
-<li>亮色模式、禁用弹幕、视频控制栏、打点自动截图、时间码显示回避、画中画保持录制（实验）、应用于当前网页、录制编码。</li>
+<li>亮色模式、禁用弹幕、视频控制栏、打点自动截图、时间码显示回避、画中画保持录制（实验）、应用于当前网页。</li>
 <li>菜单里另有三个按钮：网页全屏 / 教程帮助 / 重载插件。</li>
 </ul>
 
@@ -136,9 +136,9 @@ li{margin:4px 0}
 <h3>录制与编码</h3>
 <ul>
 <li><kbd>R</kbd> 开始 / 停止录制（含声音），录完会把这段时长写进剪贴板。</li>
-<li>四档编码：H.264（默认）、低分辨率 H.264、VP8、VP9。</li>
-<li>「低分辨率 H.264」固定 720P，其余跟随源分辨率；帧率跟随源帧率，编码吃力时只降帧率、不改分辨率。</li>
-<li>录制画面已做 limited 色彩范围修正，更接近原片；截图不做这项修正，VP9 档例外。</li>
+<li>编码固定 <b>MP4 · H.264 + AAC</b>（无档位可选）：播放器、剪辑软件最通用，声音是 AAC。</li>
+<li>分辨率与帧率都跟随源视频，<b>一源帧画一次</b>（不做定时重绘），录制最顺、文件帧数≈源帧数。</li>
+<li>录制画面做了 limited 色彩范围修正（码流与容器标签一起改），更接近原片；截图不做这项修正。</li>
 </ul>
 <h3>文件名规则</h3>
 <ul>
@@ -161,11 +161,11 @@ li{margin:4px 0}
 </details>
 <details>
 <summary>录制画面颜色偏深 / 和原片不一样？</summary>
-<div class="body">录制时已把画面修正到 limited 色彩范围，正常应与原片一致；VP9 档例外（无法修正），对颜色敏感请改用 H.264 或 VP8。截图不受影响。</div>
+<div class="body">录制时已把画面修正到 limited 色彩范围（码流与容器标签一起改），正常应与原片一致。截图不受影响。</div>
 </details>
 <details>
 <summary>录制帧率偏低？</summary>
-<div class="body">四档编码都靠 CPU，编码跟不上就会掉帧。在设置里把「录制编码」换成更省资源的「低分辨率 H.264」重录；插件不会中途改分辨率。</div>
+<div class="body">录制固定 MP4/H.264 + AAC，<b>一源帧画一次</b>、不做定时重绘，主线程开销最低。若仍掉帧，多半是机器编码能力吃紧：关掉其他吃 CPU 的程序，或先用较低清晰度播放再录。控制台 <span class="mono">[MGP-REC]</span> 日志里的 <span class="mono">draws</span> / <span class="mono">encoderSlow</span> 能看出瓶颈在哪。</div>
 </details>
 <details>
 <summary>导出的 Excel 打不开 / 导入的表格识别不出时间码？</summary>
@@ -173,7 +173,7 @@ li{margin:4px 0}
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v3.4</span>
+<span>芒着拉片 | MG Player+ v3.5</span>
 <span>YUMMi</span>
 </footer>
 </div>

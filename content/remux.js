@@ -27,6 +27,19 @@
     arr[p] = (v >>> 24) & 255; arr[p + 1] = (v >>> 16) & 255;
     arr[p + 2] = (v >>> 8) & 255; arr[p + 3] = v & 255;
   }
+  // 64 位写入（version=1 的 mvhd/tkhd/mdhd 的 duration 是 8 字节）：
+  // 只写低 32 位会把值写进高半区，得到「10617159158 秒」这种天文时长，
+  // VLC/ffmpeg 能自行重算所以照放，Windows 播放器 / QuickTime / 手机 / 剪辑软件会直接打不开
+  function wrU64(arr, p, v) {
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    wrU32(arr, p, Math.floor(n / 4294967296));
+    wrU32(arr, p + 4, n >>> 0);
+  }
+  // 按时长写入 mvhd/tkhd/mdhd 的 duration 字段（自动区分 version 0 / 1）
+  function wrDuration(boxBytes, verOffset, value) {
+    if (boxBytes[8] === 1) wrU64(boxBytes, verOffset, value);
+    else wrU32(boxBytes, verOffset, Math.min(value, 0xFFFFFFFF));
+  }
   function ascii(b, p, n) {
     let s = '';
     for (let i = 0; i < n; i++) s += String.fromCharCode(b[p + i]);
@@ -74,6 +87,12 @@
     if (flags & TFHD_DEFAULT_SAMPLE_FLAGS) { r.defaultSampleFlags = rdU32(bytes, p); p += 4; }
     r.defaultBaseIsMoof = !!(flags & TFHD_DEFAULT_BASE_IS_MOOF);
     return r;
+  }
+
+  function parseTfdt(bytes, b) {
+    const d = b.data;
+    const version = bytes[d];
+    return version === 1 ? rdU64(bytes, d + 4) : rdU32(bytes, d + 4);
   }
 
   function parseTrun(bytes, b) {
@@ -368,128 +387,181 @@
     // 2. 解析所有 moof → 每轨样本 { offset, size, duration, isSync, cts }
     const samplesByTrack = new Map();
     const lastDataEnd = new Map();
+    let badSamples = 0;      // 越界 / 尺寸异常的样本（丢弃，不让它污染 mdat 与采样表）
+    let firstTfdt = null;    // 首个片段的基础解码时间（诊断用；录制总是从 0 开始）
     for (const m of moofs) {
       for (const traf of walkBoxes(bytes, m.data, m.end)) {
         if (traf.type !== 'traf') continue;
-        let tfhd = null, trun = null;
+        let tfhd = null;
+        const truns = [];        // 一个 traf 可以带多个 trun（样本数据依次相接）
         for (const tb of walkBoxes(bytes, traf.data, traf.end)) {
           if (tb.type === 'tfhd') tfhd = parseTfhd(bytes, tb);
-          else if (tb.type === 'trun') trun = parseTrun(bytes, tb);
+          else if (tb.type === 'trun') truns.push(parseTrun(bytes, tb));
+          else if (tb.type === 'tfdt' && firstTfdt === null) firstTfdt = parseTfdt(bytes, tb);
         }
-        if (!tfhd || !trun) continue;
+        if (!tfhd || !truns.length) continue;
         const trex = trexById.get(tfhd.trackId);
         let list = samplesByTrack.get(tfhd.trackId);
         if (!list) { list = []; samplesByTrack.set(tfhd.trackId, list); }
-        // 样本数据基准偏移：base-data-offset > default-base-is-moof > 前一片段数据末尾
+        // 样本数据基准偏移：base-data-offset > default-base-is-moof > 所在 moof 起点
+        // （规范缺省就是「本 moof 起点」，此前退回 0 会把数据从文件头开始拷贝）
         let base;
         if (tfhd.baseDataOffset != null) base = tfhd.baseDataOffset;
         else if (tfhd.defaultBaseIsMoof) base = m.start;
-        else base = lastDataEnd.get(tfhd.trackId) || 0;
-        let off = trun.dataOffset != null ? base + trun.dataOffset : base;
-        for (let i = 0; i < trun.count; i++) {
-          const size = trun.sizes != null ? trun.sizes[i]
-            : (tfhd.defaultSampleSize != null ? tfhd.defaultSampleSize : (trex ? trex.defSize : 0));
-          const dur = trun.durations != null ? trun.durations[i]
-            : (tfhd.defaultSampleDuration != null ? tfhd.defaultSampleDuration : (trex ? trex.defDur : 0));
-          let flags = trun.sampleFlags != null ? trun.sampleFlags[i]
-            : (tfhd.defaultSampleFlags != null ? tfhd.defaultSampleFlags : (trex ? trex.defFlags : 0));
-          if (i === 0 && trun.firstSampleFlags != null) flags = trun.firstSampleFlags;
-          list.push({
-            offset: off,
-            size,
-            duration: dur,
-            isSync: !(flags & 0x10000),
-            cts: trun.cts != null ? trun.cts[i] : 0
-          });
-          off += size;
+        else base = lastDataEnd.get(tfhd.trackId) || m.start;
+        let off = null;
+        for (const trun of truns) {
+          // 带 data_offset 的 trun 自行定位；否则紧接上一个 trun 的数据末尾
+          if (trun.dataOffset != null) off = base + trun.dataOffset;
+          if (off == null) off = base;
+          for (let i = 0; i < trun.count; i++) {
+            const size = trun.sizes != null ? trun.sizes[i]
+              : (tfhd.defaultSampleSize != null ? tfhd.defaultSampleSize : (trex ? trex.defSize : 0));
+            const dur = trun.durations != null ? trun.durations[i]
+              : (tfhd.defaultSampleDuration != null ? tfhd.defaultSampleDuration : (trex ? trex.defDur : 0));
+            let flags = trun.sampleFlags != null ? trun.sampleFlags[i]
+              : (tfhd.defaultSampleFlags != null ? tfhd.defaultSampleFlags : (trex ? trex.defFlags : 0));
+            if (i === 0 && trun.firstSampleFlags != null) flags = trun.firstSampleFlags;
+            // 越界样本直接丢弃：写进 mdat 会变成垃圾数据，写进 stsz/stco 会让播放器读到文件外
+            if (size > 0 && off >= 0 && off + size <= len) {
+              list.push({
+                offset: off,
+                size,
+                duration: dur,
+                isSync: !(flags & 0x10000),
+                cts: trun.cts != null ? trun.cts[i] : 0
+              });
+            } else {
+              badSamples++;
+            }
+            off += size;
+          }
         }
         lastDataEnd.set(tfhd.trackId, off);
       }
     }
     if (!samplesByTrack.size) throw new Error('remux: no samples');
 
-    // 3. 布局：ftyp + mdat(header + 样本数据) + moov
+    // 3. 样本总表（按文件顺序 = 保持录制交错顺序）
     const all = [];
     for (const [trackId, list] of samplesByTrack) {
       for (const s of list) all.push({ trackId, s });
     }
-    all.sort((a, b) => a.s.offset - b.s.offset); // 保持录制交错顺序
+    all.sort((a, b) => a.s.offset - b.s.offset);
     let totalData = 0;
     for (const e of all) totalData += e.s.size;
-    const mdatHeader = (totalData + 8) > 0xFFFFFFFF ? 16 : 8;
-    let cur = ftypRaw.length + mdatHeader;
-    for (const e of all) { e.outOffset = cur; cur += e.s.size; }
 
-    // 4. 重建 moov
+    // 4. 每轨的表（stco 依赖最终布局，单独在布局阶段生成）
     const movieTs = moov.timescale || 1000;
-    let maxMovieDur = 0;
-    let colorFix = 0;
-    const trakBytes = [];
+    let maxMovieDur = 0, maxTrackId = 0, colorFix = 0, isAvc1 = false;
+    const traks = [];
     for (const t of moov.traks) {
       const list = samplesByTrack.get(t.id) || [];
       if (!list.length || !t.stsdRaw || !t.mdhdRaw) continue;
-      const mediaDur = list.reduce((a, s) => a + (s.duration || 0), 0);
+      // 与 buildStts 用同一套时长口径（0 → 1），否则 mdhd 时长与 stts 对不上
+      const mediaDur = list.reduce((a, s) => a + (s.duration || 1), 0);
       const movieDur = Math.round(mediaDur * movieTs / (t.mdhdTimescale || 1));
       if (movieDur > maxMovieDur) maxMovieDur = movieDur;
-
-      // tkhd / mdhd：保留原始字节，仅改写 duration 字段
-      const tkhd = t.tkhdRaw.slice();
-      const tkhdV = tkhd[8];
-      wrU32(tkhd, 8 + (tkhdV === 1 ? 28 : 20), movieDur);
-      const mdhd = t.mdhdRaw.slice();
-      const mdhdV = mdhd[8];
-      wrU32(mdhd, 8 + (mdhdV === 1 ? 24 : 16), Math.min(mediaDur, 0xFFFFFFFF));
-
-      // stbl 表（stsd 先把色彩范围标签改成 limited，与录制端的 limited 画面配套）
+      if (t.id > maxTrackId) maxTrackId = t.id;
+      if (ascii(t.stsdRaw, 20, 4) === 'avc1' || ascii(t.stsdRaw, 20, 4) === 'avc3') isAvc1 = true;
       const stsdFix = stsdToLimited(t.stsdRaw);
       if (stsdFix.changed) colorFix++;
-      const stts = buildStts(list);
-      const stblParts = [stsdFix.data];
-      stblParts.push(stts);
-      const ctts = buildCtts(list);
-      if (ctts) stblParts.push(ctts);
-      const stss = buildStss(list);
-      if (stss) stblParts.push(stss);
-      stblParts.push(buildStsc(list.length));
-      stblParts.push(buildStsz(list));
-      stblParts.push(buildStco(all, t.id));
-
-      const stbl = box('stbl', concat(stblParts));
-      const minf = box('minf', concat([...t.minfRaw, stbl]));
-      const mdia = box('mdia', concat([mdhd, t.hdlrRaw, minf]));
-      const trak = box('trak', concat([tkhd, t.edtsRaw, mdia]));
-      trakBytes.push(trak);
+      traks.push({
+        t, list, mediaDur, movieDur,
+        stsd: stsdFix.data,
+        stts: buildStts(list),
+        ctts: buildCtts(list),
+        stss: buildStss(list),
+        stsz: buildStsz(list)
+      });
     }
-    if (!trakBytes.length) throw new Error('remux: no usable tracks (traks=' + moov.traks.length + ', sampleTracks=' + samplesByTrack.size + ')');
+    if (!traks.length) throw new Error('remux: no usable tracks (traks=' + moov.traks.length + ', sampleTracks=' + samplesByTrack.size + ')');
 
-    // mvhd：保留原始字节，改写 duration
-    const mvhd = moov.mvhdRaw.slice();
-    const mvhdV = mvhd[8];
-    wrU32(mvhd, 8 + (mvhdV === 1 ? 24 : 16), Math.min(maxMovieDur, 0xFFFFFFFF));
-    const moovOut = box('moov', concat([mvhd, ...trakBytes]));
+    // ftyp 改成经典 MP4 品牌：原始 fragment 的 brand 里带 iso5 / dash 时，
+    // 部分剪辑软件与播放器会仍按「分片 MP4」对待而拒绝打开（remux 的意义就是去掉它）
+    const ftyp = classicFtyp(isAvc1);
 
-    // 5. 写输出
-    const mdatSize = mdatHeader + totalData;
-    const out = new Uint8Array(ftypRaw.length + mdatSize + moovOut.length);
-    let p = 0;
-    out.set(ftypRaw, p); p += ftypRaw.length;
-    if (mdatHeader === 16) {
-      wrU32(out, p, 1); p += 4;
-      for (let i = 0; i < 4; i++) out[p + i] = 'mdat'.charCodeAt(i); p += 4;
-      // 64 位 size：写入高 32 位
-      wrU32(out, p, Math.floor(mdatSize / 4294967296)); p += 4;
-      wrU32(out, p, mdatSize >>> 0); p += 4;
-    } else {
-      wrU32(out, p, mdatSize); p += 4;
-      for (let i = 0; i < 4; i++) out[p + i] = 'mdat'.charCodeAt(i); p += 4;
+    // 5. 布局：ftyp + moov + mdat（faststart）——moov 前置，播放器/剪辑软件兼容性最好；
+    //    stco 的宽度（stco/co64）取决于 moov 自身大小 → 迭代到偏移宽度稳定为止（最多 3 轮）
+    const mdatHeader = (totalData + 8) > 0xFFFFFFFF ? 16 : 8;
+    let useCo64 = false, out = null, moovOut = null;
+    for (let pass = 0; pass < 3; pass++) {
+      const trial = buildMoov(moov, traks, maxMovieDur, maxTrackId, useCo64, null);
+      const base = ftyp.length + trial.length + mdatHeader;
+      let cur = base;
+      for (const e of all) { e.outOffset = cur; cur += e.s.size; }
+      const needCo64 = all.some(e => e.outOffset > 0xFFFFFFFF);
+      if (needCo64 !== useCo64) { useCo64 = needCo64; continue; }
+      moovOut = buildMoov(moov, traks, maxMovieDur, maxTrackId, useCo64, all);
+      if (moovOut.length !== trial.length) continue;   // 宽度变了，再迭代一次
+      const mdatSize = mdatHeader + totalData;
+      out = new Uint8Array(ftyp.length + moovOut.length + mdatSize);
+      let p = 0;
+      out.set(ftyp, p); p += ftyp.length;
+      out.set(moovOut, p); p += moovOut.length;
+      if (mdatHeader === 16) {
+        wrU32(out, p, 1); p += 4;
+        for (let i = 0; i < 4; i++) out[p + i] = 'mdat'.charCodeAt(i); p += 4;
+        wrU32(out, p, Math.floor(mdatSize / 4294967296)); p += 4;
+        wrU32(out, p, mdatSize >>> 0); p += 4;
+      } else {
+        wrU32(out, p, mdatSize); p += 4;
+        for (let i = 0; i < 4; i++) out[p + i] = 'mdat'.charCodeAt(i); p += 4;
+      }
+      for (const e of all) {
+        out.set(bytes.subarray(e.s.offset, e.s.offset + e.s.size), p);
+        p += e.s.size;
+      }
+      break;
     }
-    for (const e of all) {
-      out.set(bytes.subarray(e.s.offset, e.s.offset + e.s.size), p);
-      p += e.s.size;
+    if (!out) throw new Error('remux: layout not converged');
+    if (info) {
+      info.rangeTag = colorFix > 0 ? 'limited×' + colorFix : 'unchanged';
+      info.faststart = true;
+      info.co64 = useCo64;
+      info.badSamples = badSamples;
+      info.firstTfdt = firstTfdt;
     }
-    out.set(moovOut, p);
-    if (info) info.rangeTag = colorFix > 0 ? 'limited×' + colorFix : 'unchanged';
     return out;
+  }
+
+  // 经典 MP4 的 ftyp（major=isom，兼容 brand 声明 avc1/mp41）：与 ffmpeg 重封装一致
+  function classicFtyp(isAvc1) {
+    const brands = ['isom', 'iso2'];
+    if (isAvc1) brands.push('avc1');
+    brands.push('mp41');
+    const out = new Uint8Array(16 + brands.length * 4);
+    wrU32(out, 0, out.length);
+    const put = (at, s) => { for (let i = 0; i < 4; i++) out[at + i] = s.charCodeAt(i); };
+    put(4, 'ftyp');
+    put(8, 'isom');
+    wrU32(out, 12, 0x00000200);   // minor_version
+    brands.forEach((b, i) => put(16 + i * 4, b));
+    return out;
+  }
+
+  // 重建 moov（mvhd + 每轨 trak）。offsets 为 null 时只用相同宽度占位（试算 moov 大小）
+  function buildMoov(moov, traks, maxMovieDur, maxTrackId, useCo64, offsets) {
+    const mvhd = moov.mvhdRaw.slice();
+    wrDuration(mvhd, 8 + (mvhd[8] === 1 ? 24 : 16), maxMovieDur);
+    if (mvhd.length >= 4) wrU32(mvhd, mvhd.length - 4, maxTrackId + 1);   // next_track_ID
+    const trakBytess = traks.map(x => {
+      const tkhd = x.t.tkhdRaw.slice();
+      wrDuration(tkhd, 8 + (tkhd[8] === 1 ? 28 : 20), x.movieDur);
+      const mdhd = x.t.mdhdRaw.slice();
+      wrDuration(mdhd, 8 + (mdhd[8] === 1 ? 24 : 16), x.mediaDur);
+      const stblParts = [x.stsd, x.stts];
+      if (x.ctts) stblParts.push(x.ctts);
+      if (x.stss) stblParts.push(x.stss);
+      stblParts.push(buildStsc(x.list.length));
+      stblParts.push(x.stsz);
+      stblParts.push(buildStco(offsets, x.t.id, x.list.length, useCo64));
+      const stbl = box('stbl', concat(stblParts));
+      const minf = box('minf', concat([...x.t.minfRaw, stbl]));
+      const mdia = box('mdia', concat([mdhd, x.t.hdlrRaw, minf]));
+      return box('trak', concat([tkhd, x.t.edtsRaw, mdia]));
+    });
+    return box('moov', concat([mvhd, ...trakBytess]));
   }
 
   // ─── stbl 表构建 ─────────────────────────────
@@ -530,7 +602,11 @@
       else runs.push({ count: 1, offset: v });
     }
     const out = new Uint8Array(8 + 8 * runs.length);
-    wrU32(out, 0, neg ? 1 : 0);
+    // FullBox 的 version 在**第一个字节**：有负偏移必须写 version=1（有符号 ctts）。
+    // 写成 wrU32(0, 1) 会变成 version=0 + flags=1，而偏移仍按二进制补码写 → PTS 变成天文数字，
+    // 严格播放器/剪辑软件报「文件损坏 / 不支持」
+    out[0] = neg ? 1 : 0;
+    out[1] = out[2] = out[3] = 0;
     wrU32(out, 4, runs.length);
     runs.forEach((r, i) => { wrU32(out, 8 + i * 8, r.count); wrU32(out, 12 + i * 8, r.offset >>> 0); });
     return box('ctts', out);
@@ -538,8 +614,10 @@
 
   function buildStss(list) {
     const syncNums = [];
-    list.forEach((s, i) => { if (s.isSync) syncNums.push(i + 1); });
-    if (syncNums.length === list.length) return null; // 全部关键帧可省略
+    // 首帧一定当关键帧：stss 的 entry_count=0（「没有任何关键帧」）是非法的，
+    // 严格播放器读到会判定文件不可解码
+    list.forEach((s, i) => { if (s.isSync || i === 0) syncNums.push(i + 1); });
+    if (!syncNums.length || syncNums.length === list.length) return null; // 全部关键帧可省略 stss
     const out = new Uint8Array(8 + 4 * syncNums.length);
     wrU32(out, 0, 0);
     wrU32(out, 4, syncNums.length);
@@ -566,16 +644,19 @@
     return box('stsz', out);
   }
 
-  function buildStco(all, trackId) {
-    const offs = all.filter(e => e.trackId === trackId).map(e => e.outOffset);
-    const big = offs.some(o => o > 0xFFFFFFFF);
-    const out = new Uint8Array(8 + (big ? 8 : 4) * offs.length);
+  // 每样本一个 chunk（与 stco 一一对应）；offsets 为 null 时只按宽度占位（试算 moov 大小）
+  function buildStco(offsets, trackId, count, forceCo64) {
+    const big = forceCo64 != null ? forceCo64 : (offsets || []).some(e => e.trackId === trackId && e.outOffset > 0xFFFFFFFF);
+    const out = new Uint8Array(8 + (big ? 8 : 4) * count);
     wrU32(out, 0, 0);
-    wrU32(out, 4, offs.length);
-    offs.forEach((o, i) => {
-      if (big) { wrU32(out, 8 + i * 8, Math.floor(o / 4294967296)); wrU32(out, 12 + i * 8, o >>> 0); }
-      else wrU32(out, 8 + i * 4, o);
-    });
+    wrU32(out, 4, count);
+    if (offsets) {
+      const offs = offsets.filter(e => e.trackId === trackId).map(e => e.outOffset);
+      offs.forEach((o, i) => {
+        if (big) { wrU32(out, 8 + i * 8, Math.floor(o / 4294967296)); wrU32(out, 12 + i * 8, o >>> 0); }
+        else wrU32(out, 8 + i * 4, o);
+      });
+    }
     return box(big ? 'co64' : 'stco', out);
   }
 
@@ -590,6 +671,6 @@
   // _test：仅供开发自检脚本调用（Material/qc-dev/check-color-fix.js），扩展运行时不使用
   return {
     remuxToClassic,
-    _test: { stsdToLimited, avcCToLimited, spsToLimited, spsFullRangeBit, rbspUnescape, rbspEscape }
+    _test: { stsdToLimited, entryToLimited, avcCToLimited, colrToLimited, spsToLimited, spsFullRangeBit, rbspUnescape, rbspEscape }
   };
 });

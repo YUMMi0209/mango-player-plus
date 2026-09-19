@@ -6,8 +6,6 @@
   window.__mgpFps = FPS;
   // 录制 remux（fMP4 → 经典 MP4）：IIFE 启动时捕获引用，防止页面脚本事后篡改 window.MPGRemux
   const MPGRemuxRef = (typeof window !== 'undefined' && window.MPGRemux) ? window.MPGRemux : null;
-  // 录制 WebM 色彩范围标签改写（Range 2→1）：同样在启动时捕获引用
-  const MPGWebmColorRef = (typeof window !== 'undefined' && window.MPGWebmColor) ? window.MPGWebmColor : null;
   // 录制画面压缩到 limited（16-235）：Chromium 的 canvas 是 sRGB 全范围（0-255），
   // 而几乎所有的播放器 / 剪辑软件默认按 limited 解释视频，会再把画面拉伸一次，
   // 表现为黑位被压掉、画面发闷「偏深」。在绘制时做一次对比度压缩（255→219），
@@ -368,11 +366,11 @@
   let shadow, wrapper, video, videoContainer,
       recMediaRecorder, recChunks, recCanvas, recCtx, recStream, recRaf,
       toastTimer, stateTimer;
-  let recPaintTimer = null;      // 固定节拍重绘定时器（已弃用：setInterval 间隔会被渲染节拍
-                                 // 对齐，低间隔下实际触发频率骤降，与采样同频导致采旧帧）
-  let recPaintRaf = 0;           // 绘制循环 rAF id（rAF 驱动绘制，前台不节流）
+  let recPaintRaf = 0;           // 退回 rAF 绘制循环的 id（不支持 rVFC 的浏览器）
   let recDrawOk = 0, recDrawFail = 0;   // 绘制成功 / 连续失败计数（自愈判定 + 诊断）
   let recDrawFailAt = 0;        // 连续绘制失败起始时间（时间戳止损，rAF 帧率随显示器变化）
+  let recLastDrawAt = 0;        // 最近一次成功绘制的时刻（保活补帧判据）
+  let recKeepAliveTimer = null; // 源停帧（暂停 / 卡住）时补帧的保活定时器
   let recVideoAdopted = false;   // 录制中 video 引用是否被重新定位过
   let recAdoptPending = 0;      // 上次尝试重定位 video 的时间戳（0 = 未在重试；失败后每 2s 重试一次）
   let recDiag = null, recDiagTimer = null;  // 录制诊断数据（停止 / 结束时 console 输出）
@@ -380,8 +378,6 @@
   let recLastHash = null;      // 上次画布采样哈希
   let recFreezeCount = 0;      // 连续无变化计数
   let recLastCT = -1;          // 上次采样时 video.currentTime
-  let recDowngradeTimer = null; // 自动降级评估（编码能力不足：丢拍率超标 → 降分辨率 / 降帧率）
-  let recLastDrops = 0, recLastTicks = 0, recDowngrades = 0;  // 丢拍增量统计 + 降级次数
   let recChunkBytes = 0;        // MediaRecorder 已产出的编码数据字节数（编码进度）
   let recLastChunkAt = 0;       // 最近一次产出数据块的时刻（编码停滞判据）
   let recStartAt = 0;           // 本次录制开始时刻
@@ -391,7 +387,6 @@
   let recStopTime = null;    // 本次录制的停止时间（独立于预设出点）
   let recPaused = false;     // 页面切后台：MediaRecorder 已暂停（画中画保持录制未开启时）
   let pipActive = false;     // 画中画保持录制：录制期间 PiP 窗口激活（页面后台时视频仍渲染）
-  let recPacer = null;       // CFR 时间戳自控器：最新帧 + 标准帧率节拍输出（输入输出解耦，背压丢拍不挂起）
   let hashSeekDone = false;
 
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
@@ -1135,12 +1130,6 @@
     return pipActive || (video != null && document.pictureInPictureElement === video);
   }
 
-  // ─── 时间戳自控（CFR 输出）────────────────────
-  // canvas.captureStream 的帧到达时刻抖动（渲染节拍 + 采样量化）导致 MediaRecorder
-  // 输出 VFR（可变帧率）。此处用 MediaStreamTrackProcessor 读帧，按固定帧率网格
-  // 重打时间戳（重复帧丢弃、缺帧用上一帧补），经 MediaStreamTrackGenerator 输出，
-  // MediaRecorder 按输入帧 timestamp 打样本时间戳 → 输出恒定帧率。
-  // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
   // ─── 录制音频捕获 ─────────────────────────────
   // 优先 AudioContext（MediaElementSource）：video.captureStream() 会让 video 进入
   // 捕获模式，在部分播放器（芒果TV）上渲染被接管，后续 drawImage(video) 画不出新帧，
@@ -1197,108 +1186,18 @@
     return best;
   }
 
-  // CFR 时间戳自控（强制标准帧率）：
-  // canvas.captureStream(fps) 的 fps 只是目标提示，实际输出帧率取决于 canvas 绘制
-  // 频率，无法单独保证标准帧率。MediaRecorder 按帧时间戳封装——只要视频帧时间戳
-  // 严格落在标准帧率网格（如 25fps → 40ms 一拍），输出文件即标准帧率。
-  // 架构：输入侧持续读取 captureStream 只保留最新帧（丢弃中间帧，读取循环永不阻塞）；
-  // 输出侧按标准帧率节拍把最新帧写入 generator（时间戳累加式递增，帧率变化不跳变）。
-  // 输入输出完全解耦：编码器背压只导致"丢一拍"，不会挂起循环。
-  // 浏览器不支持（Firefox / 旧版 Chromium）时返回 null，调用方回退直连 recStream。
-  function startFramePacer(stream, fps) {
-    if (typeof MediaStreamTrackProcessor === 'undefined' || typeof MediaStreamTrackGenerator === 'undefined') return null;
-    try {
-      const vTrack = stream.getVideoTracks()[0];
-      if (!vTrack) return null;
-      const processor = new MediaStreamTrackProcessor({ track: vTrack });
-      const generator = new MediaStreamTrackGenerator({ kind: 'video' });
-      const outStream = new MediaStream();
-      outStream.addTrack(generator);
-      // 音频是连续采样，无需规整，原样转发（pause 时随 MediaRecorder 一并暂停）
-      stream.getAudioTracks().forEach(t => outStream.addTrack(t));
-      const reader = processor.readable.getReader();
-      const writer = generator.writable.getWriter();
-      // 标准帧率网格（微秒）；fps 显式传入时以其为准（VP8 档会把帧率上限压到 30，
-      // 若此处仍按源帧率出拍，只会重复输出同一帧，白白增加编码负担）
-      let frameDurUs = Math.round(1e6 / (fps > 0 ? fps : normRecFps(FPS)));
-      let idx = 0;            // 已输出帧数（诊断用）
-      let nextTsUs = 0;       // 下一帧时间戳（累加式，帧率变化不跳变）
-      let latest = null;      // 最新输入帧（节拍输出时使用；仅保留一帧，读取循环不积压）
-      let drops = 0;          // 丢拍计数（诊断）
-      let ticks = 0;          // 节拍总数（丢拍率 = drops / ticks）
-      let writes = 0;         // 成功提交给编码器的帧数（诊断）
-      let writeFails = 0;     // 提交失败次数（诊断）
-      let inflight = 0;       // 已提交但还没被编码器收走的帧数
-      let overBp = 0;         // 连续「队列已满」次数
-      const MAX_INFLIGHT = 4; // 允许的排队深度
-      let stopped = false;
-      let tickTimer = null;
-      // 输入侧：持续读取，只保留最新帧
-      (async () => {
-        try {
-          while (!stopped) {
-            const { value: f, done } = await reader.read();
-            if (done) break;
-            if (!f) continue;
-            if (recPaused) { f.close(); continue; }   // 暂停期间丢弃输入帧
-            if (latest) latest.close();
-            latest = f;
-          }
-        } catch (e) { /* reader 取消 / 轨道停止 */ }
-      })();
-      // 输出侧：固定节拍（标准帧率），每拍输出最新帧；暂停时停拍。
-      // 丢拍策略：**只有持续积压才丢**（连续 3 拍队满，或自算在途帧数超上限）。
-      // 编码器轻微落后（队列偶满）不丢帧——否则源 25fps 会被丢成 ~15fps，
-      // 这正是"帧率不足"的主因；真正吃不住时仍会丢拍，只是不会无限积压。
-      // 时间戳用「累加式」而不是 idx × 帧长：帧率档中途变化（自动降级）时，
-      // 累加式只在后续间隔生效，不会像乘法那样产生 PTS 跳变——跳变会被播放器
-      // 当成时间轴断裂，表现为花屏 / 卡顿
-      const tick = () => {
-        if (stopped || recPaused) return;
-        ticks++;
-        if (!latest) return;
-        const bp = (writer.desiredSize != null && writer.desiredSize < 1);
-        overBp = bp ? overBp + 1 : 0;
-        if (overBp >= 3 || inflight >= MAX_INFLIGHT) {
-          drops++;
-          nextTsUs += frameDurUs;   // 丢拍也要推进时间轴，保证文件时长与录制时长一致
-          return;
-        }
-        const out = new VideoFrame(latest, { timestamp: nextTsUs });
-        nextTsUs += frameDurUs;
-        inflight++;
-        writer.write(out).then(
-          () => { inflight--; writes++; },
-          () => { inflight--; writeFails++; try { out.close(); } catch (e) { } }
-        );
-      };
-      let tickMs = Math.max(4, Math.round(frameDurUs / 1000));
-      tickTimer = setInterval(tick, tickMs);
-      return {
-        stream: outStream,
-        dropCount() { return drops; },
-        tickCount() { return ticks; },
-        writeCount() { return writes; },
-        writeFailCount() { return writeFails; },
-        // 动态调整目标帧率（自动降级用）：重建节拍，时间戳网格同步切换
-        setFps(f) {
-          const nf = Math.max(15, Math.min(60, Math.round(f || 25)));
-          frameDurUs = Math.round(1e6 / nf);
-          tickMs = Math.max(4, Math.round(frameDurUs / 1000));
-          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-          tickTimer = setInterval(tick, tickMs);
-        },
-        stop() {
-          stopped = true;
-          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-          try { reader.cancel(); } catch (e) { }
-          try { generator.stop(); } catch (e) { }
-          try { if (latest) latest.close(); } catch (e) { }
-        }
-      };
-    } catch (e) {
-      return null;
-    }
+  // 录制编码固定为 MP4 / H.264 + AAC：容器与编码最通用（所有播放器 / 剪辑软件都能直接用）。
+  // 不提供 WebM 档：WebM 只能装 Opus 音频，部分播放器与剪辑软件打不开，且 AAC 是 MP4 唯一被
+  // 广泛支持的音频编码 —— 这就是「有的播放器能放、有的不行」的主因之一。
+  function pickRecMime() {
+    const candidates = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',   // H.264 基线 + AAC（最通用）
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4;codecs=avc1.42E01E',             // 本机没有 AAC 编码器时的兜底（无音频）
+      'video/mp4'
+    ];
+    for (const t of candidates) if (MediaRecorder.isTypeSupported(t)) return t;
+    return 'video/mp4';
   }
 
   function toggleRecording() {
@@ -1345,38 +1244,18 @@
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
-    // 录制设置（面板「录制编码」）：h264 / h264-low / vp8 / vp9（默认 h264）
-    // 分辨率：h264-low 固定 720P；其余三档**跟随视频本身分辨率**（不缩放、不放大）
-    // 兼容旧档位值（1080p-vp8 / 720p-vp8 / 1080p-vp9 / 720p-vp9 / 1080p-h264 / 720p-h264）
-    const LEGACY_CODEC = {
-      '1080p-vp8': 'vp8', '720p-vp8': 'vp8',
-      '1080p-vp9': 'vp9', '720p-vp9': 'vp9',
-      '1080p-h264': 'h264', '720p-h264': 'h264-low'
-    };
-    const recRaw = (window.__mgpSettings || {}).recCodec || 'h264';
-    const recPref = LEGACY_CODEC[recRaw] || recRaw;
-    const recWantVp9 = recPref === 'vp9';
-    const recWantVp8 = recPref === 'vp8';
-    const recWantWebm = recWantVp8 || recWantVp9;   // 两者都是软件编码，调优策略一致
-    const recLow = recPref === 'h264-low';           // 低分辨率 H.264：720P
-    const recMaxW = recLow ? 1280 : 0;               // 0 = 跟随源分辨率
-    const recMaxH = recLow ? 720 : 0;
-    // 色彩范围修正（全范围 → limited）只在能同时改掉「码流/容器标签」时做，否则画面与
-    // 标签会错配，反而更糟：
-    //   · VP8 / H.264 / 低分辨率 H.264：范围由容器（WebM Colour）或 SPS VUI + colr 声明，
-    //     我们能在录制结束后把标签改成 limited，与压缩后的画面一致 → 可以做
-    //   · VP9：范围写在 VP9 码流内部的 uncompressed header（color_range），容器标签改不动它，
-    //     所以 VP9 保持「全范围画面 + 全范围标签」不变（与改之前行为一致）
-    //   · 画布不支持 filter 时同样跳过（无法压缩画面就别改标签）
-    //   · 负责改标签的模块没就位（脚本未注入等）时也跳过：压缩了却改不了标签会更糟
-    const recCanRangeFix = !recWantVp9 && REC_FILTER_SUPPORTED &&
-      (recWantWebm ? !!MPGWebmColorRef : !!MPGRemuxRef);
+    // 录制编码固定 MP4 / H.264 + AAC，分辨率跟随视频本身（不缩放）——
+    // 「录制编码」下拉已移除：WebM 档只能配 Opus 音频，部分播放器与剪辑软件打不开，
+    // 固定成 MP4+AAC 后录出来的文件到处都能直接用。
+    // 色彩范围修正（全范围 → limited）需要「画面压缩」与「标签改写」同时成立：
+    //   · 画布不支持 filter 时跳过（压缩不了画面就别改标签）
+    //   · remux 模块没就位（脚本未注入等）时跳过：压缩了却改不了标签会更糟
+    const recCanRangeFix = REC_FILTER_SUPPORTED && !!MPGRemuxRef;
 
-    // canvas 转绘方案（实测最稳）：canvas 捕获固定帧率流 + rAF 重绘。
-    // video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面，不使用
+    // canvas 转绘方案（实测最稳）：video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面
     recCanvas = document.createElement('canvas');
-    recCanvas.width = recMaxW ? Math.min(video.videoWidth, recMaxW) : video.videoWidth;
-    recCanvas.height = recMaxH ? Math.min(video.videoHeight, recMaxH) : video.videoHeight;
+    recCanvas.width = video.videoWidth;
+    recCanvas.height = video.videoHeight;
     // alpha:false（不透明）+ 显式 sRGB：
     //   ① 不透明画布不会有 alpha 预乘 / 合成带来的颜色变化，编码器拿到的是纯 RGB；
     //   ② 不透明画布在 Chromium 里走更快的合成路径，主线程开销更低（给编码器让 CPU）
@@ -1388,11 +1267,14 @@
     document.body.appendChild(recCanvas);
     // 立即绘制首帧，避免录制开头输出空白帧
     paintRecFrame();
-    // 采集帧率 = 最接近的标准档位（25/30/50/60）：**跟随源帧率**，源 50/60fps 就按 50/60 采，
-    // 保证输出文件帧率与源一致（丢帧由 pacer 背压丢拍处理，不在这里压上限）；
-    // 绘制由采样间隔一半的定时器驱动（采样间隔内必有新绘制，不会漏帧）
-    const capFps = normRecFps(FPS);
-    recStream = recCanvas.captureStream(capFps);
+    // 采集方式对齐 v1.0 那条「很顺」的链路：captureStream() **不指定帧率** ——
+    // 画布每被绘制一次就产一帧，帧时间戳由浏览器按真实绘制时刻给出；
+    // 绘制由 requestVideoFrameCallback 驱动，源视频每来一个新帧才画一次（按 mediaTime 去重）。
+    // 于是输出帧数 ≈ 源帧数、没有重复帧、也没有时间戳重排，播放最顺。
+    // （此前用 captureStream(定帧率) + MediaStreamTrackProcessor/Generator 重打时间戳做 CFR：
+    //   多了一层读取与重写，网格与源节奏一有抖动就插重复帧或丢帧，反而发顿）
+    const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
+    recStream = recCanvas.captureStream();
     // 音频：AudioContext 捕获优先（避免 video.captureStream() 影响渲染），失败回退
     const audioRes = getRecAudioTrack(video);
     const audioVia = audioRes ? audioRes.via : 'none';
@@ -1404,49 +1286,18 @@
       return;
     }
 
-    // 编码档：WebM(VP9) / WebM(VP8) / MP4(H.264)；不支持时按候选列表依次回退
-    // （VP9 压缩率更好，但软件编码更吃 CPU；VP8 实时性最好；H.264 剪辑更友好）
-    const mt = (() => {
-      const candidates = recWantVp9
-        ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-        : recWantVp8
-          ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-          : [
-              'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-              'video/mp4;codecs=avc1.42E01E,mp4a.40.2;profiles=fmp4',
-              'video/mp4;codecs=avc1.42E01E',
-              'video/mp4',
-              'video/webm;codecs=vp8,opus',
-              'video/webm'
-            ];
-      for (const t of candidates)
-        if (MediaRecorder.isTypeSupported(t)) return t;
-    })();
-    // 目标码率：按 canvas 实际输出分辨率档位取值（偏保守）。软编环境码率是编码耗时
-    // 的直接因素，吞吐不足时低码率可显著提速；WebM（VP8/VP9）比 H.264 再压一档，
-    // 其中 VP9 压缩率更好，可用更低码率达到同等画质
+    const mt = pickRecMime();
+    if (!/mp4a/.test(mt)) console.info('[MGP-REC] 本机不支持 MP4+AAC，本次录制可能没有声音：' + mt);
+
+    // 目标码率：按画布分辨率档位取值（对齐 v1.0 的偏高码率，画面明显更实）。
+    // MediaRecorder 中途无法改码率，必须一次到位；H.264 走硬件编码时高码率几乎不增加 CPU
     const recPx = recCanvas.width * recCanvas.height;
-    const videoBits = recWantVp9
-      ? (recPx >= 3840 * 2160 ? 7000000
-        : recPx >= 1920 * 1080 ? 3000000
-        : recPx >= 1280 * 720 ? 2000000
-        : 1400000)
-      : recWantVp8
-        ? (recPx >= 3840 * 2160 ? 8000000
-          : recPx >= 1920 * 1080 ? 3500000
-          : recPx >= 1280 * 720 ? 2200000
-          : 1500000)
-        : (recPx >= 3840 * 2160 ? 12000000
-          : recPx >= 1920 * 1080 ? 5000000
-          : recPx >= 1280 * 720 ? 4000000
-          : 3000000);
-    // CFR 时间戳自控：按标准帧率网格重打时间戳，强制输出文件为标准帧率
-    // （captureStream 直连输出帧率随绘制节奏浮动，无法保证标准帧率）；
-    // 输入输出解耦 + 背压丢拍，不会像旧实现那样挂起冻结视频轨
-    recPacer = startFramePacer(recStream, capFps);
-    const mediaStream = recPacer ? recPacer.stream : recStream;
+    const videoBits = recPx >= 3840 * 2160 ? 45000000
+      : recPx >= 1920 * 1080 ? 16000000
+      : recPx >= 1280 * 720 ? 10000000
+      : 6000000;
     try {
-      recMediaRecorder = new MediaRecorder(mediaStream, {
+      recMediaRecorder = new MediaRecorder(recStream, {
         mimeType: mt,
         videoBitsPerSecond: videoBits,
         audioBitsPerSecond: 128000
@@ -1457,7 +1308,6 @@
       if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
       if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
-      if (recPacer) { recPacer.stop(); recPacer = null; }
       if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
       recCanvas = null; recCtx = null; pendingShot = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
@@ -1490,39 +1340,56 @@
     };
     // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
     recMediaRecorder.start(250);
-    // 绘制驱动：requestAnimationFrame + 动态节拍。
-    // 目标绘制间隔 ≈ 采样间隔 ×0.8（约 1.25× 采样帧率）：既能保证每次采样都拿到较新
-    // 画面，又不做无谓的重复绘制——全尺寸 drawImage（1080p 每帧约 8MB 像素搬运）是
-    // 主线程最大开销，绘制频率越低，留给编码器的 CPU 越多（此前按 2× 采样绘制，
-    // 25fps 源要画 50fps，CPU 被绘制吃掉后编码跟不上 → 丢帧成 ~15fps）
-    let recRafLastTs = 0, recRafInterval = 16.7, recLastPaintTs = 0;
-    paintRecFrame();
-    const recRafLoop = ts => {
-      if (!recordingInternal) return;
-      if (recRafLastTs) recRafInterval = recRafInterval * 0.9 + (ts - recRafLastTs) * 0.1;
-      recRafLastTs = ts;
-      const targetPaintMs = Math.max(recRafInterval, (1000 / capFps) * 0.8);
-      if (!recLastPaintTs || ts - recLastPaintTs >= targetPaintMs - 1) {
-        recLastPaintTs = ts;
-        paintRecFrame();
-      }
-      recPaintRaf = requestAnimationFrame(recRafLoop);
+    // 绘制驱动：源视频每来一个新帧画一次（requestVideoFrameCallback + mediaTime 去重），
+    // 画布因此「一源帧产一帧」，captureStream() 跟着给出与实际节奏一致的时间戳。
+    // 不做重复绘制也不做定时重绘：全尺寸 drawImage（1080p 每帧约 8MB 像素搬运）是主线程
+    // 最大开销，画得越少留给编码器的 CPU 越多。
+    // 不支持 rVFC 的浏览器退回 rAF 常驻绘制（按源帧率节流）。
+    let recLastDrawMedia = -1;
+    const recPaintViaFrameCb = () => {
+      if (!recordingInternal) return false;
+      const v = video;
+      if (!v || typeof v.requestVideoFrameCallback !== 'function') return false;
+      // 每拍都用「当前 video」重新挂回调：录制中播放器重建 / 换源后自动跟到新 video
+      v.requestVideoFrameCallback((now, meta) => {
+        if (!recordingInternal) return;
+        const m = meta && meta.mediaTime != null ? meta.mediaTime : -1;
+        if (m !== recLastDrawMedia) { recLastDrawMedia = m; paintRecFrame(); }
+        recPaintViaFrameCb();
+      });
+      return true;
     };
-    recPaintRaf = requestAnimationFrame(recRafLoop);
+    if (!recPaintViaFrameCb()) {
+      const targetMs = 1000 / Math.max(15, Math.min(60, capFps));
+      let lastPaint = 0;
+      const recRafLoop = ts => {
+        if (!recordingInternal) return;
+        if (!lastPaint || ts - lastPaint >= targetMs - 1) { lastPaint = ts; paintRecFrame(); }
+        recPaintRaf = requestAnimationFrame(recRafLoop);
+      };
+      recPaintRaf = requestAnimationFrame(recRafLoop);
+    }
+    // 保活补帧：源视频被暂停 / 卡住时 rVFC 不再回调，视频轨会停摆而音频仍在继续 →
+    // 音画时长对不上（播放器里表现为画面定格后声音还在走）。超过 500ms 没有新帧就补画一帧。
+    // 正常播放时每帧都在 40ms 内由 rVFC 触发，这里不会生效（不影响「一源帧一帧」）
+    recKeepAliveTimer = setInterval(() => {
+      if (!recordingInternal) { clearInterval(recKeepAliveTimer); recKeepAliveTimer = null; return; }
+      if (recPaused) return;
+      if (performance.now() - recLastDrawAt > 500) paintRecFrame();
+    }, 500);
 
-    // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「画面卡住」类问题
+    // 录制诊断（排障用）：停止 / 结束时 console.info 输出，用于定位「画面卡住 / 掉帧」类问题
     recDiag = {
       fps: FPS,
       capFps,
-      pacerOn: !!recPacer,
       mimeType: mt,
       videoBits,
       audioVia,
       resW: recCanvas.width,
       resH: recCanvas.height,
       canvasInDom: !!recCanvas.parentElement,
-      draws: 0, drawFails: 0, adopted: false, downgrades: 0,
-      rangeFix: recCanRangeFix ? 'on' : (recWantVp9 ? 'off(vp9)' : 'off'),
+      draws: 0, drawFails: 0, adopted: false,
+      rangeFix: recCanRangeFix ? 'on' : 'off',
       hwEnc: 'probing', hwEncCfg: ''
     };
     // 硬件编码器能力探测（WebCodecs）：MediaRecorder 无法指定编码器，
@@ -1551,13 +1418,6 @@
       recDiag.draws = recDrawOk;
       recDiag.drawFails = recDrawFail;
       recDiag.adopted = recVideoAdopted;
-      recDiag.pacerDrops = recPacer && typeof recPacer.dropCount === 'function' ? recPacer.dropCount() : -1;
-      // 节拍数 = pacer 实际尝试输出的帧数：与最终文件帧数对比可区分
-      // 「pacer 未输出」与「MediaRecorder 内部丢帧（编码吞吐不足）」
-      recDiag.pacerTicks = recPacer && typeof recPacer.tickCount === 'function' ? recPacer.tickCount() : -1;
-      // 实际提交给编码器的帧数 / 提交失败数：据此判断丢帧发生在 pacer 还是编码器
-      recDiag.pacerWrites = recPacer && typeof recPacer.writeCount === 'function' ? recPacer.writeCount() : -1;
-      recDiag.pacerWriteFails = recPacer && typeof recPacer.writeFailCount === 'function' ? recPacer.writeFailCount() : -1;
       recDiag.chunkBytes = recChunkBytes;
       recDiag.chunkCount = recChunks.length;
       recDiag.currentTime = video ? video.currentTime : -1;
@@ -1598,57 +1458,21 @@
       recLastCT = ct;
     }, 2000);
 
-    // ─── 自动降级：编码能力不足（软编环境常见）时保证录制流畅 ─────────
-    // 判据用「MediaRecorder 实际编码产出」而非 pacer 丢拍率：
-    // pacerDrops 只反映 pacer→generator 队列背压，MediaRecorder 内部积压
-    // （编码器吞吐不足）不会反馈到该计数——曾导致 1080p 严重滞后却不降级。
-    // 两种判据任一成立即降级：
-    //   ① 编码停滞：超过阈值没有新数据块（timeslice 250ms）
-    //   ② 编码吞吐不足：累计产出字节数远低于目标码率对应的量
-    //
-    // ⚠️ 只降帧率（60→50→30→25），**绝不改分辨率**：
-    // 录制中途改 canvas 尺寸会让编码器收到与首帧不同的尺寸，而 MP4 的
-    // moov/stsd 里记录的是起始分辨率 —— H.264 轨道随后出现花屏 / 绿块
-    // （WebM 对分辨率变化更宽容，但同样不保证）。要改分辨率请重新开始录制。
-    const REC_FPS_STEPS = [60, 50, 30, 25];
-    function recFpsDownStep() {
-      const cur = recDiag.capFps;
-      const i = REC_FPS_STEPS.indexOf(cur);
-      if (i < 0 || i >= REC_FPS_STEPS.length - 1) return false;  // 已到最低档
-      const nf = REC_FPS_STEPS[i + 1];
-      recDiag.capFps = nf;
-      if (recPacer && typeof recPacer.setFps === 'function') recPacer.setFps(nf);
-      return true;
-    }
-    function recDoDowngrade() {
-      if (recFpsDownStep()) {
-        recDowngrades++;
-        recDiag.downgrades = recDowngrades;
-        try { mgpToast('设备编码能力不足，录制帧率已降为 ' + recDiag.capFps + 'fps', true); } catch (e) { }
-        return true;
-      }
-      return false;   // 已到最低帧率：继续丢拍，保证文件时间轴正确（不再改分辨率）
-    }
-    recLastDrops = 0; recLastTicks = 0;
-    recDowngradeTimer = setInterval(() => {
-      if (!recordingInternal || !recPacer) return;
+    // ─── 编码跟不上时的诊断（不再自动降级）─────────
+    // v1.0 的采集链路（一源帧画一次 + captureStream 直连）本身不做帧率干预，实测最顺；
+    // 这里只把「编码停滞 / 吞吐不足」记进诊断日志，便于排障时判断是不是机器编码能力吃紧，
+    // 不再中途改帧率（改帧率要重建时间戳网格，反而引入卡顿）。
+    recLastChunkAt = recLastChunkAt || performance.now();
+    const recWatch = setInterval(() => {
+      if (!recordingInternal) { clearInterval(recWatch); return; }
       const now = performance.now();
       const elapsed = (now - recStartAt) / 1000;
-      // 启动初期不评估（编码器热身 / 首块延迟）；VP8 软编更易吃紧，提前到 2.5s 起评估
-      if (elapsed < (recWantWebm ? 2.5 : 4)) return;
-      const d = recPacer.dropCount(), t = recPacer.tickCount();
-      const dD = d - recLastDrops, tD = t - recLastTicks;
-      recLastDrops = d; recLastTicks = t;
-      // ① 编码停滞：无新数据块（timeslice 250ms）
-      const stalled = now - recLastChunkAt > (recWantWebm ? 1800 : 2500);
-      // ② 编码吞吐：累计字节数 < 目标码率 × 录制时长 × 30%（下限 20KB 防误判）
+      if (elapsed < 4) return;
+      const stalled = now - recLastChunkAt > 2500;
       const expectedBytes = ((videoBits + 128000) / 8) * elapsed * 0.3;
       const lowThroughput = recChunkBytes > 0 && recChunkBytes < expectedBytes && expectedBytes > 20000;
-      // ③ pacer 丢拍率（旧判据，保留兜底）；VP8 阈值更敏感
-      const highDrop = tD >= 20 && dD / tD > (recWantWebm ? 0.25 : 0.4);
-      if (!stalled && !lowThroughput && !highDrop) return;
-      recDoDowngrade();
-    }, recWantWebm ? 1500 : 2000);
+      if (recDiag) recDiag.encoderSlow = stalled ? 'stalled' : (lowThroughput ? 'lowThroughput' : 'ok');
+    }, 2000);
 
     // Render：16ms 定时重绘已在上面启动（captureStream 只在 canvas 有新绘制时产帧），
     // 不再叠加 rVFC / rAF 绘制链——多驱动无收益且增加不确定性
@@ -1687,7 +1511,7 @@
       finally {
         if (recCtx) { try { recCtx.filter = 'none'; } catch (e) { } }
       }
-      if (ok) { recDrawOk++; recDrawFail = 0; recDrawFailAt = 0; }
+      if (ok) { recDrawOk++; recDrawFail = 0; recDrawFailAt = 0; recLastDrawAt = performance.now(); }
       else {
         if (!recDrawFailAt) recDrawFailAt = performance.now();
         recDrawFail++;
@@ -1737,10 +1561,9 @@
     recordingInternal = false;
     if (recRaf) cancelAnimationFrame(recRaf);
     if (recPaintRaf) cancelAnimationFrame(recPaintRaf);
-    if (recPaintTimer) { clearInterval(recPaintTimer); recPaintTimer = null; }
+    if (recKeepAliveTimer) { clearInterval(recKeepAliveTimer); recKeepAliveTimer = null; }
     if (recDiagTimer) { clearInterval(recDiagTimer); recDiagTimer = null; }
     if (recFreezeTimer) { clearInterval(recFreezeTimer); recFreezeTimer = null; }
-    if (recDowngradeTimer) { clearInterval(recDowngradeTimer); recDowngradeTimer = null; }
     try {
       if (recDiag) {
         recDiag.draws = recDrawOk; recDiag.drawFails = recDrawFail; recDiag.adopted = recVideoAdopted;
@@ -1780,7 +1603,6 @@
   function finishRecording() {
     const mimeType = recMediaRecorder ? recMediaRecorder.mimeType : '';
     if (recStream) { recStream.getTracks().forEach(t=>t.stop()); recStream = null; }
-    if (recPacer) { recPacer.stop(); recPacer = null; }
     if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
     recMediaRecorder = null; recCanvas = null; recCtx = null;
     try {
@@ -1805,8 +1627,7 @@
       notifyRecFinished(false);
       return;
     }
-    const isMp4 = /^video\/mp4/.test(mimeType);
-    const ext = isMp4 ? 'mp4' : 'webm';
+    const ext = 'mp4';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
     // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
     const name = buildFileName(fmtTCPlainF(state.recordingStart || 0), state.recordingStart || 0, ext);
@@ -1814,56 +1635,39 @@
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
     // 原始文件快照：arrayBuffer 转换期间 recChunks 可能被下一次录制覆盖，回退时用快照
-    const rawBlob = new Blob(recChunks, { type: mimeType || 'video/' + ext });
+    const rawBlob = new Blob(recChunks, { type: mimeType || 'video/mp4' });
     const saveAndToast = blob => {
       downloadBlob(blob, name);
       mgpToast('录制结束 — ' + sec + 's', true);
       notifyRecFinished(true);   // 通知批量流程：本段录制已完成（有产出）
     };
-    // 色彩范围标签统一改成 limited（画面已在绘制时压缩到 16-235，见 REC_LIMITED_FILTER）：
-    //   · WebM：改 Colour/Range（2 全范围 → 1 limited）
-    //   · MP4 ：remux 时改 SPS VUI 的 video_full_range_flag 与 colr(nclx) 的 full_range_flag
-    // 标签与画面一致后，看标签的播放器与默认按 limited 的剪辑软件都能还原出源画面。
-    // MediaRecorder 输出的 MP4 是 fragmented MP4（moov 前置 + moof/mdat 分片），
-    // 部分剪辑软件（达芬奇旧版 / 会声会影 / Edius 等）无法读取。录制结束后
-    // 经 remux.js 重封装为经典 MP4（ftyp | mdat | moov，无 moof）；失败则回退原始文件。
-    // 注意 remux 失败回退时画面已是 limited、标签仍是全范围（罕见情况，仅记日志）
+    // 统一走 remux 生成「经典 MP4」（ftyp | moov | mdat，无 moof），并把色彩范围标签
+    // 改成 limited（画面已在绘制时压缩到 16-235，见 REC_LIMITED_FILTER）：
+    // MediaRecorder 直接产出的是 fragmented MP4，且 mvhd/tkhd/mdhd 的时长字段不可靠，
+    // 严格播放器（Windows 播放器 / QuickTime / 手机 / 剪辑软件）会打不开。
+    // remux 会补全时长、轨道号、关键帧表、经典 ftyp 品牌并把 moov 前置；失败则回退原始文件
+    const remuxThenSave = bytes => {
+      if (MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
+        const info = {};
+        try {
+          const out = MPGRemuxRef.remuxToClassic(bytes, info);
+          if (recDiag) recDiag.rangeTag = info.rangeTag || '';
+          console.info('[MGP-REC] remux ok', JSON.stringify(info));
+          saveAndToast(new Blob([out], { type: 'video/mp4' }));
+          return;
+        } catch (e) {
+          if (recDiag) recDiag.rangeTag = 'remux失败，保留原始文件';
+          console.info('[MGP-REC] remux failed, keep raw mp4:', e && e.message);
+        }
+      }
+      saveAndToast(rawBlob);
+    };
     rawBlob.arrayBuffer().then(buf => {
       const bytes = new Uint8Array(buf);
-      if (isMp4) {
-        if (MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
-          const info = {};
-          try {
-            const out = MPGRemuxRef.remuxToClassic(bytes, info);
-            if (recDiag) recDiag.rangeTag = info.rangeTag || '';
-            console.info('[MGP-REC] range tag', info.rangeTag || '(unknown)');
-            saveAndToast(new Blob([out], { type: 'video/mp4' }));
-          } catch (e) {
-            if (recDiag) recDiag.rangeTag = 'remux失败，保留原始标签';
-            console.info('[MGP-REC] remux failed, keep raw mp4:', e && e.message);
-            saveAndToast(rawBlob);
-          }
-        } else {
-          saveAndToast(rawBlob);
-        }
-        return;
-      }
-      // WebM / Matroska：只改 Colour 里的 Range 值，不动其它字节。
-      // VP9 不改（recCanRangeFix=false）：它的范围写在码流内部，容器标签单独改会错配
-      if (recCanRangeFix && MPGWebmColorRef && typeof MPGWebmColorRef.toLimited === 'function') {
-        try {
-          const r = MPGWebmColorRef.toLimited(bytes);
-          if (recDiag) recDiag.rangeTag = r.reason + (r.changed ? ' ✓' : '');
-          console.info('[MGP-REC] range tag', r.reason);
-          saveAndToast(r.changed ? new Blob([r.data], { type: mimeType || 'video/webm' }) : rawBlob);
-        } catch (e) {
-          if (recDiag) recDiag.rangeTag = 'webm 标签改写失败';
-          console.info('[MGP-REC] webm color patch failed:', e && e.message);
-          saveAndToast(rawBlob);
-        }
-      } else {
-        saveAndToast(rawBlob);
-      }
+      if (/^video\/mp4/.test(mimeType)) { remuxThenSave(bytes); return; }
+      // 理论上不会发生（编码已固定 MP4）：拿到了别的容器就原样保存，并提示一下
+      console.info('[MGP-REC] unexpected container: ' + mimeType);
+      saveAndToast(rawBlob);
     }).catch(() => {
       saveAndToast(rawBlob);
     });
