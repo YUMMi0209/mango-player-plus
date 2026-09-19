@@ -6,20 +6,16 @@
   window.__mgpFps = FPS;
   // 录制 remux（fMP4 → 经典 MP4）：IIFE 启动时捕获引用，防止页面脚本事后篡改 window.MPGRemux
   const MPGRemuxRef = (typeof window !== 'undefined' && window.MPGRemux) ? window.MPGRemux : null;
-  // 录制画面压缩到 limited（16-235）：Chromium 的 canvas 是 sRGB 全范围（0-255），
-  // 而几乎所有的播放器 / 剪辑软件默认按 limited 解释视频，会再把画面拉伸一次，
-  // 表现为黑位被压掉、画面发闷「偏深」。在绘制时做一次对比度压缩（255→219），
-  // 把画面落到 16-235，容器标签相应改成 limited（WebM 改 Colour/Range；
-  // MP4 改 SPS VUI + colr），录出来的文件在哪种解释下都与源画面一致。
-  // 219/255 = 85.88%；实测 1080p 每帧多约 1ms（25fps 预算 40ms），可接受。
-  const REC_LIMITED_FILTER = 'contrast(85.88%)';
-  // 万一本机 Chromium 不支持 2D context 的 filter（属性不存在时赋值只会挂个 JS 字段、
-  // 不影响绘制），就不能做范围压缩——否则画面仍是全范围而标签写成 limited，画面会发灰。
-  // 这种机型直接整体跳过范围修正，保持与改之前一致的行为。
-  const REC_FILTER_SUPPORTED = (() => {
-    try { return typeof CanvasRenderingContext2D !== 'undefined' && 'filter' in CanvasRenderingContext2D.prototype; }
-    catch (e) { return false; }
-  })();
+  // 录制色彩：不再做「压缩到 16-235 + 改写容器标签」那套（会把饱和度吃掉、画面发灰），
+  // 改为**只补偿编码器的色度收缩**：
+  // Chromium 的 H.264 编码器把色度按 limited 范围缩放（×224/255 ≈ 0.878）却把文件标成
+  // full-range，于是录出来的饱和色整体发灰（纯红 255,0,0 解回 230,0,0、绿带上红边）。
+  // 绘制时预先把饱和度放大 1/0.878 ≈ 113.9% 正好抵消：端到端实测最大偏差 21 → 3 级
+  // （8 色块图，见 Material/qc-dev/probe-color-variants.js 的 D 变体）。
+  // saturate 只动色度，黑白与灰阶不受影响 —— 比之前那套范围压缩安全得多。
+  // 若某些机型的编码器本就正确（不收缩色度），这里最多过饱和约 14%，且色度会被编码器上限截住，
+  // 不会失控；实测把系数加到 1.20 结果与 1.139 完全一致（已被截断）。
+  const REC_SAT_FIX = 'saturate(113.9%)';
   const BTN = '36px';
   const MARK_COLORS = { red: '#e74c3c', orange: '#ff7a1a', blue: '#3498db', green: '#2ecc71', gray: '#9aa0a6' };
 
@@ -152,20 +148,66 @@
 
   loadLogs();
 
-  function fmtTC(sec, frames) {
+  // fps 可选：实时时间模式按固定 25fps 折算帧号（与视频自身帧率无关）
+  function fmtTC(sec, frames, fps) {
     if (frames === undefined) frames = true;
+    const F = fps > 0 ? fps : FPS;
     if (isNaN(sec) || sec < 0) sec = 0;
     // +1e-6：修正浮点边界（如 0.04*25=1.0000000000000002 会误进下一帧）
-    const tf = Math.floor(sec * FPS + 1e-6);
-    const fph = FPS * 3600, fpm = FPS * 60;
+    const tf = Math.floor(sec * F + 1e-6);
+    const fph = F * 3600, fpm = F * 60;
     const h = Math.floor(tf / fph), m = Math.floor((tf % fph) / fpm);
-    const s = Math.floor((tf % fpm) / FPS), f = tf % FPS;
+    const s = Math.floor((tf % fpm) / F), f = tf % F;
     const hms = String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
     return frames ? hms+':'+String(f).padStart(2,'0') : hms;
   }
   function fmtTCPlain(sec) { return fmtTC(sec, false).replace(/:/g, '-'); }
   // 带帧号文件名时间码 HH-MM-SS-FF：截图文件名与打点记录时间码精确对应，便于截图管理匹配
   function fmtTCPlainF(sec) { return fmtTC(sec, true).replace(/:/g, '-'); }
+
+  // ─── 实时时间模式（时间码取系统时间）─────────────
+  // 开启后：顶部时间码显示系统时间 HHMMSSFF（固定按 25fps 折算帧号），状态标签由 PLAY 变为 LIVE；
+  // 打点记录 / 截图 / 录制的**文件名时间码**也用它；同时禁用所有「按时间码跳转」的功能。
+  // 直播页默认开启；普通视频默认关闭，且**不写存储、每次手动开**（刷新页面即回到默认）。
+  const RT_FPS = 25;
+  let rtTime = null;   // null = 还没判定过（用直播判定作为默认值）
+  function rtOn() {
+    if (rtTime === null) rtTime = isLivePage();
+    return rtTime === true;
+  }
+  function setRtTime(on) {
+    const v = !!on;
+    if (rtOn() === v) return rtOn();
+    rtTime = v;
+    try { mgpToast(v ? '已开启实时时间：时间码取系统时间，按时间码跳转已停用' : '已关闭实时时间，恢复按视频时间码', true); } catch (e) { }
+    updateTC();
+    return rtOn();
+  }
+  // 系统时间（当天秒数，带毫秒小数）
+  function rtSeconds() {
+    const d = new Date();
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
+  }
+  // 录制/截图取时刻：实时时间模式用系统时间，否则用画面时间
+  function nowT() { return rtOn() ? rtSeconds() : dispTime(); }
+  // 记录时间码文本：实时时间模式取「此刻」的系统时间（固定 25fps 折算帧号），
+  // 否则用给定时刻（画面时间）的时间码。注意记录的 time/inTime/outTime 仍存画面时间，
+  // 这样时长、排序、去重、#mpp= 链接都不受影响，只是**展示/导出/文件名**的时间码变成实时时间
+  function recTC(sec) {
+    if (rtOn()) return fmtTC(rtSeconds(), true, RT_FPS);
+    return fmtTC(sec, true);
+  }
+  // 文件名时间码：实时时间模式必须用「动作发生那一刻」的系统时间（录制/截图保存有延迟），
+  // 所以动作发生时先记一份快照，保存时按时刻取回
+  let rtStamp = { sec: null, tc: '' };
+  function rtMarkTC(sec) { if (rtOn()) rtStamp = { sec: sec, tc: fmtTC(rtSeconds(), true, RT_FPS) }; return sec; }
+  function fileTC(sec) {
+    if (!rtOn()) return fmtTCPlainF(sec);
+    const tc = (rtStamp.sec != null && Math.abs(rtStamp.sec - sec) < 0.05)
+      ? rtStamp.tc
+      : fmtTC(rtSeconds(), true, RT_FPS);
+    return tc.replace(/:/g, '-');
+  }
 
   const CSS = `
 :host{all:initial;display:block;width:100%!important;contain:layout style}
@@ -277,6 +319,8 @@
   letter-spacing:.5px;
 }
 .b-pl{background:#ff5f00;color:#fff}
+/* 实时时间模式：播放中显示 LIVE（红色，一眼能看出当前是系统时间码） */
+.b-lv{background:#e74c3c;color:#fff}
 .b-st{background:#555;color:#ddd}
 .b-rec{background:#e74c3c;color:#fff}
 .b-in{background:#3498db;color:#fff}
@@ -573,7 +617,9 @@
       e.stopPropagation();
       openSeek();
     });
-    qs('#mgp-btn-ss').addEventListener('click', captureScreenshot);
+    // 包一层：直接绑 captureScreenshot 会把 click 事件当成 copyOnly 传进去，
+    // 变成「点按钮只复制、不下载」（与 S 键行为不一致）
+    qs('#mgp-btn-ss').addEventListener('click', () => captureScreenshot(false));
     qs('#mgp-btn-rec').addEventListener('click', toggleRecording);
     // 网页全屏进度条：拖动实时同步跳转；按住不动 1 秒拉长进度条（撑满左右 1% 边距，±30s 精细调整），松开恢复
     // 鼠标拖动为手动实现（Chromium 自定义 appearance 的 range 鼠标原生拖动失效，触屏正常）
@@ -878,6 +924,8 @@
   function openSeek() {
     const tcEl = qs('#mgp-tc');
     if (!tcEl || !video) return;
+    // 实时时间模式下时间码是系统时间，按时间码跳转没有意义 → 停用
+    if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; }
     const old = tcEl.querySelector('#mgp-seek');
     if (old) old.remove();
     const box = document.createElement('div');
@@ -967,8 +1015,18 @@
   function updateTC() {
     const txt = qs('#mgp-tc-text'), badge = qs('#mgp-tc-badge');
     if (!txt || !badge || !video) return;
+    const rt = rtOn();
     let dt, bl, bc;
-    if (state.tcMode === 'rec' || recordingInternal) {
+    if (rt) {
+      // 实时时间：时间码恒为系统时间；状态标签照旧，播放中显示 LIVE
+      dt = rtSeconds();
+      if (state.tcMode === 'rec' || recordingInternal) { bl = 'REC'; bc = 'b-rec'; }
+      else if (state.tcMode === 'in') { bl = 'IN'; bc = 'b-in'; }
+      else if (state.tcMode === 'ot') { bl = 'OUT'; bc = 'b-ot'; }
+      else if (state.tcMode === 'mk') { bl = 'MARK'; bc = 'b-mk'; }
+      else if (video.paused) { bl = 'STOP'; bc = 'b-st'; }
+      else { bl = 'LIVE'; bc = 'b-lv'; }
+    } else if (state.tcMode === 'rec' || recordingInternal) {
       dt = Math.max(0, dispTime() - (state.recordingStart || 0));
       bl = 'REC'; bc = 'b-rec';
     } else if (state.tcMode === 'in') {
@@ -989,7 +1047,7 @@
     } else {
       dt = dispTime(); bl = 'PLAY'; bc = 'b-pl';
     }
-    const p = fmtTC(dt, true).split(':');
+    const p = fmtTC(dt, true, rt ? RT_FPS : FPS).split(':');
     if (p.length === 4) txt.innerHTML = p.slice(0,3).join(':') + '<span id="mgp-tc-frames">:' + p[3] + '</span>';
     badge.textContent = bl; badge.className = bc;
     syncFsProgress();
@@ -1070,8 +1128,8 @@
           });
         } else {
           // 时间码与备注取自同一时刻（避免文件名内两者对不上）
-          const t = dispTime();
-          downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
+          const t = rtMarkTC(dispTime());
+          downloadBlob(b, buildFileName(fileTC(t), t, 'png'));
           // S 键：下载并复制
           annCopyBlob(b).then(ok => {
             mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
@@ -1102,7 +1160,7 @@
   // 保存打点截图：前缀统一 SCS；t 为打点时刻（时间码与备注均取自该时刻，保持一致）
   function saveShotBlob(b, t, toast) {
     if (!b) { mgpToast('截图失败', true); return; }
-    downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
+    downloadBlob(b, buildFileName(fileTC(t), t, 'png'));
     if (toast) mgpToast(toast, true);
   }
 
@@ -1205,23 +1263,24 @@
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
     // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
     // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
-    const nowT = dispTime();
+    const recStartT = nowT();
     // 录制始终从当前位置开始，不改变已打好的入点/出点；
     // 仅当“正好从入点开始”且存在有效出点时，播放到出点自动停止
     const hasRange = state.inPoint !== null && state.outPoint !== null && state.outPoint > state.inPoint;
-    const atIn = hasRange && Math.abs(nowT - state.inPoint) <= 1 / FPS;
+    const atIn = hasRange && Math.abs(recStartT - state.inPoint) <= 1 / FPS;
     // 从日志列表跳转到入点开始录制：当前播放位置命中某条片段记录的入点时，
     // 以该记录的出点作为自动停止目标（页面打点状态可能未设置）
     recStopTarget = null;
     if (!atIn) {
       const rec = logs.inOut.find(u => u.inTime != null && u.outTime != null && u.outTime > u.inTime
-        && Math.abs(u.inTime - nowT) <= 1 / FPS);
+        && Math.abs(u.inTime - recStartT) <= 1 / FPS);
       if (rec) recStopTarget = rec.outTime;
     }
     recordingInternal = true;
     recAutoStop = atIn || recStopTarget != null;
     recStopTime = null;
-    state.recordingStart = nowT;
+    state.recordingStart = recStartT;
+    rtMarkTC(recStartT);
     state.tcMode = 'rec'; resetSpeed();
     saveState();
     lastExpectedTime = video.currentTime;   // seek 锁定基准用媒体时钟
@@ -1247,10 +1306,16 @@
     // 录制编码固定 MP4 / H.264 + AAC，分辨率跟随视频本身（不缩放）——
     // 「录制编码」下拉已移除：WebM 档只能配 Opus 音频，部分播放器与剪辑软件打不开，
     // 固定成 MP4+AAC 后录出来的文件到处都能直接用。
-    // 色彩范围修正（全范围 → limited）需要「画面压缩」与「标签改写」同时成立：
-    //   · 画布不支持 filter 时跳过（压缩不了画面就别改标签）
-    //   · remux 模块没就位（脚本未注入等）时跳过：压缩了却改不了标签会更糟
-    const recCanRangeFix = REC_FILTER_SUPPORTED && !!MPGRemuxRef;
+    //
+    // 色彩：**不再做「画布压缩到 limited + 改写容器标签」那套修正**。
+    // 实测（Material/qc-dev/probe-color-variants.js，8 色块图端到端比对）：
+    //   · 加 contrast(85.88%) 压缩 + 标签改 limited（旧实现）→ 画面范围准，但**饱和度被吃掉约 20 级**
+    //     （纯红 255,0,0 录出来解回 226,2,4），整体发灰；
+    //   · 不压缩、标签改 limited → 黑白被拉开（16→0、235→255），画面发闷；
+    //   · **不压缩、也不动标签（现在的做法）** → 黑白灰准确（16→14、235→232），
+    //     饱和色误差最小 —— 因为 Chromium 录出来的 MP4 本身就是「full-range 画面 + full-range 标注」自洽的，
+    //     多余的压缩/改写只会引入偏差。
+    // 保留：录制诊断里的 rangeFix 字段（现在恒为 'off(native)'），方便排障时确认没有额外处理
 
     // canvas 转绘方案（实测最稳）：video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面
     recCanvas = document.createElement('canvas');
@@ -1394,7 +1459,7 @@
       resH: recCanvas.height,
       canvasInDom: !!recCanvas.parentElement,
       draws: 0, drawFails: 0, adopted: false,
-      rangeFix: recCanRangeFix ? 'on' : 'off',
+      rangeFix: 'off(native)',
       hwEnc: 'probing', hwEncCfg: ''
     };
     // 硬件编码器能力探测（WebCodecs）：MediaRecorder 无法指定编码器，
@@ -1506,9 +1571,8 @@
       let ok = false;
       try {
         if (recCtx && video && video.isConnected && video.readyState >= 2 && video.videoWidth > 0) {
-          // 全范围 → limited 压缩（见 REC_LIMITED_FILTER 说明）：只对录制画布做，
-          // 截图（PNG）保持原样——PNG 在浏览器里按 sRGB 显示，压缩反而会变灰
-          if (recCanRangeFix) recCtx.filter = REC_LIMITED_FILTER;
+          // 只补偿色度收缩（见 REC_SAT_FIX 说明）：不动亮度/黑白，避免再出现「发灰」
+          recCtx.filter = REC_SAT_FIX;
           recCtx.drawImage(video, 0, 0, recCanvas.width, recCanvas.height);
           ok = true;
         }
@@ -1635,7 +1699,7 @@
     const ext = 'mp4';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
     // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
-    const name = buildFileName(fmtTCPlainF(state.recordingStart || 0), state.recordingStart || 0, ext);
+    const name = buildFileName(fileTC(state.recordingStart || 0), state.recordingStart || 0, ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     navigator.clipboard.writeText(String(sec)).catch(()=>{});
@@ -1646,11 +1710,11 @@
       mgpToast('录制结束 — ' + sec + 's', true);
       notifyRecFinished(true);   // 通知批量流程：本段录制已完成（有产出）
     };
-    // 统一走 remux 生成「经典 MP4」（ftyp | moov | mdat，无 moof），并把色彩范围标签
-    // 改成 limited（画面已在绘制时压缩到 16-235，见 REC_LIMITED_FILTER）：
+    // 统一走 remux 生成「经典 MP4」（ftyp | moov | mdat，无 moof）：
     // MediaRecorder 直接产出的是 fragmented MP4，且 mvhd/tkhd/mdhd 的时长字段不可靠，
     // 严格播放器（Windows 播放器 / QuickTime / 手机 / 剪辑软件）会打不开。
-    // remux 会补全时长、轨道号、关键帧表、经典 ftyp 品牌并把 moov 前置；失败则回退原始文件
+    // remux 会补全时长、轨道号、关键帧表、经典 ftyp 品牌并把 moov 前置；
+    // 色彩标签保持编码器原生（不再改写，原因见文件头注释）；失败则回退原始文件
     const remuxThenSave = bytes => {
       if (MPGRemuxRef && typeof MPGRemuxRef.remuxToClassic === 'function') {
         const info = {};
@@ -1691,10 +1755,10 @@
     state.inPoint = t; state.outPoint = null;
     state.tcMode = 'in'; saveState();
     if (video.paused) video.play().catch(()=>{});
-    mgpToast('入点 ( ' + fmtTC(t) + ' | 0s )');
+    mgpToast('入点 ( ' + recTC(t) + ' | 0s )');
     // 打点自动截图：暂存当前画面，待 O 打出点时保存（多次 I 只保留最后一次，与日志入点逻辑一致）
     if (autoShot()) {
-      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fmtTCPlainF(t) }; });
+      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fileTC(rtMarkTC(t)) }; });
     }
   }
 
@@ -1708,8 +1772,8 @@
     video.pause(); resetSpeed();
     if (lastLogOutTime === null || Math.abs(outTime - lastLogOutTime) > 0.001) {
       insertSorted(logs.inOut, {
-        inTime: state.inPoint, inTC: fmtTC(state.inPoint),
-        outTime, outTC: fmtTC(outTime),
+        inTime: state.inPoint, inTC: recTC(state.inPoint),
+        outTime, outTC: recTC(outTime),
         dur: Math.max(0, outTime - state.inPoint),
         url: location.href,
         title: titleForLog()
@@ -1727,7 +1791,7 @@
       const ps = pendingShot; pendingShot = null;
       if (ps.blob) {
         const inT = state.inPoint != null ? state.inPoint : 0;
-        downloadBlob(ps.blob, buildFileName(fmtTCPlainF(inT), inT, 'png'));
+        downloadBlob(ps.blob, buildFileName(fileTC(inT), inT, 'png'));
         mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's ) · 已截图', true);
       }
     }
@@ -1933,7 +1997,7 @@
     const t = dispTime();
     state.markTime = t;
     state.tcMode = 'mk'; saveState();
-    insertSorted(logs.marks, { time: t, tc: fmtTC(t), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
+    insertSorted(logs.marks, { time: t, tc: recTC(t), url: location.href, title: titleForLog() }, m => m.time != null ? m.time : 0);
     saveLogs();
     // 不自动复制时间码（避免覆盖用户剪贴板；需要时点击控制栏时间码或面板记录行复制）
     mgpToast('已标记 ( ' + fmtTC(t) + ' )', true);
@@ -1957,8 +2021,8 @@
   function enforceSpeed() { if (!video) return; if (curSpeed !== 1 && Math.abs(video.playbackRate - curSpeed) > 0.01) video.playbackRate = curSpeed; }
   // 跳转到记录时刻：统一经 alignToFrame 对齐到帧起点（直接 seek 到帧边界之间
   // 会渲染出比目标早一帧的画面，导致跳转后画面与记录时间码不符）
-  function jumpIn() { if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.inPoint); video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
-  function jumpOut() { if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.outPoint); video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpIn() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.inPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.inPoint); video.pause(); resetSpeed(); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpOut() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.outPoint === null || !video) return; recStopTime = null; video.currentTime = alignToFrame(state.outPoint); video.pause(); resetSpeed(); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
@@ -2192,10 +2256,10 @@
     // 嵌入时间码：读取设置（background 推送的完整设置），进入时捕获当前画面时间码
     const s = window.__mgpSettings || {};
     annShowTC = s.annotateTimecode === true;
-    const shotT = dispTime();
-    annTC = fmtTC(shotT, true);
+    const shotT = rtMarkTC(dispTime());
+    annTC = recTC(shotT);   // 标注右上角嵌入的时间码（实时时间模式下即系统时间）
     // 命名与直接截图（S 键）完全一致：标题_时间码_备注.png
-    annFileName = buildFileName(fmtTCPlainF(shotT), shotT, 'png');
+    annFileName = buildFileName(fileTC(shotT), shotT, 'png');
     annBuild();
   }
 
@@ -2467,6 +2531,7 @@
   // ─── Hash seek: links like #mpp=123.4 seek once on page open ──
   function applyHashSeek(v) {
     if (hashSeekDone || !v) return;
+    if (rtOn()) { hashSeekDone = true; return; }   // 实时时间模式：不按链接时间码跳转
     hashSeekDone = true;
     try {
       const m = (location.hash || '').match(/mpp=([\d.]+)/);
@@ -2534,7 +2599,7 @@
         c.getContext('2d').drawImage(video, 0, 0);
         c.toBlob(b => {
           if (!b || batchCancel) { resolve(false); return; }   // 取消后不再产出这张截图
-          downloadBlob(b, buildFileName(fmtTCPlainF(t), t, 'png'));
+          downloadBlob(b, buildFileName(fileTC(t), t, 'png'));
           resolve(true);
         }, 'image/png');
       } catch (e) { resolve(false); }
@@ -2639,8 +2704,11 @@
   // ─── Log API (used by popup via executeScript) ───
   window.__mgpToast = mgpToast;
   window.__mgpAPI = {
+    getRealtime() { return rtOn(); },
+    setRealtime(on) { return setRtTime(on); },
     getLogs() { return JSON.parse(JSON.stringify(logs)); },
     jumpTo(t) {
+      if (rtOn()) { try { mgpToast('实时时间模式：已停用按时间码跳转', true); } catch (e) { } return false; }
       if (!video) return false;
       video.currentTime = alignToFrame(t);
       video.pause();

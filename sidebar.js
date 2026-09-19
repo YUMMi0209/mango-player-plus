@@ -27,6 +27,7 @@
     togAvoid: '#tog-avoid',
     togPip: '#tog-pip',
     togBar: '#tog-bar',
+  togRt: '#tog-rt',
     togDanmu: '#tog-danmu',
     togAll: '#tog-all',
     togTheme: '#tog-theme',

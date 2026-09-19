@@ -205,17 +205,48 @@
     if (u(1)) u(1);                           // overscan_info_present_flag
     if (over || !u(1)) return null;           // video_signal_type_present_flag
     u(3);                                     // video_format
-    const flagBit = bit, value = u(1);
-    return over ? null : { bit: flagBit, value };
+    const rangeBit = bit, rangeVal = u(1);
+    if (over) return null;
+    const info = { rangeBit, rangeVal, descPresent: false };
+    // colour_description：primaries / transfer / matrix 三个 u8（紧随 full_range 之后）
+    if (u(1)) {
+      info.descPresent = true;
+      info.primariesBit = bit; info.primaries = u(8);
+      info.transferBit = bit; info.transfer = u(8);
+      info.matrixBit = bit; info.matrix = u(8);
+      if (over) return null;
+    }
+    return info;
   }
-  // 单个 SPS NAL（含 NAL 头）→ limited；已 limited 或无法解析时返回 null
+  // 按 bit 写入（MSB first）：VUI 里的 u8 字段不保证字节对齐
+  function putBits(buf, bitPos, n, value) {
+    for (let i = 0; i < n; i++) {
+      const mask = 0x80 >> ((bitPos + i) & 7);
+      if ((value >> (n - 1 - i)) & 1) buf[bitPos + i >> 3] |= mask;
+      else buf[(bitPos + i) >> 3] &= ~mask;
+    }
+  }
+  // 单个 SPS NAL（含 NAL 头）→ 标准 BT.709 + limited；
+  // 已经标准时返回 null（无需改动）。
+  // 为什么连 primaries / transfer / matrix 一起改：Chromium 录 canvas 写的是
+  // primaries=1 / **transfer=13（sRGB 传输特性）** / matrix=1，而 transfer=13 不是视频通行的取值 ——
+  // 认这个字段的播放器 / 剪辑软件会按 sRGB 曲线解释，画面整体被抬亮、发灰。
+  // 统一写成 bt709 三件套（1/1/1）+ limited，与芒果TV等流媒体源文件的标注一致，各处解释才一致。
   function spsToLimited(nal) {
     if (!nal || nal.length < 8) return null;
     const rbsp = rbspUnescape(nal.subarray(1));
     const f = spsFullRangeBit(rbsp);
-    if (!f || f.value === 0) return null;
+    if (!f) return null;
+    const need = f.rangeVal !== 0 ||
+      (f.descPresent && (f.primaries !== 1 || f.transfer !== 1 || f.matrix !== 1));
+    if (!need) return null;
     const patched = rbsp.slice();
-    patched[f.bit >> 3] &= ~(0x80 >> (f.bit & 7));
+    putBits(patched, f.rangeBit, 1, 0);
+    if (f.descPresent) {
+      putBits(patched, f.primariesBit, 8, 1);
+      putBits(patched, f.transferBit, 8, 1);
+      putBits(patched, f.matrixBit, 8, 1);
+    }
     const body = rbspEscape(patched);
     const out = new Uint8Array(body.length + 1);
     out[0] = nal[0];
@@ -245,13 +276,16 @@
     parts.push(payload.subarray(p));          // numOfPictureParameterSets + PPS 等原样保留
     return { data: concat([payload.subarray(0, 6), ...parts]), changed };
   }
-  // colr(nclx)：full_range_flag 1→0
+  // colr(nclx)：统一成 BT.709 三件套 + limited（同 SPS VUI，两处必须一致）
   function colrToLimited(payload) {
     if (payload.length < 11 || ascii(payload, 0, 4) !== 'nclx') return { data: payload, changed: 0 };
-    const off = 4 + 6;                        // primaries(2) transfer(2) matrix(2)
-    if (!(payload[off] & 0x80)) return { data: payload, changed: 0 };
+    const rangeOff = 4 + 6;                   // primaries(2) transfer(2) matrix(2)
+    const prim = rdU16(payload, 4), trc = rdU16(payload, 6), mtx = rdU16(payload, 8);
+    const full = !!(payload[rangeOff] & 0x80);
+    if (!full && prim === 1 && trc === 1 && mtx === 1) return { data: payload, changed: 0 };
     const out = payload.slice();
-    out[off] &= 0x7F;
+    wrU16(out, 4, 1); wrU16(out, 6, 1); wrU16(out, 8, 1);
+    out[rangeOff] &= 0x7F;
     return { data: out, changed: 1 };
   }
   // 视频样本描述（avc1 等）：改 SPS VUI 与 colr。结构不符预期时整体不动。
@@ -464,7 +498,7 @@
       if (movieDur > maxMovieDur) maxMovieDur = movieDur;
       if (t.id > maxTrackId) maxTrackId = t.id;
       if (ascii(t.stsdRaw, 20, 4) === 'avc1' || ascii(t.stsdRaw, 20, 4) === 'avc3') isAvc1 = true;
-      const stsdFix = stsdToLimited(t.stsdRaw);
+      const stsdFix = { data: t.stsdRaw, changed: 0 };   // 色彩标签保持编码器原生（v3.5 起不改写）
       if (stsdFix.changed) colorFix++;
       traks.push({
         t, list, mediaDur, movieDur,

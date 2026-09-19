@@ -119,6 +119,17 @@ const MPP = (() => {
     } catch (e) { }
     return false;
   }
+  // 实时时间模式（时间码取系统时间）：状态存在页面端（不落盘，直播页默认开），面板只负责开关
+  function fnGetRealtime() {
+    try { return window.__mgpAPI && typeof window.__mgpAPI.getRealtime === 'function' ? window.__mgpAPI.getRealtime() === true : false; }
+    catch (e) { return false; }
+  }
+  function fnSetRealtime(on) {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.setRealtime === 'function') return window.__mgpAPI.setRealtime(on === true) === true;
+    } catch (e) { }
+    return false;
+  }
   function fnJump(time) {
     try {
       if (window.__mgpAPI && typeof window.__mgpAPI.jumpTo === 'function') {
@@ -594,6 +605,7 @@ const MPP = (() => {
     els.togShot = $(cfg.togShot);
     els.togAvoid = $(cfg.togAvoid);
     els.togPip = $(cfg.togPip);
+    els.togRt = $(cfg.togRt);
     els.togBar = $(cfg.togBar);
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
@@ -2647,6 +2659,14 @@ const MPP = (() => {
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
       applyTheme(s.theme);
     });
+    // 实时时间：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
+    // 每次打开设置菜单都同步一次，避免与页面实际状态不一致
+    const syncRtSwitch = () => {
+      if (!els.togRt) return;
+      execInPage(fnGetRealtime).then(v => { if (els.togRt) els.togRt.checked = v === true; }).catch(() => { });
+    };
+    syncRtSwitch();
+    if (els.btnSettings) els.btnSettings.addEventListener('click', syncRtSwitch);
     // 设置保存统一经 background 中转：面板（popup/侧边栏）关闭会中断未完成的
     // storage 异步链，切换后立即关闭面板会导致保存丢失；service worker 不随面板关闭
     const savePatch = patch => chrome.runtime.sendMessage({ type: 'saveSettings', patch }).catch(() => { });
@@ -2654,6 +2674,16 @@ const MPP = (() => {
     if (els.togAvoid) els.togAvoid.addEventListener('change', e => savePatch({ avoidTimecode: e.target.checked }));
     if (els.togPip) els.togPip.addEventListener('change', e => savePatch({ pipRecord: e.target.checked }));
     if (els.togBar) els.togBar.addEventListener('change', e => savePatch({ barEnabled: e.target.checked }));
+    // 实时时间：只改页面状态，不写设置（默认关闭 / 每次手动开；直播页默认开）
+    if (els.togRt) els.togRt.addEventListener('change', e => {
+      const want = e.target.checked;
+      execInPage(fnSetRealtime, [want]).then(v => {
+        if (els.togRt && v !== want) { els.togRt.checked = v === true; panelToast('当前页面不支持该开关'); }
+      }).catch(() => {
+        if (els.togRt) els.togRt.checked = !want;
+        panelToast('当前页面不支持该开关');
+      });
+    });
     if (els.togDanmu) els.togDanmu.addEventListener('change', e => savePatch({ danmuBlock: e.target.checked }));
     // 网页全屏按钮：视频铺满当前窗口（非浏览器全屏），ESC 退出；反馈提示统一显示在网页
     if (els.btnWebFs) els.btnWebFs.addEventListener('click', () => {
