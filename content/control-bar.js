@@ -2242,9 +2242,9 @@
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
-    // 嵌入时间码（开关开启时）：右上角，白边主题色粗体，与文本标注同风格（字号为标注文本的两倍）
+    // 嵌入时间码（开关开启时）：右上角，白边主题色粗体，与文本标注同风格、同字号
     if (annShowTC && annTC) {
-      const tcFs = Math.max(40, Math.round(c.width / 30));
+      const tcFs = annTextFontSize();
       ctx.font = 'bold ' + tcFs + 'px "JetBrains Mono","Cascadia Code","Consolas",monospace';
       ctx.lineWidth = Math.max(3, Math.round(tcFs / 6));
       const tw = ctx.measureText(annTC).width;
@@ -2256,12 +2256,13 @@
     }
   }
 
-  // 文本标注字号（按截图原始尺寸换算）：跟着画面宽度走，1080p 约 51px、720p 约 34px。
-  // 用户反馈偏小，这里把系数从 width/50 提到 width/38、下限从 18 提到 28
-  // （输入框预览字号按 annScale 同比例换算，所以框里框外一致）
+  // 标注文字字号（按截图原始尺寸换算）：跟着画面宽度走，与右上角嵌入时间码**同字号**
+  // （1080p 64px、720p 43px、下限 40px）。用户反馈偏小，已两次上调：
+  // width/50 → width/38 → width/30，现在与时间码一致。
+  // 输入框预览字号按 annScale 同比例换算，所以框里框外一致
   function annTextFontSize() {
     const w = (annSource && annSource.width) || 1280;
-    return Math.max(28, Math.round(w / 38));
+    return Math.max(40, Math.round(w / 30));
   }
 
   // 确认文本标注：绘制到截图并关闭输入框
