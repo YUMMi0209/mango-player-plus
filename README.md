@@ -12,7 +12,7 @@
 Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
 1. 获取代码（任选其一）：
-   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v3.5.zip` 并解压；
+   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v3.6.zip` 并解压；
    - 或 `git clone https://github.com/YUMMi0209/mango-player-plus.git` 克隆仓库。
 2. 打开扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
@@ -53,8 +53,8 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 | `Shift + I / O / M` | 跳转到最近打下的入点 / 出点 / 标记点 |
 | `,` / `.` | 逐帧后退 / 前进（按视频帧率 1 帧） |
 | `PageUp` / `PageDown` | 后退 / 前进 1 秒（网页不随之翻页） |
-| `S` | 截图：保存当前画面为 PNG（同时复制到剪贴板） |
-| `C` | 截图并复制到剪贴板（不下载） |
+| `S` | 截图：保存当前画面为 PNG（同时复制到剪贴板）；会先停在当前帧，保证文件名时间码与画面一致 |
+| `C` | 截图并复制到剪贴板（不下载）；同样会先停在当前帧 |
 | `R` | 开始 / 停止录制画面（含声音） |
 | `Esc` | 取消进行中的批量截图 / 录制；网页全屏时退出全屏 |
 
@@ -90,6 +90,8 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 右键点击可弹出输入框，输入时间码直接跳转。
 
 > 跳转是**帧级校正**的：芒果TV 这类播放器会把 `seek` 吸附到更早的位置（可能早好几帧），所以跳过去之后会核对**实际渲染帧**与目标帧的差并补偿，保证画面与记录的时间码一致。输入框跳转、`Shift + I / O / M`、`#mpp=` 链接、面板点记录跳转、批量截图 / 批量录制都走这条链路。
+>
+> 时间码本身也是**逐帧对齐画面**的（v3.6 起）：读取的是「此刻真正上屏的那一帧」——以 rVFC 给出的上屏时刻为基准、按墙上时钟外推（站点页面卡顿、回调被拖后也不会让时间码漂），并修正片源首帧 PTS 不为 0 的偏移（芒果TV 部分片源会整体偏 2~3 帧）。**截图与标注会先冻结画面、把画面定位到该帧并核对后再取图**，所以图片/文件名里的时间码与图里那一帧严格一致（因此按 `S` / `C` / `Shift + S` 时画面会暂停在当前帧）。
 
 支持以下格式（**面板里右键双击时间码就地编辑时同样适用**，两者共用同一套解析逻辑）：
 
@@ -578,5 +580,5 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,heigh
 
 ---
 
-芒着拉片 | MG Player+ v3.5  
+芒着拉片 | MG Player+ v3.6  
 YUMMi

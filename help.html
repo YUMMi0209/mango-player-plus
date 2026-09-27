@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v3.5 使用教程</title>
+<title>芒着拉片 | MG Player+ v3.6 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v3.5</span>
+<span class="sub">使用教程 · v3.6</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -130,8 +130,9 @@ li{margin:4px 0}
 </ul>
 <h3>截图与标注</h3>
 <ul>
-<li><kbd>S</kbd> 下载 PNG 并复制到剪贴板；<kbd>C</kbd> 只复制不下载。</li>
+<li><kbd>S</kbd> 下载 PNG 并复制到剪贴板；<kbd>C</kbd> 只复制不下载。两者都会先停在当前帧，保证文件名时间码与图里那一帧一致。</li>
 <li><kbd>Shift</kbd>+<kbd>S</kbd> 标注截图：画框 / 加字（字号按截图宽度换算，1080p 64px，与嵌入时间码同字号），<kbd>Z</kbd> 撤销、<kbd>C</kbd> 复制、<kbd>Enter</kbd> 保存、<kbd>Esc</kbd> 取消。</li>
+<li>时间码按「此刻真正上屏的那一帧」计算（片源首帧 PTS 偏移会自动修正），所以状态栏的时间码、图片里嵌入的时间码、文件名里的时间码始终是同一帧。</li>
 <li>「打点自动截图」开启后，<kbd>M</kbd> 打点立即截图，<kbd>I</kbd> 打入点先暂存、<kbd>O</kbd> 打出点时保存。</li>
 </ul>
 <h3>录制与编码</h3>
@@ -174,7 +175,7 @@ li{margin:4px 0}
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v3.5</span>
+<span>芒着拉片 | MG Player+ v3.6</span>
 <span>YUMMi</span>
 </footer>
 </div>
