@@ -36,6 +36,22 @@
           else delete map[key];
           chrome.storage.local.set({ mpp_history: map }).catch(() => { });
         }).catch(() => { });
+      } else if (d.__mgp === 'lut') {
+        // 颜色查找表：MAIN world 拿不到 chrome.runtime，这里按 id 取扩展内的 .cube 文本送回去
+        const LUT_FILES = {
+          slog3: 'luts/slog3-sgamut3cine-to-lc709-typea.cube',
+          clog3: 'luts/clog3-cinema-gamut-to-canon709.cube',
+          slog2: 'luts/slog2-sgamut-to-lc709-typea.cube',
+          clog2: 'luts/clog2-cinema-gamut-to-canon709.cube'
+        };
+        const id = String(d.name || '');
+        const path = LUT_FILES[id];
+        if (!path) return;
+        fetch(chrome.runtime.getURL(path)).then(r => r.text()).then(text => {
+          window.postMessage({ __mgp: 'lutData', name: id, text: text }, '*');
+        }).catch(() => {
+          window.postMessage({ __mgp: 'lutData', name: id, error: 'fetch-failed' }, '*');
+        });
       } else if (d.__mgp === 'settings' && d.patch && typeof d.patch === 'object') {
         // 页面端（标注截图嵌入时间码开关等）经桥保存设置：
         // 仅接受白名单字段并强制布尔化，防页面脚本伪造设置污染扩展存储

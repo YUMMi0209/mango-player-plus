@@ -30,6 +30,7 @@ MPP.init({
   togPip: '#tog-pip',
   togBar: '#tog-bar',
   togRt: '#tog-rt',
+  lutOpts: '#lut-opts',
   togDanmu: '#tog-danmu',
   togAll: '#tog-all',
   togTheme: '#tog-theme',

@@ -4,8 +4,8 @@
 'use strict';
 
 const SETTINGS_KEY = 'mpp_settings';
-// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关；lastMode 记忆上次的面板显示模式；annotateTimecode 标注截图嵌入时间码开关；recCodec 录制编码（h264 / h264-low / vp8 / vp9，默认 h264；仅 h264-low 固定 720P，其余跟随源分辨率）；noteFileName 备注写入文件名开关
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: 'h264' };
+// v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关；lastMode 记忆上次的面板显示模式；annotateTimecode 标注截图嵌入时间码开关；noteFileName 备注写入文件名开关；lut 颜色查找表（slog3 / clog3 / slog2 / clog2，默认 slog3；是否应用由页面上按 Q 控制，默认不应用）
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: 'h264', lut: 'slog3' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);
@@ -83,7 +83,7 @@ async function syncActiveScripts() {
       await chrome.scripting.registerContentScripts([
         {
           id: ACTIVE_SCRIPTS_ID,
-          matches, js: ['content/tc-parse.js', 'content/remux.js', 'content/content.js', 'content/control-bar.js'],
+          matches, js: ['content/tc-parse.js', 'content/remux.js', 'content/lut.js', 'content/content.js', 'content/control-bar.js'],
           runAt: 'document_idle', world: 'MAIN'
         },
         {

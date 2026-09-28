@@ -499,19 +499,21 @@
   // 因此时间码必须以 mediaTime 为准才能与画面内嵌时间码一致
   let lastFrameMediaTime = null;
   // 最近一次「画面真正上屏」的信息：{ mediaTime, presentedAt, presentedFrames }
-  // presentedAt = rVFC 的 expectedDisplayTime（与 performance.now() 同一时基），
-  // 用它 + 墙上时钟做外推，才能在**回调被主线程拖后**时也拿到当前真正在放的那一帧
-  // （只读回调里的 mediaTime 会落后几帧到十几帧：站点页面越忙、倍速越高落后越多）
   let lastFrameInfo = null;
-  let frameFreezeAt = 0;   // 画面冻结（暂停）发生的时刻，performance.now() 口径
-  // 实测的「一次上屏间隔」（≈ 1/刷新率，通常 16.7ms）：仅用于诊断输出（frameDebug），
-  // 便于排查「回调节奏 / 显示节奏」问题
+  // 实测的「一次上屏间隔」（≈ 1/刷新率，通常 16.7ms）：仅用于诊断输出（frameDebug）
   let displayQuantum = 16.7;
   const dqSamples = [];
+  // 回调「滞后帧数」：rVFC 回调可能被主线程拖后（站点越忙、倍速越高落后越多），回调里报的
+  // 那一帧会比屏幕上真正在放的那一帧旧 lag 帧。lag 不靠猜，靠**画面指纹**实测
+  // （见 calibrateToFrozen）：冻结画面 → 把画面 seek 到候选帧 → 比对像素找到屏幕上那一帧，
+  // 同时得到 lag = 该帧 − 回调上报帧；之后不用 seek 也能给出正确时间码。
+  let frameLag = 0;
+  let frameBasisExact = false;   // true = 有精确落点（刚校验过），此时不再叠加 lag
   // 片源「首帧 PTS 偏移」（mediaTime − 视频时间），按整帧计：部分片源（芒果TV 等）首帧
-  // PTS 不从 0 开始，偏 2~3 帧，不修正的话整条时间码都会偏大（画面停在第一帧却显示第 3 帧）。
-  // 只在视频开头（currentTime<0.5）测量，避免把站点 seek 吸附的误差当成偏移。见 notePtsOffset
+  // PTS 不从 0 开始，偏 2~3 帧，不修正的话整条时间码都会整体偏大（画面停在第一帧却显示第 3 帧）。
+  // 优先用「seek 落点已核对」时的实测值（最可信），其次用视频开头第一帧的读数
   let ptsOffset = 0;
+  let ptsOffsetVerified = false;
   // 持续校准帧率：掉帧会让单帧间隔翻倍，取滑动窗口中位数抗噪；
   // 非整数帧率（23.976 / 29.97 / 59.94）四舍五入到整数（24 / 30 / 60），
   // 不再归整到 5 的倍数（否则 24fps 会被误判为 25fps 导致时间码逐帧漂移）
@@ -565,71 +567,153 @@
     }
     v.requestVideoFrameCallback(cb);
   }
-  // 「此刻画面在放哪一帧」：以最近一次上屏帧为基准，按墙上时钟外推。
-  // 为什么要外推：回调可能被主线程拖后（站点页面越忙、倍速越高，落后越多），
-  //   只读回调里的 mediaTime 会差几帧到十几帧。
-  // 为什么以「上屏时刻」为基准：rVFC 的 expectedDisplayTime 是那一帧真正上屏的时刻，
-  //   与 performance.now() 同一时基，页面卡顿也不会让基准漂移。
-  // 暂停后只外推到「冻结那一刻」（画面不再前进）；外推最多 100ms（页面被节流、
-  //   回调停摆时宁可停在最后已知位置，也不要一路跑飞）。
-  const FRAME_EXTRAP_MAX_MS = 100;
+  // 「此刻画面在放哪一帧」= 回调上报的那一帧 + 实测滞后 lag（按整帧）。
+  // 不再按墙上时钟连续外推：那会算出「不存在的中间值」，站点卡顿 / 高倍速下反而更偏；
+  // 这里给出的永远是某一帧的真实时间，lag 没测准时退化为「回调上报帧」，偏保守不往前冲。
   function frameTimeNow() {
     const f = lastFrameInfo;
     if (!f || f.mediaTime == null) return lastFrameMediaTime;
-    const rate = (video && video.playbackRate) ? video.playbackRate : 1;
-    const endAt = (video && video.paused) ? (frameFreezeAt || f.presentedAt) : performance.now();
-    const dt = Math.min(endAt - f.presentedAt, FRAME_EXTRAP_MAX_MS);
-    return dt > 0 ? f.mediaTime + (dt / 1000) * rate : f.mediaTime;
-  }
-  // 测「首帧 PTS 偏移」：只在视频开头测（currentTime<0.5 时画面必然还停在开头几帧）。
-  // 暂停样本最可信（播放头与画面都停在原地），一个就够，取最小值；
-  // 只有播放样本时，时钟滞后会让读数偏大，所以取最小值并要求至少 5 次一致。
-  const ptsHist = [];   // { fr, paused }
-  function notePtsOffset() {
-    if (!video || video.seeking || lastFrameMediaTime == null) return;
-    if (video.currentTime > 0.5) return;
     const F = FPS > 0 ? FPS : 25;
-    const fr = Math.round((lastFrameMediaTime - video.currentTime) * F);
-    if (fr < 0 || fr > 6) return;
-    ptsHist.push({ fr: fr, paused: !!video.paused });
-    if (ptsHist.length > 30) ptsHist.shift();
-    const p = ptsHist.filter(x => x.paused).map(x => x.fr);
-    if (p.length >= 1) { ptsOffset = Math.min.apply(null, p) / F; return; }
-    const all = ptsHist.map(x => x.fr);
-    const minFr = Math.min.apply(null, all);
-    ptsOffset = all.filter(x => x === minFr).length >= 5 ? minFr / F : 0;
+    const lag = frameBasisExact ? 0 : Math.max(0, Math.min(12, frameLag));
+    return f.mediaTime + lag / F;
   }
-  // 冻结画面读数：pause 事件是异步的，等事件到了再读就晚了（丢的是暂停前那几帧的时间），
-  // 所以先记下冻结时刻再暂停；暂停后 frameTimeNow 只外推到这里为止
+  // 测「首帧 PTS 偏移」（bootstrap）：只在视频最开头测，此时画面必然是首帧，
+  // 它的 mediaTime 就是首帧 PTS 偏移。只取 currentTime ≤ 1/fps 的样本，避免把
+  // 站点 seek 吸附的位置差当成偏移（seek 落点已核对的实测值优先，见 setPtsOffsetFrom）
+  const ptsHist = [];
+  function notePtsOffset() {
+    if (ptsVerified()) return;
+    if (!video || video.seeking || lastFrameMediaTime == null) return;
+    const F = FPS > 0 ? FPS : 25;
+    if (video.currentTime > 1 / F) return;
+    const fr = Math.round(lastFrameMediaTime * F);
+    if (fr < 0 || fr > 6) return;
+    ptsHist.push(fr);
+    if (ptsHist.length > 30) ptsHist.shift();
+    const minFr = Math.min.apply(null, ptsHist);
+    ptsOffset = ptsHist.filter(x => x === minFr).length >= 2 ? minFr / F : 0;
+  }
+  function ptsVerified() { return ptsOffsetVerified; }
+  // 用「已核对过的 seek 落点」实测 PTS 偏移：落点那一帧的视频时间 = 目标帧，
+  // 它的 mediaTime 与目标帧时间的差就是偏移（最可信的测法）
+  function setPtsOffsetFrom(mediaTime, targetSec) {
+    const F = FPS > 0 ? FPS : 25;
+    const want = Math.floor(targetSec * F + 1e-6) / F;
+    const fr = Math.round((mediaTime - want) * F);
+    if (fr < -2 || fr > 6) return;
+    if (ptsOffsetVerified && Math.abs(fr / F - ptsOffset) < 1e-6) return;
+    ptsOffset = fr / F;
+    ptsOffsetVerified = true;
+  }
+  // 冻结画面：截图 / 标注取图前暂停，保证取到的是「你按下时看到的那一帧」。
+  // pause 事件是异步的，所以这里直接同步调用 pause()，随后立刻 drawImage
   function freezeFrame() {
     if (!video) return;
-    frameFreezeAt = performance.now();
     if (!video.paused) { try { video.pause(); } catch (e) { } }
   }
-  // 外部（站点/用户）暂停时也要记冻结时刻。注意：自家 freezeFrame() 之后 pause 事件
-  // 会晚到（事件是异步的），若在这里覆盖成更晚的时刻，暂停后的读数会继续往前跑
-  // （8 倍速下能多出 3 帧）——所以短时间内已有的冻结时刻优先保留
-  function onVideoPause() {
-    const now = performance.now();
-    if (!frameFreezeAt || (now - frameFreezeAt) > 1500) frameFreezeAt = now;
+  // ── 画面指纹：用来在**不改变画面**的前提下确认「屏幕上到底是哪一帧」 ──
+  // 为什么需要：暂停后 rVFC 不再触发（没有新帧上屏），拿不到当前帧的元数据；而站点播放器
+  // 还会把 seek 吸附到别处，所以只能靠「比画面」来确认落点。32×32 灰度指纹读一次约 5ms，
+  // 只在截图/校准时做一次，不影响播放。
+  let sigCanvas = null, sigCtx = null;
+  const SIG_N = 32, SIG_MATCH = 3.5;   // 平均亮度差 ≤3.5 视为同一帧（压缩噪声经验值）
+  function frameSignature(src) {
+    try {
+      if (!src) return null;
+      const sw = src.videoWidth || src.width, sh = src.videoHeight || src.height;
+      if (!sw || !sh) return null;
+      if (!sigCanvas) {
+        sigCanvas = document.createElement('canvas');
+        sigCanvas.width = SIG_N; sigCanvas.height = SIG_N;
+        sigCtx = sigCanvas.getContext('2d', { willReadFrequently: true });
+      }
+      sigCtx.drawImage(src, 0, 0, sw, sh, 0, 0, SIG_N, SIG_N);
+      const d = sigCtx.getImageData(0, 0, SIG_N, SIG_N).data;
+      const gray = new Uint8Array(SIG_N * SIG_N);
+      let h = 2166136261;
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+        const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
+        gray[j] = g;
+        h = ((h ^ g) * 16777619) >>> 0;
+      }
+      return { hash: h, gray: gray };
+    } catch (e) { return null; }
   }
-  // 截图 / 标注取图的「定帧」：先冻结画面，再把画面定位到当前这一帧并核对**实际渲染帧**
-  // （站点播放器会把 seek 吸附到别处），确认后才取图。这样图里那一帧与时间码必定是同一帧
-  // ——取图后立刻 drawImage，画面已冻结，不会再变。seek 不可用（直播等）时按超时兜底。
-  function settleCaptureFrame(cb) {
-    let called = false;
-    const run = () => { if (called) return; called = true; try { cb(); } catch (e) { } };
-    if (!video || !video.videoWidth) { run(); return; }
-    freezeFrame();
-    const t = dispTime();
-    jumpAligned(t, { keepPlaying: true, onDone: run });
-    setTimeout(run, 1200);   // 兜底：seek 不生效时也不能把截图卡住
+  function sigDiff(a, b) {
+    if (!a || !b || !a.gray || !b.gray || a.gray.length !== b.gray.length) return Infinity;
+    if (a.hash === b.hash) return 0;
+    let s = 0;
+    for (let i = 0; i < a.gray.length; i++) s += Math.abs(a.gray[i] - b.gray[i]);
+    return s / a.gray.length;
   }
-  // 时间码基准 = 「当前正在渲染的那一帧的视频时间」= 上屏帧 mediaTime − 首帧 PTS 偏移。
-  // 早先这里取的是 min(上屏帧时间, currentTime)：但 currentTime 是**播放头时钟**，
-  //   高倍速/站点卡顿时它会明显滞后于画面（实测 8 倍速下差 3 帧以上），取 min 会把
-  //   时间码往回拽，于是「控制栏时间码比画面里那一帧少几帧」。现在改为只按上屏帧推算，
-  //   首帧 PTS 偏移用一次性测得的常量修正。
+  // 把画面 seek 到第 idx 帧并读回「实际渲染的是哪一帧」（mediaTime）。
+  // 注意：不需要保证落在请求的那一帧——签名比对会告诉我们落到了哪一帧，
+  // 站点把 seek 吸到别处也不影响（继续往下试就行）。所以这里用最轻的 seek，
+  // 不做 jumpAligned 那套「核对 + 补偿」（页面卡时那套一次要 ~1 秒，校准连试几帧会超时）
+  function probeFrameAt(idx, cb) {
+    if (!video || idx < 0) { cb(null); return; }
+    const F = FPS > 0 ? FPS : 25;
+    const target = idx / F + 1e-4;
+    let settled = false, fallback = 0;
+    const finish = mt => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      try { video.removeEventListener('seeked', onSeeked); } catch (e) { }
+      cb(mt == null ? null : mt);
+    };
+    const onSeeked = () => {
+      // 等这一帧真正上屏：rVFC 是最可靠的信号，拿不到就退回一个小延时
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        try { video.requestVideoFrameCallback(() => setTimeout(() => finish(lastFrameMediaTime), 30)); return; } catch (e) { }
+      }
+      setTimeout(() => finish(lastFrameMediaTime), 80);
+    };
+    video.addEventListener('seeked', onSeeked);
+    try { video.currentTime = target; } catch (e) { finish(null); return; }
+    fallback = setTimeout(() => finish(lastFrameMediaTime), 400);
+  }
+  // 冻结画面的「定帧校准」：把画面 seek 到候选帧并比对指纹，直到找到屏幕上那一帧。
+  // 只用它来**确定时间码**：图片早已按冻结画面取好，所以校准怎么跳都不会改变图片内容。
+  function calibrateToFrozen(frozenSig, cb) {
+    const F = FPS > 0 ? FPS : 25;
+    let done = false;
+    const finish = found => {
+      if (done) return;
+      done = true;
+      try { cb(found ? found.mediaTime : null); } catch (e) { }
+    };
+    if (!frozenSig || !video) { finish(null); return; }
+    const base = lastFrameInfo ? lastFrameInfo.mediaTime : null;
+    const start = Math.floor(dispTime() * F + 1e-6) + Math.round(frameLag);
+    // 候选顺序：先按估计值，再**向前**逐帧找（屏幕上的帧一定不早于回调刚上报的那一帧，
+    // 回调被拖后越多就越靠后），最后补几个向后的兜底与大跨度粗查
+    const order = [0, 1, 2, 3, 4, -1, 5, 6, 7, 8, -2, -3, 12, 20, 32];
+    let i = 0;
+    const next = () => {
+      if (done) return;
+      // 都没匹配上：不猜（宁可退回「当前读数」这个已知真实帧，也不要报一个错的帧号）
+      if (i >= order.length) { finish(null); return; }
+      const targetFrame = start + order[i++];
+      if (targetFrame < 0) { next(); return; }
+      probeFrameAt(targetFrame, mt => {
+        if (done) return;
+        if (mt == null) { next(); return; }
+        const dist = sigDiff(frozenSig, frameSignature(video));
+        if (dist <= SIG_MATCH) {
+          frameBasisExact = true;   // 画面就停在这一帧，之后读数不必再加滞后
+          if (base != null) frameLag = Math.max(0, Math.min(24, Math.round((mt - base) * F)));
+          finish({ mediaTime: mt, dist: dist });
+          return;
+        }
+        next();
+      });
+    };
+    next();
+  }
+  // 时间码基准 = 「当前正在渲染的那一帧的视频时间」= 上屏帧 mediaTime + 实测滞后 − 首帧 PTS 偏移。
+  // 早先版本按墙上时钟连续外推，会算出不存在的中间值（站点卡顿/高倍速下更偏）；
+  // 现在只用「真实上屏帧 + 实测滞后」，并由截图时的指纹校准持续修正。
   function dispTime() {
     const est = frameTimeNow();
     if (est == null) return video ? video.currentTime : 0;
@@ -691,6 +775,11 @@
         const err = (mt == null) ? 0 : (frameStart - mt);       // >0：落早了
         // 偏早就按实测误差补偿再 seek 一次（最多两轮）；误差在 1 帧内即认为落点正确
         if (err > 0.6 / F && tries < 3) { seek(err + 0.5 / F); return; }
+        // 落点已核对过：此刻屏幕上就是这一帧，时间码不必再叠加「回调滞后」
+        if (mt != null && Math.abs(err) <= 1 / F) {
+          frameBasisExact = true;
+          setPtsOffsetFrom(lastFrameMediaTime, frameStart);
+        }
         finish();
       };
       const onSeeked = () => {
@@ -707,7 +796,7 @@
         finish();
         return;
       }
-      fallback = setTimeout(verify, 900);
+      fallback = setTimeout(verify, (opts && opts.verifyMs) || 900);
     };
     seek(0);
     return true;
@@ -733,8 +822,8 @@
     }
     lastFrameMediaTime = null;   // 换 video 后清除旧渲染帧时间
     lastFrameInfo = null;
-    frameFreezeAt = 0;
-    ptsOffset = 0; ptsHist.length = 0;   // 换集后重新测新片源的首帧 PTS 偏移
+    frameLag = 0; frameBasisExact = false;
+    ptsOffset = 0; ptsOffsetVerified = false; ptsHist.length = 0;   // 换集后重测新片源
     dqSamples.length = 0;
     pendingShot = null;          // 换 video 后丢弃未保存的入点截图
     loadState();
@@ -749,9 +838,8 @@
       document.head.appendChild(ds);
     }
     detectFrameRate(video);
-    // 暂停/播放：记录画面冻结时刻（frameTimeNow 的外推终点）
-    video.addEventListener('pause', onVideoPause);
-    video.addEventListener('play', () => { frameFreezeAt = 0; });
+    // 倍速变了，回调滞后帧数也变（滞后按帧计），重新测
+    video.addEventListener('ratechange', () => { frameLag = 0; frameBasisExact = false; });
     video.addEventListener('ended', onVideoEnded);
     bindEvents();
     startLoop();
@@ -1283,21 +1371,56 @@
   }
 
   // 截图：copyOnly=true 仅复制到剪贴板（C 键）；false 下载 PNG 并复制（S 键）
+  // 冻结画面 + 取指纹 → 先把「冻结画面 + 当前读数」交给调用方（用于立刻出图/开窗），
+  // 再在后台用指纹校准出这一帧的准确时间码并回调 onRefine(精确时间)。
+  // 关键：图片在冻结那一刻就取好了，之后的校准 seek **不会改变图片内容**，
+  // 所以既保证「图 = 你按下时看到的画面」，又保证「图里的时间码 = 这一帧」。
+  let calibRunning = false;
+  function captureFrozenFrame(cb, onRefine, deadlineMs) {
+    if (!video || !video.videoWidth) { cb(null); return; }
+    freezeFrame();
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    try {
+      c.getContext('2d').drawImage(video, 0, 0);
+      c.getContext('2d').getImageData(0, 0, 1, 1);   // 受保护内容会在此抛错
+    } catch (e) { cb(null, c, 'protect'); return; }
+    const est = dispTime();
+    cb(est, c);   // 立刻可用（图已定，时间码是当前读数）
+    if (!onRefine) return;
+    // 播到结尾：画面就是最后一帧，不必比对指纹（末尾 seek 也会被夹到最后一帧）
+    const F = FPS > 0 ? FPS : 25;
+    const dur = (video.duration && isFinite(video.duration)) ? video.duration : 0;
+    if (video.ended || (dur > 0 && dur - video.currentTime < 2 / F)) { onRefine(null); return; }
+    // 一次只跑一个校准：校准会来回 seek（虽然不影响已取好的图），并发起来画面会乱跳
+    if (calibRunning) { onRefine(null); return; }
+    calibRunning = true;
+    let settled = false;
+    const done = mt => {
+      if (settled) return;
+      settled = true;
+      calibRunning = false;
+      try { onRefine(mt == null ? null : mt - ptsOffset); } catch (e) { }
+    };
+    const sig = frameSignature(c);
+    if (!sig) { calibRunning = false; onRefine(null); return; }
+    calibrateToFrozen(sig, done);
+    setTimeout(() => done(null), deadlineMs || 8000);
+  }
   function captureScreenshot(copyOnly) {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
-    // 实时时间模式下：文件名的系统时间要取「按下的那一刻」，不能等定帧（可能要几百毫秒）
+    // 实时时间模式下：文件名的系统时间要取「按下的那一刻」，不能等校准（可能要几百毫秒）
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
-    // 先定帧（冻结 + 核对实际渲染帧）再取图：时间码与图里那一帧必须是同一帧。
-    // 时间码也要在 drawImage 的同一瞬间取（放在 toBlob 回调里读会晚几帧）
-    settleCaptureFrame(() => {
-      if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
-      const c = document.createElement('canvas');
-      c.width = video.videoWidth; c.height = video.videoHeight;
-      const t = rtMarkTC(dispTime());
+    let estT = null, canvas = null;
+    const save = () => {
+      const cc = canvas;
+      if (!cc) { mgpToast('截图失败: 内容保护'); return; }
+      // 校准没成功时退回当前读数（画面内容仍是冻结那一帧）
+      const t = rtMarkTC(estT == null ? dispTime() : estT);
       const tcPlain = rtSnap || fileTC(t);
+      lastCaptureTC = rtSnap || fmtTC(t);
       try {
-        c.getContext('2d').drawImage(video, 0, 0);
-        c.toBlob(b => {
+        cc.toBlob(b => {
           if (!b) { mgpToast('截图失败'); return; }
           if (copyOnly) {
             // C 键：截图复制（不下载），与标注窗口内的复制行为一致
@@ -1313,7 +1436,11 @@
           }
         }, 'image/png');
       } catch(e) { mgpToast('截图失败: 内容保护'); }
-    });
+    };
+    captureFrozenFrame((t0, c) => { estT = t0; canvas = c; }, t1 => {
+      if (t1 != null) estT = t1;   // 校准出的精确时间码
+      save();
+    }, 3500);   // 截图要等文件名，别拖太久（校准不出来就用当前读数）
   }
 
   // ─── 打点自动截图：M 打点立即保存；I 打入点暂存，O 打出点时保存最后一次 I 的截图 ──
@@ -2165,6 +2292,8 @@
     if (on && window.__mgp_video) {
       // 换集后旧容器可能被整体重建：wrapper 虽存在但已脱离 DOM（isConnected=false）时同样需要重建
       if (!wrapper || !wrapper.isConnected || video !== window.__mgp_video) inject(window.__mgp_video);
+      // 颜色查找表：容器重建后把叠加画布重新挂到新容器上
+      if (window.MPGLut && window.MPGLut.isOn()) { try { window.MPGLut.rebind(window.__mgp_video); } catch (e) { } }
     } else if (!on && wrapper) remove();
   }
 
@@ -2239,12 +2368,66 @@
       case 's': case 'S': e.preventDefault(); captureScreenshot(false); break;
       // C：截图并复制到剪贴板（不下载，与标注窗口内 C 行为一致）
       case 'c': case 'C': e.preventDefault(); captureScreenshot(true); break;
+      // Q：应用 / 取消颜色查找表（设置的「颜色查找表」里选 LUT，默认不应用）
+      case 'q': case 'Q': e.preventDefault(); toggleLut(); break;
     }
+  });
+
+  // ─── 颜色查找表（Q 键应用 / 取消）─────────────────────────────
+  // 设置的「颜色查找表」里选 LUT（SLog3 / CLog3 / SLog2 / CLog2，默认 SLog3）；
+  // Q 键应用或取消，默认不应用。LUT 数据（.cube）由隔离世界的桥取回后 postMessage 送来。
+  let lutPending = null;   // 正在等待数据的 LUT id
+  function lutId() {
+    const s = window.__mgpSettings || {};
+    const id = String(s.lut || 'slog3');
+    return (window.MPGLut && window.MPGLut.CATALOG[id]) ? id : 'slog3';
+  }
+  function lutOn() { return !!(window.MPGLut && window.MPGLut.isOn()); }
+  function toggleLut() {
+    if (!window.MPGLut) { mgpToast('颜色查找表不可用（脚本未加载）', true); return false; }
+    if (!video || !video.videoWidth) { mgpToast('无画面', true); return false; }
+    const id = lutId();
+    const label = window.MPGLut.name(id) || id;
+    if (lutOn()) {
+      window.MPGLut.clear();
+      mgpToast('已取消颜色查找表（' + label + '）', true);
+      return false;
+    }
+    // 已缓存就直接应用；否则先向隔离世界的桥要 .cube 文本（约 1MB，只取一次）
+    const ok = window.MPGLut.apply(id, null, video);
+    if (ok) { mgpToast('已应用颜色查找表：' + label + ' → 709', true); return true; }
+    const err = window.MPGLut.lastError();
+    if (err === 'lut-parse') {
+      lutPending = id;
+      mgpToast('正在载入颜色查找表 ' + label + '…');
+      try { window.postMessage({ __mgp: 'lut', name: id }, '*'); } catch (e) { }
+      setTimeout(() => { if (lutPending === id) { lutPending = null; mgpToast('颜色查找表载入失败', true); } }, 15000);
+      return false;
+    }
+    mgpToast(err === 'no-webgl2' ? '当前浏览器不支持 WebGL2，无法应用颜色查找表' : '颜色查找表应用失败', true);
+    return false;
+  }
+  window.addEventListener('message', e => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d.__mgp !== 'lutData') return;
+    if (lutPending && d.name === lutPending) lutPending = null;
+    if (d.error || !d.text) { mgpToast('颜色查找表载入失败', true); return; }
+    if (!window.MPGLut || !video) return;
+    // 只有开着等待、或当前正应用这个 LUT 时才需要动作
+    const want = lutId();
+    if (d.name !== want) return;
+    if (window.MPGLut.isOn()) {   // 已开着：直接用新数据重画（换 LUT 时）
+      window.MPGLut.apply(d.name, d.text, video);
+      return;
+    }
+    if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用颜色查找表：' + (window.MPGLut.name(d.name) || d.name) + ' → 709', true);
   });
 
   // ─── Shift+S 标注截图：截图 → 弹窗标注（主题色矩形 / 白边主题色文本）→ Enter 保存 / Esc 取消 ──
   const ANN_THEME = '#ff5f00';   // 标注主题色：与插件强调色一致（红框红字，白边不变）
   let annHost = null;      // 标注窗口宿主（light DOM 遮罩，shadow 内承载 UI）
+  let annOpening = false;  // 正在取图/校准（异步）：用来挡住这段时间里的重复触发
   let annSource = null;    // 截图原图 canvas（标注重绘底图，不被修改）
   let annCanvas = null;    // 标注画布（显示 + 标注绘制）
   let annCtx = null;
@@ -2257,6 +2440,8 @@
   let annFileName = '';
   let annShowTC = false;   // 是否在截图右上角嵌入当前画面时间码（设置记忆，默认关）
   let annTC = '';          // 嵌入的时间码文本（进入标注时捕获，HH:MM:SS:FF）
+  let lastCaptureTC = '';  // 最近一次截图解析出的时间码（诊断用）
+  let annShotSec = 0;      // 标注截图对应的视频时间（校准后更新）
   let annWinKey = null;
 
   // 标注窗口打开期间的全局键盘接管（capture 阶段，优先于主快捷键与网页全屏 Esc）
@@ -2427,30 +2612,41 @@
   function openAnnotate() {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
     if (annHost) { mgpToast('标注窗口已打开'); return; }
+    // 取图 + 指纹校准是异步的（几百毫秒）：用 annOpening 挡住这段时间里的重复触发，
+    // 否则连按两次 Shift+S 会开出两个标注窗口、后开的那个把先开的顶掉，窗口就关不掉了
+    if (annOpening) return;
     if (recordingInternal) { mgpToast('录制中无法标注截图'); return; }
-    // 进入标注：先定帧（冻结 + 定位到当前这一帧 + 核对实际渲染帧）再取图，
-    // 保证标注图里那一帧与右上角嵌入的时间码是同一帧
-    // 实时时间模式下：嵌入的系统时间取「按下的那一刻」（定帧要几百毫秒，晚了就不准）
+    annOpening = true;
+    // 实时时间模式下：嵌入的系统时间取「按下的那一刻」（校准要几百毫秒，晚了就不准）
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
-    settleCaptureFrame(() => {
-      const c = document.createElement('canvas');
-      c.width = video.videoWidth; c.height = video.videoHeight;
-      let ctx2;
-      try {
-        ctx2 = c.getContext('2d');
-        ctx2.drawImage(video, 0, 0);
-        ctx2.getImageData(0, 0, 1, 1);   // 提前验证画布可读取（受保护内容会在此抛错）
-      } catch (e) { mgpToast('截图失败: 内容保护'); return; }
+    // 先把冻结画面当底图（= 你按下时看到的画面）立刻开窗，再在后台把这帧的时间码校准准
+    const opened = (t0, c) => {
+      annOpening = false;
+      if (!c) { mgpToast('截图失败: 内容保护'); return; }
+      if (annHost) return;   // 期间已有窗口（理论上不会）
       annSource = c;
-      // 嵌入时间码：读取设置（background 推送的完整设置），取图时捕获当前画面时间码
+      // 嵌入时间码：读取设置（background 推送的完整设置）
       const s = window.__mgpSettings || {};
       annShowTC = s.annotateTimecode === true;
-      const shotT = rtMarkTC(dispTime());
+      const shotT = rtMarkTC(t0 == null ? dispTime() : t0);
+      annShotSec = shotT;
       annTC = rtSnap || recTC(shotT);   // 标注右上角嵌入的时间码（实时时间模式下即系统时间）
       // 命名与直接截图（S 键）完全一致：标题_时间码_备注.png
       annFileName = buildFileName(rtSnap || fileTC(shotT), shotT, 'png');
       annBuild();
-    });
+    };
+    // 校准出精确时间码后：更新嵌入时间码与文件名（图片内容不受影响），并重绘
+    const refine = t1 => {
+      if (t1 == null || !annHost || annSource == null) return;
+      if (rtOn()) return;   // 实时时间模式下时间码是系统时间，不受视频帧影响
+      annShotSec = t1;
+      annTC = recTC(t1);
+      annFileName = buildFileName(fileTC(t1), t1, 'png');
+      try { annRedraw(); } catch (e) { }
+    };
+    captureFrozenFrame(opened, refine, 12000);   // 窗口已开，校准可以慢慢来
+    // 兜底：取图失败（内容保护等）时也要把 annOpening 放开
+    setTimeout(() => { if (annOpening && !annHost) annOpening = false; }, 7000);
   }
 
   function annBuild() {
@@ -2623,6 +2819,18 @@
 
   window.addEventListener('mgp-video-found', syncBar);
   window.addEventListener('mgp-settings', syncBar);
+  // 颜色查找表：设置里换了档位且此刻正应用着 → 直接切到新 LUT（数据没缓存就去取）
+  window.addEventListener('mgp-settings', () => {
+    if (!window.MPGLut || !window.MPGLut.isOn()) return;
+    const id = lutId();
+    if (id === window.MPGLut.currentId()) return;
+    if (window.MPGLut.apply(id, null, video)) {
+      mgpToast('已切换颜色查找表：' + (window.MPGLut.name(id) || id), true);
+    } else {
+      lutPending = id;
+      try { window.postMessage({ __mgp: 'lut', name: id }, '*'); } catch (e) { }
+    }
+  });
 
   // ─── 后台录制保护 ─────────────────────────────
   // 页面切到后台：渲染流水线被浏览器节流（rVFC/rAF 停、定时器 ≥1s），canvas 不再更新，
@@ -3010,6 +3218,19 @@
     toggleWebFs() {
       return webFsActive ? exitWebFs() : enterWebFs();
     },
+    // 面板用：当前播放时刻（{sec, tc}）——「把这条时间码改成当前播放的时间码」用。
+    // 与打点记录完全同源：sec 是画面时间（用于定位），tc 是按当前模式显示的时间码
+    nowTime() {
+      const sec = dispTime();
+      return { sec: sec, tc: recTC(sec), rt: rtOn() };
+    },
+    // 颜色查找表：Q 键同款入口（面板 / 自检脚本用）
+    toggleLut() { return toggleLut(); },
+    lutState() {
+      if (!window.MPGLut) return { available: false };
+      const d = window.MPGLut._debug();
+      return { available: true, on: d.on, id: d.id, lutSize: d.lutSize, frames: d.frames, selected: lutId(), catalog: window.MPGLut.ids };
+    },
     // 诊断：时间码相关的实时读数（自检脚本用；面板不用）
     frameDebug() {
       return {
@@ -3020,8 +3241,12 @@
         rate: video ? (video.playbackRate || 1) : 1,
         fps: FPS,
         frameTime: frameTimeNow(),
-        presentedAt: lastFrameInfo ? lastFrameInfo.presentedAt : null,
-        presentedFrames: lastFrameInfo ? lastFrameInfo.presentedFrames : null,
+        frameLag: frameLag,
+        frameBasisExact: frameBasisExact,
+        ptsOffset: ptsOffset,
+        annTC: annTC,                       // 标注图右上角嵌入的时间码（校准后的最终值）
+        lastCaptureTC: lastCaptureTC,       // 最近一次截图解析出的时间码
+        calibrating: calibRunning,
         displayQuantum: displayQuantum,
         perfNow: performance.now()
       };
@@ -3033,7 +3258,8 @@
       if (!rec || typeof sec !== 'number' || !isFinite(sec) || sec < 0) return false;
       const t = sec;
       if (type === 'mk') {
-        rec.time = t; rec.tc = fmtTC(t);
+        // 实时时间模式下时间码显示的是系统时间，这里也按同一口径写，避免列表里口径不一致
+        rec.time = t; rec.tc = rtOn() ? recTC(t) : fmtTC(t);
       } else if (field === 'in') {
         rec.inTime = t; rec.inTC = fmtTC(t);
         rec.dur = Math.max(0, (rec.outTime || 0) - t);

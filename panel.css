@@ -80,6 +80,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .set-select{height:22px;padding:0 4px;font-size:11px;color:var(--text);background:var(--row);border:1px solid var(--card-brd);border-radius:5px;outline:none;cursor:pointer;font-family:inherit;flex-shrink:0;max-width:130px}
 .set-select:focus{border-color:var(--orange)}
 .set-tag{display:inline-flex;align-items:center;height:15px;padding:0 5px;margin-left:auto;font-size:10px;line-height:1;color:var(--orange);border:1px solid var(--orange);border-radius:8px;background:var(--orange-dk);white-space:nowrap;flex-shrink:0}
+/* 颜色查找表：一栏里放四个小选项（SLog3 / CLog3 / SLog2 / CLog2），选中项用主题色 */
+.set-row.set-col{flex-direction:column;align-items:stretch;gap:6px}
+.lut-opts{display:flex;gap:4px}
+.lut-opt{flex:1;height:22px;padding:0;font-size:11px;font-family:inherit;color:var(--muted);background:var(--row);border:1px solid var(--card-brd);border-radius:5px;cursor:pointer;transition:color .12s,background .12s,border-color .12s}
+.lut-opt:hover{color:var(--text);border-color:var(--orange)}
+.lut-opt.on{color:#fff;background:var(--orange);border-color:var(--orange);font-weight:700}
 .switch{position:relative;width:34px;height:19px;flex-shrink:0}
 .switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}
 .switch .track{position:absolute;inset:0;background:var(--row-h);border:1px solid var(--card-brd);border-radius:11px;transition:background .15s,border-color .15s}
@@ -354,6 +360,14 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .tc.in{color:var(--in);text-shadow:0 0 5px rgba(90,169,230,.55)}
 .tc.out{color:var(--out);text-shadow:0 0 5px rgba(63,207,142,.55)}
 .tc.mk{color:var(--mk);text-shadow:0 0 5px rgba(242,201,76,.55)}
+/* 标记行：时间码右侧的「用当前播放时间码替换」小按钮（与时间码同高，悬停才明显） */
+.tc-sync{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:4px;flex-shrink:0;
+  background:transparent;border:1px solid rgba(255,255,255,.14);border-radius:4px;cursor:pointer;padding:0;
+  color:var(--faint);opacity:.75;transition:color .12s,border-color .12s,background .12s,opacity .12s}
+.tc-sync svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tc-sync:hover{color:#fff;background:var(--orange-dk);border-color:var(--orange);opacity:1}
+:root[data-theme="light"] .tc-sync{border-color:rgba(0,0,0,.16)}
+:root[data-theme="light"] .tc-sync:hover{color:#fff}
 .sep{color:var(--faint);flex-shrink:0;margin:0 -4px}
 .dur{margin-left:auto;color:var(--faint);font-family:var(--mono);font-size:11px;flex-shrink:0}
 

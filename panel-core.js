@@ -153,6 +153,18 @@ const MPP = (() => {
     } catch (e) { }
     return false;
   }
+  // 当前播放时刻（面板「用当前时间码替换」按钮）：返回 {sec, tc} 或 null
+  function fnNowTime() {
+    try {
+      if (window.__mgpAPI && typeof window.__mgpAPI.nowTime === 'function') {
+        const n = window.__mgpAPI.nowTime();
+        if (n && typeof n.sec === 'number' && isFinite(n.sec)) return n;
+      }
+    } catch (e) { }
+    const v = window.__mgp_video || document.querySelector('video');
+    if (!v) return null;
+    return { sec: v.currentTime, tc: null };
+  }
   // 批量截图 / 录制：items = [{type:'mk'|'io', time, start, end}]，mode 'shot'|'rec'
   function fnBatchRun(items, mode) {
     try {
@@ -340,6 +352,8 @@ const MPP = (() => {
   const MARK_COLORS = [
     ['红', '#e74c3c'], ['橙', '#ff7a1a'], ['蓝', '#3498db'], ['绿', '#2ecc71'], ['灰', '#9aa0a6']
   ];
+  // 颜色查找表（颜色查找表）可选档位：与 content/lut.js 的 CATALOG 保持一致，默认 SLog3
+  const LUT_IDS = ['slog3', 'clog3', 'slog2', 'clog2'];
   function markColor(m) { return (m && m.color) || null; }
   function colorName(hex) {
     const c = MARK_COLORS.find(([, v]) => v === hex);
@@ -610,6 +624,7 @@ const MPP = (() => {
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
+    els.lutOpts = $(cfg.lutOpts);
     els.setRowAll = $(cfg.setRowAll);
     els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
@@ -835,6 +850,10 @@ const MPP = (() => {
         // esc() 转义：tc 来自页面 localStorage（mpp_logs），恶意站点页面脚本可注入任意内容，
         // 未转义会在扩展面板上下文执行（存储型 XSS → 扩展权限提升）
         '<span class="tc mk">' + esc(m.tc) + '</span>' +
+        // 小按钮：把这条标记的时间码改成「当前播放的时间码」（画面停在哪儿就用哪儿）
+        '<button type="button" class="tc-sync" data-sync="' + i + '" title="用当前播放的时间码替换这条记录的时间码">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13.5 2.5v3.2h-3.2"/></svg>' +
+        '</button>' +
         '<span class="mk-colors">' + MARK_COLORS.map(([name, v]) =>
           '<span class="mc-dot' + (m.color === v ? ' on' : '') + '" data-c="' + v + '" data-n="' + name + '" style="--dc:' + v + '" title="设为' + name + '色"></span>'
         ).join('') + '</span>' +
@@ -1267,6 +1286,24 @@ const MPP = (() => {
   function bindList(list) {
     if (!list) return;
     list.addEventListener('click', e => {
+      // 「用当前播放的时间码替换」小按钮：把该条标记的时间码改成当前画面时刻
+      const syncBtn = e.target.closest('.tc-sync');
+      if (syncBtn) {
+        const row = e.target.closest('.row');
+        if (!row || row.dataset.mk === undefined) return;
+        const idx = parseInt(row.dataset.mk, 10);
+        const m = logs.marks[idx];
+        if (!m) return;
+        execInPage(fnNowTime).then(n => {
+          if (!n || typeof n.sec !== 'number' || !isFinite(n.sec)) { panelToast('拿不到当前播放时间'); return; }
+          execInPage(fnSetTime, ['mk', idx, 'time', n.sec]).then(ok => {
+            if (!ok) { panelToast('时间码更新失败'); return; }
+            panelToast('已改为当前时间码');
+            load(true);
+          }).catch(() => panelToast('时间码更新失败'));
+        }).catch(() => panelToast('拿不到当前播放时间'));
+        return;
+      }
       const dot = e.target.closest('.mc-dot');
       if (dot) {
         const row = e.target.closest('.row');
@@ -2657,7 +2694,23 @@ const MPP = (() => {
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
+      syncLutOpts(s.lut);
       applyTheme(s.theme);
+    });
+    // 颜色查找表：选哪个只写设置（页面按选择在按 Q 时应用），默认 SLog3、默认不应用
+    function syncLutOpts(id) {
+      if (!els.lutOpts) return;
+      const cur = LUT_IDS.indexOf(String(id)) >= 0 ? String(id) : 'slog3';
+      els.lutOpts.querySelectorAll('.lut-opt').forEach(b => b.classList.toggle('on', b.dataset.lut === cur));
+    }
+    if (els.lutOpts) els.lutOpts.addEventListener('click', e => {
+      const b = e.target.closest('.lut-opt');
+      if (!b) return;
+      const id = b.dataset.lut;
+      if (LUT_IDS.indexOf(id) < 0) return;
+      syncLutOpts(id);
+      savePatch({ lut: id });
+      panelToast('颜色查找表：' + b.textContent + '（按 Q 应用 / 取消）');
     });
     // 实时时间：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
     // 每次打开设置菜单都同步一次，避免与页面实际状态不一致

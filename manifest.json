@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "3.6",
+  "version": "3.7",
   "default_locale": "zh_CN",
   "description": "__MSG_extDesc__",
   "permissions": ["scripting", "sidePanel", "storage", "activeTab", "windows"],
@@ -10,7 +10,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"],
-      "js": ["content/tc-parse.js", "content/remux.js", "content/content.js", "content/control-bar.js"],
+      "js": ["content/tc-parse.js", "content/remux.js", "content/lut.js", "content/content.js", "content/control-bar.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
@@ -19,6 +19,12 @@
       "js": ["content/bridge.js"],
       "run_at": "document_idle",
       "world": "ISOLATED"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["luts/*.cube"],
+      "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"]
     }
   ],
   "action": {
