@@ -2155,8 +2155,9 @@
       while (stack.length) {
         const el = stack.pop();
         if (!el || el.nodeType !== 1) continue;
-        // 扩展控制栏、Toast 提示、标注截图窗口不隐藏（全屏中标注与提示正常显示）
-        if (el === v || el === wrapper || el.id === 'mgp-toast-ext' || el.id === 'mgp-ann-mask') continue;
+        // 扩展控制栏、Toast 提示、标注截图窗口、颜色查找表画布不隐藏（全屏中这些要正常显示）
+        if (el === v || el === wrapper || el.id === 'mgp-toast-ext' || el.id === 'mgp-ann-mask' ||
+          (el.classList && el.classList.contains('mgp-lut-canvas'))) continue;
         if (el.contains(v)) { [...el.children].forEach(c => stack.push(c)); continue; }
         webFsSaved.hidden.push({ t: el, orig: el.style.display });
         el.style.display = 'none';
@@ -2183,6 +2184,9 @@
   // 用保存的元素引用还原（换集/移除后 video/wrapper 可能已不是原对象）
   function exitWebFs() {
     if (!webFsActive) return false;
+    // 颜色查找表只在网页全屏里生效：退出全屏时一并关闭
+    const hadLut = !!(window.MPGLut && window.MPGLut.isOn());
+    if (hadLut) { try { window.MPGLut.clear(); } catch (e) { } }
     if (webFsSaved) {
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
       if (webFsSaved.w) { webFsSaved.w.setAttribute('style', webFsSaved.wStyle); webFsSaved.w.classList.remove('fs-on'); }
@@ -2195,7 +2199,7 @@
     if (fsDragState) { clearTimeout(fsDragState.timer); fsDragState = null; }
     const tc = qs('#mgp-tc');
     if (tc) tc.style.transform = '';
-    mgpToast('已退出网页全屏', true);
+    mgpToast(hadLut ? '已退出网页全屏 · 颜色查找表已关闭' : '已退出网页全屏', true);
     return false;
   }
   // 网页全屏悬浮进度条：按可回退/播放范围同步位置与已播放填充
@@ -2368,14 +2372,17 @@
       case 's': case 'S': e.preventDefault(); captureScreenshot(false); break;
       // C：截图并复制到剪贴板（不下载，与标注窗口内 C 行为一致）
       case 'c': case 'C': e.preventDefault(); captureScreenshot(true); break;
-      // Q：应用 / 取消颜色查找表（设置的「颜色查找表」里选 LUT，默认不应用）
+      // Q：进入网页全屏并应用颜色查找表；再按 Q（或 Esc）退出网页全屏并关闭
       case 'q': case 'Q': e.preventDefault(); toggleLut(); break;
+      // P：只切换网页全屏（不带颜色查找表）；再按 P 或 Esc 退出
+      case 'p': case 'P': e.preventDefault(); toggleWebFsKey(); break;
     }
   });
 
-  // ─── 颜色查找表（Q 键应用 / 取消）─────────────────────────────
-  // 设置的「颜色查找表」里选 LUT（SLog3 / CLog3 / SLog2 / CLog2，默认 SLog3）；
-  // Q 键应用或取消，默认不应用。LUT 数据（.cube）由隔离世界的桥取回后 postMessage 送来。
+  // ─── 颜色查找表（Q 键：进网页全屏并应用；再按 Q / Esc 退出并关闭）───────────
+  // 设置的「颜色查找表」里选 LUT（SLog3 / CLog3 / SLog2 / CLog2，默认 SLog3）。
+  // 颜色查找表**只在网页全屏里生效**：Q 进入网页全屏并应用；再按 Q、Esc（或 P）退出网页全屏时
+  // 一并关闭。数据（.cube）由隔离世界的桥取回后 postMessage 送来。
   let lutPending = null;   // 正在等待数据的 LUT id
   function lutId() {
     const s = window.__mgpSettings || {};
@@ -2383,19 +2390,16 @@
     return (window.MPGLut && window.MPGLut.CATALOG[id]) ? id : 'slog3';
   }
   function lutOn() { return !!(window.MPGLut && window.MPGLut.isOn()); }
-  function toggleLut() {
-    if (!window.MPGLut) { mgpToast('颜色查找表不可用（脚本未加载）', true); return false; }
-    if (!video || !video.videoWidth) { mgpToast('无画面', true); return false; }
+  // P：只切换网页全屏（不带颜色查找表效果）
+  function toggleWebFsKey() {
+    if (webFsActive) exitWebFs();
+    else enterWebFs();
+  }
+  // 应用当前档位的 LUT（已缓存直接应用；否则去取 .cube）
+  function applyLut() {
     const id = lutId();
     const label = window.MPGLut.name(id) || id;
-    if (lutOn()) {
-      window.MPGLut.clear();
-      mgpToast('已取消颜色查找表（' + label + '）', true);
-      return false;
-    }
-    // 已缓存就直接应用；否则先向隔离世界的桥要 .cube 文本（约 1MB，只取一次）
-    const ok = window.MPGLut.apply(id, null, video);
-    if (ok) { mgpToast('已应用颜色查找表：' + label + ' → 709', true); return true; }
+    if (window.MPGLut.apply(id, null, video)) { mgpToast('已应用颜色查找表：' + label + ' → 709', true); return true; }
     const err = window.MPGLut.lastError();
     if (err === 'lut-parse') {
       lutPending = id;
@@ -2406,6 +2410,14 @@
     }
     mgpToast(err === 'no-webgl2' ? '当前浏览器不支持 WebGL2，无法应用颜色查找表' : '颜色查找表应用失败', true);
     return false;
+  }
+  // Q：不在网页全屏 → 进网页全屏并应用；已在应用 → 退出网页全屏（退出时自动关闭 LUT）
+  function toggleLut() {
+    if (!window.MPGLut) { mgpToast('颜色查找表不可用（脚本未加载）', true); return false; }
+    if (!video || !video.videoWidth) { mgpToast('无画面', true); return false; }
+    if (lutOn()) { exitWebFs(); return false; }
+    if (!webFsActive && !enterWebFs()) return false;
+    return applyLut();
   }
   window.addEventListener('message', e => {
     if (e.source !== window) return;
@@ -2421,6 +2433,8 @@
       window.MPGLut.apply(d.name, d.text, video);
       return;
     }
+    // 颜色查找表只在网页全屏里生效：数据回来时若已经退出全屏，就不再应用
+    if (!webFsActive) return;
     if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用颜色查找表：' + (window.MPGLut.name(d.name) || d.name) + ' → 709', true);
   });
 
@@ -3227,9 +3241,11 @@
     // 颜色查找表：Q 键同款入口（面板 / 自检脚本用）
     toggleLut() { return toggleLut(); },
     lutState() {
-      if (!window.MPGLut) return { available: false };
+      if (!window.MPGLut) return { available: false, webFs: webFsActive };
       const d = window.MPGLut._debug();
-      return { available: true, on: d.on, id: d.id, lutSize: d.lutSize, frames: d.frames, selected: lutId(), catalog: window.MPGLut.ids };
+      return { available: true, on: d.on, id: d.id, lutSize: d.lutSize, frames: d.frames,
+        selected: lutId(), catalog: window.MPGLut.ids, webFs: webFsActive,
+        layout: window.MPGLut.layoutInfo ? window.MPGLut.layoutInfo() : null };
     },
     // 诊断：时间码相关的实时读数（自检脚本用；面板不用）
     frameDebug() {

@@ -54,12 +54,15 @@
   // ── WebGL2：3D 纹理 + 全屏四边形 ──
   let cv = null, gl = null, prog = null, texLut = null, texVid = null, quad = null;
   let lutSize = 0, frames = 0, lastError = '';
+  let layoutInfo = null;   // 最近一次算出的摆放信息（诊断用：宽高与视频比例是否一致）
   // WebGL2 的 GLSL ES 3.00：必须带 #version 300 es 才能用 sampler3D / texture()
   const VS = '#version 300 es\nin vec2 p;out vec2 v;void main(){v=vec2(p.x*0.5+0.5,0.5-p.y*0.5);gl_Position=vec4(p,0.0,1.0);}';
   // 3D 纹理采样要把 [0,1] 映射到「纹素中心」：uvw = (c*(N-1)+0.5)/N，否则线性插值会整体偏暗
   // （N=2 时最夸张：0.18 → 0、0.31 → 0.13；N=33 也有约 1.5% 的系统偏移）
+  // uvScale/uvOff：object-fit:cover 时画布铺满元素框，靠它裁出可见的那块源画面
   const FS = '#version 300 es\nprecision mediump float;in vec2 v;uniform sampler2D vid;uniform mediump sampler3D lut;' +
-    'uniform float lutN;out vec4 o;void main(){vec3 c=clamp(texture(vid,v).rgb,0.0,1.0);' +
+    'uniform float lutN;uniform vec2 uvScale;uniform vec2 uvOff;out vec4 o;' +
+    'void main(){vec3 c=clamp(texture(vid,v*uvScale+uvOff).rgb,0.0,1.0);' +
     'o=vec4(texture(lut,(c*(lutN-1.0)+0.5)/lutN).rgb,1.0);}';
 
   function compile(vsSrc, fsSrc) {
@@ -77,7 +80,9 @@
     if (gl && cv && cv.isConnected) return true;
     cv = document.createElement('canvas');
     cv.className = 'mgp-lut-canvas';
-    cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2147483645;';
+    // z-index 与网页全屏时的视频相同（2147483646）：靠 DOM 顺序压在视频之上，
+    // 又低于控制栏（2147483647）；尺寸与位置由 layout() 按视频的 object-fit 精确摆放
+    cv.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:2147483646;';
     gl = cv.getContext('webgl2', { alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, desynchronized: true });
     if (!gl) { lastError = 'no-webgl2'; cv = null; return false; }
     prog = compile(VS, FS);
@@ -105,8 +110,10 @@
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.uniform1i(gl.getUniformLocation(prog, 'vid'), 0);
     gl.uniform1i(gl.getUniformLocation(prog, 'lut'), 1);
-    // 画布挂到视频容器里、紧跟在视频元素后面：站点自己的控件（进度条 / 按钮）通常在
-    // 视频之后，这样它们仍在画布之上，不会被 LUT 画布挡住
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), 1, 1);
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), 0, 0);
+    // 画布挂在视频元素**之后**：站点自己的控件在视频之后，这样它们仍在画布之上；
+    // z-index 与全屏时的视频相同（都 2147483646），靠 DOM 顺序压在视频之上、控制栏（2147483647）之下
     const host = video.parentElement;
     if (!host) { gl = null; cv = null; return false; }
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
@@ -122,12 +129,72 @@
     const loc = gl.getUniformLocation(prog, 'lutN');
     if (loc) gl.uniform1f(loc, lut.size);
   }
+  // object-position 解析（支持 关键字 / 百分比 / px），返回 [x, y] 的像素偏移
+  function parsePos(pos, slackX, slackY) {
+    const terms = String(pos || '50% 50%').trim().split(/\s+/);
+    const ax = (t, slack) => {
+      if (!t) return 0.5;
+      if (t === 'left' || t === 'top') return 0;
+      if (t === 'right' || t === 'bottom') return 1;
+      if (t === 'center') return 0.5;
+      if (/%$/.test(t)) return parseFloat(t) / 100;
+      const px = parseFloat(t);
+      return (isFinite(px) && slack) ? px / slack : 0.5;
+    };
+    const fx = ax(terms[0], slackX);
+    const fy = ax(terms[1] !== undefined ? terms[1] : terms[0], slackY);
+    return [fx * slackX, fy * slackY];
+  }
+  // 摆放画布：**严格照视频元素自己的 object-fit / object-position**，保证比例不变形。
+  // 关键场景：网页全屏时插件把视频设为 object-fit:contain（100vw×100vh），画面上下（或左右）
+  // 有黑边；画布必须只铺在「画面区域」上，铺满整个元素框就会把画面拉伸变形。
+  function layout(video) {
+    if (!cv || !video) return null;
+    const host = video.parentElement;
+    if (!host) return null;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const er = video.getBoundingClientRect();
+    const hr = host.getBoundingClientRect();
+    const bw = er.width, bh = er.height;
+    if (!bw || !bh || !vw || !vh) return null;
+    const cs = getComputedStyle(video);
+    const fit = cs.objectFit || 'fill';
+    let cw = bw, ch = bh, uvs = [1, 1], uvo = [0, 0];
+    if (fit === 'contain' || fit === 'scale-down' || fit === 'none') {
+      let s = Math.min(bw / vw, bh / vh);
+      if (fit === 'none') s = 1;
+      else if (fit === 'scale-down') s = Math.min(s, 1);
+      cw = vw * s; ch = vh * s;
+    } else if (fit === 'cover') {
+      const s = Math.max(bw / vw, bh / vh);
+      const shownW = bw / s, shownH = bh / s;   // 元素框里实际可见的源像素区域
+      uvs = [shownW / vw, shownH / vh];
+      uvo = [(1 - uvs[0]) / 2, (1 - uvs[1]) / 2];
+    }
+    const [offX, offY] = parsePos(cs.objectPosition, bw - cw, bh - ch);
+    const left = (er.left - hr.left) + offX;
+    const top = (er.top - hr.top) + offY;
+    cv.style.left = Math.round(left) + 'px';
+    cv.style.top = Math.round(top) + 'px';
+    cv.style.width = Math.round(cw) + 'px';
+    cv.style.height = Math.round(ch) + 'px';
+    // 绘制缓冲：跟随内容区域尺寸（按设备像素比，保证与视频元素同样的清晰度）
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Math.max(2, Math.round(cw * dpr)), ph = Math.max(2, Math.round(ch * dpr));
+    if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), uvs[0], uvs[1]);
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), uvo[0], uvo[1]);
+    layoutInfo = { fit: fit, boxW: Math.round(bw), boxH: Math.round(bh), cssW: Math.round(cw), cssH: Math.round(ch),
+      bufW: pw, bufH: ph, videoW: vw, videoH: vh,
+      aspect: cw && ch ? Math.round((cw / ch) * 1000) / 1000 : 0,
+      videoAspect: Math.round((vw / vh) * 1000) / 1000 };
+    return layoutInfo;
+  }
   function draw(video) {
     if (!gl || !cv) return;
-    const w = video.videoWidth || 0, h = video.videoHeight || 0;
-    if (!w || !h) return;
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-    gl.viewport(0, 0, w, h);
+    const li = layout(video);
+    if (!li) return;
+    gl.viewport(0, 0, cv.width, cv.height);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texVid);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -203,6 +270,7 @@
     clear: clear,
     rebind: rebind,
     parseCube: parseCube,
+    layoutInfo() { return layoutInfo; },
     lastError() { return lastError; },
     _debug() { return { on: on, id: curId, lutSize: lutSize, frames: frames, gl: !!gl, canvas: !!cv }; }
   };
