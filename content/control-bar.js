@@ -2199,7 +2199,7 @@
     if (fsDragState) { clearTimeout(fsDragState.timer); fsDragState = null; }
     const tc = qs('#mgp-tc');
     if (tc) tc.style.transform = '';
-    mgpToast(hadLut ? '已退出网页全屏 · 颜色查找表已关闭' : '已退出网页全屏', true);
+    mgpToast(hadLut ? '已退出网页全屏 · LUT 已取消' : '已退出网页全屏', true);
     return false;
   }
   // 网页全屏悬浮进度条：按可回退/播放范围同步位置与已播放填充
@@ -2372,16 +2372,16 @@
       case 's': case 'S': e.preventDefault(); captureScreenshot(false); break;
       // C：截图并复制到剪贴板（不下载，与标注窗口内 C 行为一致）
       case 'c': case 'C': e.preventDefault(); captureScreenshot(true); break;
-      // Q：进入网页全屏并应用颜色查找表；再按 Q（或 Esc）退出网页全屏并关闭
+      // Q：进网页全屏并应用 LUT；已在全屏里则应用 / 取消（不退出全屏，退出只按 Esc / P）
       case 'q': case 'Q': e.preventDefault(); toggleLut(); break;
       // P：只切换网页全屏（不带颜色查找表）；再按 P 或 Esc 退出
       case 'p': case 'P': e.preventDefault(); toggleWebFsKey(); break;
     }
   });
 
-  // ─── 颜色查找表（Q 键：进网页全屏并应用；再按 Q / Esc 退出并关闭）───────────
+  // ─── 颜色查找表（Q 键：进全屏并应用 / 全屏内应用与取消；Esc·P 退出全屏）───────────
   // 设置的「颜色查找表」里选 LUT（SLog3 / CLog3 / SLog2 / CLog2，默认 SLog3）。
-  // 颜色查找表**只在网页全屏里生效**：Q 进入网页全屏并应用；再按 Q、Esc（或 P）退出网页全屏时
+  // 颜色查找表**只在网页全屏里生效**：Q 进网页全屏并应用；全屏内再按 Q 只是应用/取消；Esc（或 P）退出全屏时
   // 一并关闭。数据（.cube）由隔离世界的桥取回后 postMessage 送来。
   let lutPending = null;   // 正在等待数据的 LUT id
   function lutId() {
@@ -2399,24 +2399,30 @@
   function applyLut() {
     const id = lutId();
     const label = window.MPGLut.name(id) || id;
-    if (window.MPGLut.apply(id, null, video)) { mgpToast('已应用颜色查找表：' + label + ' → 709', true); return true; }
+    if (window.MPGLut.apply(id, null, video)) { mgpToast('已应用LUT：' + label, true); return true; }
     const err = window.MPGLut.lastError();
     if (err === 'lut-parse') {
       lutPending = id;
-      mgpToast('正在载入颜色查找表 ' + label + '…');
+      mgpToast('正在载入LUT：' + label + '…');
       try { window.postMessage({ __mgp: 'lut', name: id }, '*'); } catch (e) { }
-      setTimeout(() => { if (lutPending === id) { lutPending = null; mgpToast('颜色查找表载入失败', true); } }, 15000);
+      setTimeout(() => { if (lutPending === id) { lutPending = null; mgpToast('LUT 载入失败', true); } }, 15000);
       return false;
     }
-    mgpToast(err === 'no-webgl2' ? '当前浏览器不支持 WebGL2，无法应用颜色查找表' : '颜色查找表应用失败', true);
+    mgpToast(err === 'no-webgl2' ? '当前浏览器不支持 WebGL2，无法应用 LUT' : 'LUT 应用失败', true);
     return false;
   }
-  // Q：不在网页全屏 → 进网页全屏并应用；已在应用 → 退出网页全屏（退出时自动关闭 LUT）
+  // Q：不在网页全屏 → 进网页全屏并应用；已在网页全屏 → 应用 / 取消（**不退出全屏**）。
+  // 退出网页全屏只能按 Esc / P（退出时若正应用着会自动关掉）
   function toggleLut() {
     if (!window.MPGLut) { mgpToast('颜色查找表不可用（脚本未加载）', true); return false; }
     if (!video || !video.videoWidth) { mgpToast('无画面', true); return false; }
-    if (lutOn()) { exitWebFs(); return false; }
-    if (!webFsActive && !enterWebFs()) return false;
+    if (!webFsActive) { if (!enterWebFs()) return false; return applyLut(); }
+    if (lutOn()) {
+      const label = window.MPGLut.name(window.MPGLut.currentId()) || '';
+      window.MPGLut.clear();
+      mgpToast('已取消LUT' + (label ? '：' + label : ''), true);
+      return false;
+    }
     return applyLut();
   }
   window.addEventListener('message', e => {
@@ -2424,7 +2430,7 @@
     const d = e.data;
     if (!d || d.__mgp !== 'lutData') return;
     if (lutPending && d.name === lutPending) lutPending = null;
-    if (d.error || !d.text) { mgpToast('颜色查找表载入失败', true); return; }
+    if (d.error || !d.text) { mgpToast('LUT 载入失败', true); return; }
     if (!window.MPGLut || !video) return;
     // 只有开着等待、或当前正应用这个 LUT 时才需要动作
     const want = lutId();
@@ -2435,7 +2441,7 @@
     }
     // 颜色查找表只在网页全屏里生效：数据回来时若已经退出全屏，就不再应用
     if (!webFsActive) return;
-    if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用颜色查找表：' + (window.MPGLut.name(d.name) || d.name) + ' → 709', true);
+    if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用LUT：' + (window.MPGLut.name(d.name) || d.name), true);
   });
 
   // ─── Shift+S 标注截图：截图 → 弹窗标注（主题色矩形 / 白边主题色文本）→ Enter 保存 / Esc 取消 ──
@@ -2839,7 +2845,7 @@
     const id = lutId();
     if (id === window.MPGLut.currentId()) return;
     if (window.MPGLut.apply(id, null, video)) {
-      mgpToast('已切换颜色查找表：' + (window.MPGLut.name(id) || id), true);
+      mgpToast('已切换LUT：' + (window.MPGLut.name(id) || id), true);
     } else {
       lutPending = id;
       try { window.postMessage({ __mgp: 'lut', name: id }, '*'); } catch (e) { }

@@ -57,12 +57,15 @@
   let layoutInfo = null;   // 最近一次算出的摆放信息（诊断用：宽高与视频比例是否一致）
   // WebGL2 的 GLSL ES 3.00：必须带 #version 300 es 才能用 sampler3D / texture()
   const VS = '#version 300 es\nin vec2 p;out vec2 v;void main(){v=vec2(p.x*0.5+0.5,0.5-p.y*0.5);gl_Position=vec4(p,0.0,1.0);}';
+  // uvScale / uvOff：画面在画布里的占比与位置（画布铺满整个元素框/全屏，画面按 object-fit 摆在其内）。
+  // 落在画面之外（全屏黑边）输出纯黑，与视频元素自己的黑边一致 —— 既覆盖整个全屏区域，又不拉伸画面。
   // 3D 纹理采样要把 [0,1] 映射到「纹素中心」：uvw = (c*(N-1)+0.5)/N，否则线性插值会整体偏暗
   // （N=2 时最夸张：0.18 → 0、0.31 → 0.13；N=33 也有约 1.5% 的系统偏移）
-  // uvScale/uvOff：object-fit:cover 时画布铺满元素框，靠它裁出可见的那块源画面
   const FS = '#version 300 es\nprecision mediump float;in vec2 v;uniform sampler2D vid;uniform mediump sampler3D lut;' +
     'uniform float lutN;uniform vec2 uvScale;uniform vec2 uvOff;out vec4 o;' +
-    'void main(){vec3 c=clamp(texture(vid,v*uvScale+uvOff).rgb,0.0,1.0);' +
+    'void main(){vec2 uv=(v-uvOff)/uvScale;' +
+    'if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0){o=vec4(0.0,0.0,0.0,1.0);return;}' +
+    'vec3 c=clamp(texture(vid,uv).rgb,0.0,1.0);' +
     'o=vec4(texture(lut,(c*(lutN-1.0)+0.5)/lutN).rgb,1.0);}';
 
   function compile(vsSrc, fsSrc) {
@@ -80,9 +83,9 @@
     if (gl && cv && cv.isConnected) return true;
     cv = document.createElement('canvas');
     cv.className = 'mgp-lut-canvas';
-    // z-index 与网页全屏时的视频相同（2147483646）：靠 DOM 顺序压在视频之上，
-    // 又低于控制栏（2147483647）；尺寸与位置由 layout() 按视频的 object-fit 精确摆放
-    cv.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:2147483646;';
+    // 画布铺满整个元素框（网页全屏时 = 整个屏幕里的视频区域）：z-index 与全屏视频同级，
+    // 靠 DOM 顺序压在视频之上、低于控制栏（2147483647）；黑边由着色器输出纯黑
+    cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2147483646;';
     gl = cv.getContext('webgl2', { alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, desynchronized: true });
     if (!gl) { lastError = 'no-webgl2'; cv = null; return false; }
     prog = compile(VS, FS);
@@ -145,9 +148,9 @@
     const fy = ax(terms[1] !== undefined ? terms[1] : terms[0], slackY);
     return [fx * slackX, fy * slackY];
   }
-  // 摆放画布：**严格照视频元素自己的 object-fit / object-position**，保证比例不变形。
-  // 关键场景：网页全屏时插件把视频设为 object-fit:contain（100vw×100vh），画面上下（或左右）
-  // 有黑边；画布必须只铺在「画面区域」上，铺满整个元素框就会把画面拉伸变形。
+  // 摆放画布：**画布铺满整个元素框（网页全屏时就是整个屏幕）**，画面按视频自己的
+  // object-fit / object-position 摆在画布内 —— 用 uvScale/uvOff 让着色器把画面画在正确的位置，
+  // 画面之外（全屏黑边）输出纯黑。这样「应用区域覆盖画面全屏」且比例绝不变形。
   function layout(video) {
     if (!cv || !video) return null;
     const host = video.parentElement;
@@ -159,7 +162,8 @@
     if (!bw || !bh || !vw || !vh) return null;
     const cs = getComputedStyle(video);
     const fit = cs.objectFit || 'fill';
-    let cw = bw, ch = bh, uvs = [1, 1], uvo = [0, 0];
+    // 画面（内容）在元素框里的像素矩形
+    let cw = bw, ch = bh;
     if (fit === 'contain' || fit === 'scale-down' || fit === 'none') {
       let s = Math.min(bw / vw, bh / vh);
       if (fit === 'none') s = 1;
@@ -167,26 +171,29 @@
       cw = vw * s; ch = vh * s;
     } else if (fit === 'cover') {
       const s = Math.max(bw / vw, bh / vh);
-      const shownW = bw / s, shownH = bh / s;   // 元素框里实际可见的源像素区域
-      uvs = [shownW / vw, shownH / vh];
-      uvo = [(1 - uvs[0]) / 2, (1 - uvs[1]) / 2];
+      cw = vw * s; ch = vh * s;
     }
     const [offX, offY] = parsePos(cs.objectPosition, bw - cw, bh - ch);
-    const left = (er.left - hr.left) + offX;
-    const top = (er.top - hr.top) + offY;
-    cv.style.left = Math.round(left) + 'px';
-    cv.style.top = Math.round(top) + 'px';
-    cv.style.width = Math.round(cw) + 'px';
-    cv.style.height = Math.round(ch) + 'px';
-    // 绘制缓冲：跟随内容区域尺寸（按设备像素比，保证与视频元素同样的清晰度）
+    // 画布 = 整个元素框
+    cv.style.left = Math.round(er.left - hr.left) + 'px';
+    cv.style.top = Math.round(er.top - hr.top) + 'px';
+    cv.style.width = Math.round(bw) + 'px';
+    cv.style.height = Math.round(bh) + 'px';
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const pw = Math.max(2, Math.round(cw * dpr)), ph = Math.max(2, Math.round(ch * dpr));
+    const pw = Math.max(2, Math.round(bw * dpr)), ph = Math.max(2, Math.round(bh * dpr));
     if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
-    gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), uvs[0], uvs[1]);
-    gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), uvo[0], uvo[1]);
-    layoutInfo = { fit: fit, boxW: Math.round(bw), boxH: Math.round(bh), cssW: Math.round(cw), cssH: Math.round(ch),
-      bufW: pw, bufH: ph, videoW: vw, videoH: vh,
-      aspect: cw && ch ? Math.round((cw / ch) * 1000) / 1000 : 0,
+    // uvScale = 画面在画布里的归一化尺寸；uvOff = 画面左上角在画布里的归一化位置
+    // （v.y 以画面底部为 1，所以纵向偏移要翻过来）
+    const sx = cw / bw, sy = ch / bh;
+    const ox = offX / bw, oy = (bh - ch - offY) / bh;
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), Math.max(1e-6, sx), Math.max(1e-6, sy));
+    gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), ox, oy);
+    layoutInfo = { fit: fit, boxW: Math.round(bw), boxH: Math.round(bh),
+      picW: Math.round(cw), picH: Math.round(ch), videoW: vw, videoH: vh,
+      uvScale: [Math.round(sx * 1000) / 1000, Math.round(sy * 1000) / 1000],
+      uvOff: [Math.round(ox * 1000) / 1000, Math.round(oy * 1000) / 1000],
+      canvasW: pw, canvasH: ph,
+      picAspect: ch ? Math.round((cw / ch) * 1000) / 1000 : 0,
       videoAspect: Math.round((vw / vh) * 1000) / 1000 };
     return layoutInfo;
   }
