@@ -85,7 +85,7 @@
     cv.className = 'mgp-lut-canvas';
     // 画布铺满整个元素框（网页全屏时 = 整个屏幕里的视频区域）：z-index 与全屏视频同级，
     // 靠 DOM 顺序压在视频之上、低于控制栏（2147483647）；黑边由着色器输出纯黑
-    cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2147483646;';
+    cv.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483001;';
     gl = cv.getContext('webgl2', { alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, desynchronized: true });
     if (!gl) { lastError = 'no-webgl2'; cv = null; return false; }
     prog = compile(VS, FS);
@@ -115,12 +115,12 @@
     gl.uniform1i(gl.getUniformLocation(prog, 'lut'), 1);
     gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), 1, 1);
     gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), 0, 0);
-    // 画布挂在视频元素**之后**：站点自己的控件在视频之后，这样它们仍在画布之上；
-    // z-index 与全屏时的视频相同（都 2147483646），靠 DOM 顺序压在视频之上、控制栏（2147483647）之下
-    const host = video.parentElement;
-    if (!host) { gl = null; cv = null; return false; }
-    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-    if (video.nextSibling) host.insertBefore(cv, video.nextSibling); else host.appendChild(cv);
+    // 画布挂到 <body> 并用 position:fixed 铺满**整个网页窗口**：不依赖视频所在容器的
+    // 尺寸与 overflow（挂在容器里会被容器裁掉、只能覆盖容器那一块）。网页全屏时视频本身
+    // 也是铺满窗口的，两者对齐；画面在黑边之外的地方由着色器输出纯黑。
+    // z-index 2147483001：高于全屏视频（2147483000）、低于扩展控制栏（2147483647）
+    if (!document.body) { gl = null; cv = null; return false; }
+    document.body.appendChild(cv);
     return true;
   }
   function uploadLut(lut) {
@@ -148,21 +148,26 @@
     const fy = ax(terms[1] !== undefined ? terms[1] : terms[0], slackY);
     return [fx * slackX, fy * slackY];
   }
-  // 摆放画布：**画布铺满整个元素框（网页全屏时就是整个屏幕）**，画面按视频自己的
-  // object-fit / object-position 摆在画布内 —— 用 uvScale/uvOff 让着色器把画面画在正确的位置，
-  // 画面之外（全屏黑边）输出纯黑。这样「应用区域覆盖画面全屏」且比例绝不变形。
+  // 摆放：画布固定铺满**整个网页窗口**（100vw×100vh，position:fixed），画面按视频自己的
+  // object-fit / object-position 摆在窗口内 —— uvScale/uvOff 把「画面矩形」换算成窗口里的归一化
+  // 位置交给着色器；画面之外（全屏黑边 / 窗口里非画面区域）输出纯黑。
+  // 这样既覆盖整个网页窗口，又绝不拉伸画面。
   function layout(video) {
     if (!cv || !video) return null;
-    const host = video.parentElement;
-    if (!host) return null;
     const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const winW = window.innerWidth || document.documentElement.clientWidth;
+    const winH = window.innerHeight || document.documentElement.clientHeight;
+    if (!winW || !winH) return null;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Math.max(2, Math.round(winW * dpr)), ph = Math.max(2, Math.round(winH * dpr));
+    if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+    // 画面（内容）在视口里的像素矩形：视频元素框 + object-fit / object-position
     const er = video.getBoundingClientRect();
-    const hr = host.getBoundingClientRect();
-    const bw = er.width, bh = er.height;
-    if (!bw || !bh || !vw || !vh) return null;
     const cs = getComputedStyle(video);
     const fit = cs.objectFit || 'fill';
-    // 画面（内容）在元素框里的像素矩形
+    const bw = er.width, bh = er.height;
+    if (!bw || !bh) return null;
     let cw = bw, ch = bh;
     if (fit === 'contain' || fit === 'scale-down' || fit === 'none') {
       let s = Math.min(bw / vw, bh / vh);
@@ -174,22 +179,18 @@
       cw = vw * s; ch = vh * s;
     }
     const [offX, offY] = parsePos(cs.objectPosition, bw - cw, bh - ch);
-    // 画布 = 整个元素框
-    cv.style.left = Math.round(er.left - hr.left) + 'px';
-    cv.style.top = Math.round(er.top - hr.top) + 'px';
-    cv.style.width = Math.round(bw) + 'px';
-    cv.style.height = Math.round(bh) + 'px';
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const pw = Math.max(2, Math.round(bw * dpr)), ph = Math.max(2, Math.round(bh * dpr));
-    if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
-    // uvScale = 画面在画布里的归一化尺寸；uvOff = 画面左上角在画布里的归一化位置
-    // （v.y 以画面底部为 1，所以纵向偏移要翻过来）
-    const sx = cw / bw, sy = ch / bh;
-    const ox = offX / bw, oy = (bh - ch - offY) / bh;
+    const picLeft = er.left + offX;
+    const picTop = er.top + offY;
+    // 画面在窗口里的归一化尺寸 / 位置（v.y 以窗口底部为 1，纵向偏移要翻过来）
+    const sx = cw / winW, sy = ch / winH;
+    const ox = picLeft / winW;
+    const oy = (winH - (picTop + ch)) / winH;
     gl.uniform2f(gl.getUniformLocation(prog, 'uvScale'), Math.max(1e-6, sx), Math.max(1e-6, sy));
     gl.uniform2f(gl.getUniformLocation(prog, 'uvOff'), ox, oy);
-    layoutInfo = { fit: fit, boxW: Math.round(bw), boxH: Math.round(bh),
-      picW: Math.round(cw), picH: Math.round(ch), videoW: vw, videoH: vh,
+    layoutInfo = { fit: fit, winW: Math.round(winW), winH: Math.round(winH),
+      boxW: Math.round(bw), boxH: Math.round(bh),
+      picW: Math.round(cw), picH: Math.round(ch), picLeft: Math.round(picLeft), picTop: Math.round(picTop),
+      videoW: vw, videoH: vh,
       uvScale: [Math.round(sx * 1000) / 1000, Math.round(sy * 1000) / 1000],
       uvOff: [Math.round(ox * 1000) / 1000, Math.round(oy * 1000) / 1000],
       canvasW: pw, canvasH: ph,
@@ -253,17 +254,18 @@
     gl = null; prog = null; texLut = null; texVid = null; lutSize = 0;
     return true;
   }
-  // 页面换视频 / 视频容器重建后，把画布重新挂到新容器并继续绘制
+  // 换集 / 容器重建后：画布固定在 <body> 上不动，只要继续按新的视频绘制即可；
+  // 万一画布被页面清掉（站点重建 DOM）就重新挂一次
   function rebind(video) {
     if (!on) return;
-    if (!gl || !video || !video.videoWidth) return;
-    const host = video.parentElement;
-    if (!host) return;
-    if (gl && cv && cv.parentElement === host) { draw(video); return; }
+    if (!video || !video.videoWidth) return;
     if (!gl) { apply(curId, null, video); return; }
-    if (cv && cv.parentElement) cv.parentElement.removeChild(cv);
-    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-    if (video.nextSibling) host.insertBefore(cv, video.nextSibling); else host.appendChild(cv);
+    if (!cv || !cv.isConnected) {
+      if (!cv) cv = document.createElement('canvas');
+      cv.className = 'mgp-lut-canvas';
+      cv.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483001;';
+      if (document.body) document.body.appendChild(cv);
+    }
     draw(video);
   }
   window.MPGLut = {

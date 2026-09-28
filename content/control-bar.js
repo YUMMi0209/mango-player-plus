@@ -2172,13 +2172,17 @@
     v.style.cssText =
       'position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
       'width:100vw!important;height:100vh!important;object-fit:contain!important;' +
-      'background:#000!important;z-index:2147483646!important;margin:0!important;' +
+      // z-index 2147483000：把 2147483001 留给颜色查找表的叠加画布（铺满整个网页窗口），
+      // 控制栏 wrapper 仍是 2147483647（最上层）
+      'background:#000!important;z-index:2147483000!important;margin:0!important;' +
       'max-width:none!important;max-height:none!important;';
     if (wrapper) { wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;'; wrapper.classList.add('fs-on'); }
     webFsActive = true;
     moveTCDown();
     syncFsProgress();
     mgpToast('网页全屏（ESC 退出）', true);
+    // 全屏里若正应用着颜色查找表：容器尺寸变了，重新按新窗口摆一遍画布（画布是 fixed 铺满窗口的）
+    if (window.MPGLut && window.MPGLut.isOn()) { try { window.MPGLut.rebind(v); } catch (e) { } }
     return true;
   }
   // 用保存的元素引用还原（换集/移除后 video/wrapper 可能已不是原对象）
@@ -2296,8 +2300,11 @@
     if (on && window.__mgp_video) {
       // 换集后旧容器可能被整体重建：wrapper 虽存在但已脱离 DOM（isConnected=false）时同样需要重建
       if (!wrapper || !wrapper.isConnected || video !== window.__mgp_video) inject(window.__mgp_video);
-      // 颜色查找表：容器重建后把叠加画布重新挂到新容器上
-      if (window.MPGLut && window.MPGLut.isOn()) { try { window.MPGLut.rebind(window.__mgp_video); } catch (e) { } }
+      // 颜色查找表：容器重建后把叠加画布重新挂到新容器上；万一已不在网页全屏（异常路径）则关掉
+      if (window.MPGLut && window.MPGLut.isOn()) {
+        if (!webFsActive) { try { window.MPGLut.clear(); } catch (e) { } }
+        else { try { window.MPGLut.rebind(window.__mgp_video); } catch (e) { } }
+      }
     } else if (!on && wrapper) remove();
   }
 
