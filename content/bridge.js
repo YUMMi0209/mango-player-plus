@@ -40,9 +40,7 @@
         // 颜色查找表：MAIN world 拿不到 chrome.runtime，这里按 id 取扩展内的 .cube 文本送回去
         const LUT_FILES = {
           slog3: 'luts/slog3-sgamut3cine-to-lc709-typea.cube',
-          clog3: 'luts/clog3-cinema-gamut-to-canon709.cube',
-          slog2: 'luts/slog2-sgamut-to-lc709-typea.cube',
-          clog2: 'luts/clog2-cinema-gamut-to-canon709.cube'
+          clog3: 'luts/clog3-cinema-gamut-to-canon709.cube'
         };
         const id = String(d.name || '');
         const path = LUT_FILES[id];

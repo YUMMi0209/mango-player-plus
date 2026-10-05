@@ -23,7 +23,6 @@
     settingsMenu: '#settings-menu',
     btnMode: '#btn-mode',
     modeMenu: '#mode-menu',
-    togShot: '#tog-shot',
     togAvoid: '#tog-avoid',
     togPip: '#tog-pip',
     togBar: '#tog-bar',

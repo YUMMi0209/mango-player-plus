@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v3.7 使用教程</title>
+<title>芒着拉片 | MG Player+ v3.8 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v3.7</span>
+<span class="sub">使用教程 · v3.8</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -115,8 +115,8 @@ li{margin:4px 0}
 <p><b>批量导出</b>：勾选多个视频后点「<b>导出选中</b>」—— 只选 1 个直接给一份日志表（同名 <span class="mono">标题_日志记录_导出时间</span>）；选多个则每个视频一份、<b>一起打包成 zip</b>。表格里的链接带定位，可以直接拖回插件再导入。只有条数、已拿不到明细的视频会跳过，导出提示里会写明。</p>
 <h3>设置</h3>
 <ul>
-<li>亮色模式、禁用弹幕、视频控制栏、打点自动截图、时间码显示回避、画中画保持录制（实验）、应用于当前网页。</li>
-<li><b>实时时间</b>（在「视频控制」下面）：开启后时间码变成<b>系统时间</b>（<span class="mono">HHMMSSFF</span>，固定按 25fps 折算帧号），状态标签由 <span class="mono">PLAY</span> 变 <b>LIVE</b>；打点记录、录制与截图的文件名都用这个时间码，同时<b>停用所有按时间码跳转</b>的功能。默认关闭、每次手动开（刷新即回到关闭），<b>直播页默认开启</b>。</li>
+<li>亮色模式、禁用弹幕、视频控制栏、直播模式、颜色查找表、时间码显示回避、画中画保持录制（实验）、应用于当前网页。</li>
+<li><b>直播模式</b>（在「视频控制」下面）：开启后时间码变成<b>系统时间</b>（<span class="mono">HHMMSSFF</span>，固定按 25fps 折算帧号），状态标签由 <span class="mono">PLAY</span> 变 <b>LIVE</b>；打点记录、录制与截图的文件名都用这个时间码，同时<b>停用所有按时间码跳转</b>的功能。默认关闭、每次手动开（刷新即回到关闭），<b>直播页默认开启</b>。</li>
 <li>菜单里另有三个按钮：网页全屏 / 教程帮助 / 重载插件。</li>
 </ul>
 
@@ -130,14 +130,13 @@ li{margin:4px 0}
 </ul>
 <h3>截图与标注</h3>
 <ul>
-<li><kbd>S</kbd> 下载 PNG 并复制到剪贴板；<kbd>C</kbd> 只复制不下载。两者都会先停在当前帧，保证文件名时间码与图里那一帧一致。</li>
+<li><kbd>S</kbd> 下载 PNG 并复制到剪贴板（会先停在当前帧，保证文件名时间码与图里那一帧一致）；<kbd>C</kbd> 只复制、不下载，<b>也不会暂停播放</b>。</li>
 <li><kbd>Shift</kbd>+<kbd>S</kbd> 标注截图：画框 / 加字（字号按截图宽度换算，1080p 64px，与嵌入时间码同字号），<kbd>Z</kbd> 撤销、<kbd>C</kbd> 复制、<kbd>Enter</kbd> 保存、<kbd>Esc</kbd> 取消。</li>
 <li>时间码按「此刻真正上屏的那一帧」计算（片源首帧 PTS 偏移会自动修正），所以状态栏的时间码、图片里嵌入的时间码、文件名里的时间码始终是同一帧。</li>
-<li>「打点自动截图」开启后，<kbd>M</kbd> 打点立即截图，<kbd>I</kbd> 打入点先暂存、<kbd>O</kbd> 打出点时保存。</li>
 </ul>
 <h3>颜色查找表（LUT）</h3>
 <ul>
-<li>设置里「颜色查找表」选档位：<b>SLog3 / CLog3 / SLog2 / CLog2</b>（默认 SLog3，相机官方 Look LUT）。</li>
+<li>设置里「颜色查找表」选档位：<b>SLog3 / CLog3</b>（默认 SLog3，相机官方 Look LUT）。</li>
 <li>按 <kbd>Q</kbd> <b>进网页全屏并应用</b>（提示「已应用LUT：名称」）；已在全屏里时 <kbd>Q</kbd> 只做应用 / 取消，<b>不会退出全屏</b>；退出全屏按 <kbd>Esc</kbd> 或 <kbd>P</kbd>（退出时若正应用着会自动取消）。</li>
 <li>只想全屏看原片：按 <kbd>P</kbd> 进网页全屏，再按 <kbd>P</kbd> 或 <kbd>Esc</kbd> 退出（不套 LUT）。</li>
 <li><b>覆盖整个网页窗口</b>：画布铺满窗口，画面按原比例摆在其中（画面之外纯黑）——覆盖面是整窗，比例也不变形；截图与录制仍是原始画面。</li>
@@ -183,7 +182,7 @@ li{margin:4px 0}
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v3.7</span>
+<span>芒着拉片 | MG Player+ v3.8</span>
 <span>YUMMi</span>
 </footer>
 </div>

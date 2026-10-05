@@ -119,7 +119,7 @@ const MPP = (() => {
     } catch (e) { }
     return false;
   }
-  // 实时时间模式（时间码取系统时间）：状态存在页面端（不落盘，直播页默认开），面板只负责开关
+  // 直播模式（时间码取系统时间）：状态存在页面端（不落盘，直播页默认开），面板只负责开关
   function fnGetRealtime() {
     try { return window.__mgpAPI && typeof window.__mgpAPI.getRealtime === 'function' ? window.__mgpAPI.getRealtime() === true : false; }
     catch (e) { return false; }
@@ -144,11 +144,11 @@ const MPP = (() => {
       return true;
     } catch (e) { return false; }
   }
-  // 编辑记录时间码（右键双击时间码）：type 'mk'|'io'，field 'time'|'in'|'out'
-  function fnSetTime(type, idx, field, sec) {
+  // 编辑记录时间码：type 'mk'|'io'，field 'time'|'in'|'out'；fp = 记录指纹（优先用它定位记录）
+  function fnSetTime(type, idx, field, sec, fp) {
     try {
       if (window.__mgpAPI && typeof window.__mgpAPI.setTime === 'function') {
-        return window.__mgpAPI.setTime(type, idx, field, sec) === true;
+        return window.__mgpAPI.setTime(type, idx, field, sec, fp) === true;
       }
     } catch (e) { }
     return false;
@@ -192,7 +192,8 @@ const MPP = (() => {
     } catch (e) { }
     return false;
   }
-  function fnSetMarkColor(idx, color) {
+  // 标记颜色：fp = 记录指纹（优先用它定位；页面没了就按指纹在本地存储里找同一条）
+  function fnSetMarkColor(idx, color, fp) {
     function vkey() {
       if (window.__mgpVkey) { try { return window.__mgpVkey(); } catch (e) { } }
       const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
@@ -203,9 +204,14 @@ const MPP = (() => {
       if (v) { const d = v.id || v.vid || v.mgpid; if (d) return 'id:' + d; }
       return location.origin + location.pathname;
     }
+    // 按指纹在当前视频的记录里找同一条（本地兜底路径同样不能按序号写错记录）
+    function fpIdx(arr) {
+      if (!fp || typeof fp !== 'object' || !Array.isArray(arr)) return -1;
+      return arr.findIndex(r => r && r.tc === fp.tc && Math.abs((r.time || 0) - (fp.time || 0)) < 0.002);
+    }
     let ok = false;
     if (window.__mgpAPI && typeof window.__mgpAPI.setMarkColor === 'function') {
-      try { ok = window.__mgpAPI.setMarkColor(idx, color) === true; } catch (e) { }
+      try { ok = window.__mgpAPI.setMarkColor(idx, color, fp) === true; } catch (e) { }
     }
     if (!ok) {
       try {
@@ -214,9 +220,10 @@ const MPP = (() => {
         const key = vkey();
         if (map && Array.isArray(map.inOut) && Array.isArray(map.marks)) map = { [key]: map };
         const e = map[key] || { inOut: [], marks: [] };
-        if (e.marks && e.marks[idx]) {
-          if (color === null || color === undefined) delete e.marks[idx].color;
-          else e.marks[idx].color = color;
+        const at = fp ? fpIdx(e.marks) : idx;
+        if (e.marks && e.marks[at]) {
+          if (color === null || color === undefined) delete e.marks[at].color;
+          else e.marks[at].color = color;
           map[key] = e;
           localStorage.setItem('mpp_logs', JSON.stringify(map));
           ok = true;
@@ -226,11 +233,20 @@ const MPP = (() => {
     return ok;
   }
   // v2.0 打点备注：type 为 'mk' / 'io'
-  function fnSetNote(type, idx, note) {
+  // fp：记录指纹（时间码 + 时刻）—— 面板与页面的记录顺序可能不一致（导入 / 排序 / 其他窗口
+  // 改过），一律用指纹定位，避免备注写到别的记录上或写不进去
+  function fnSetNote(type, idx, note, fp) {
     if (window.__mgpAPI && typeof window.__mgpAPI.setNote === 'function') {
-      try { return window.__mgpAPI.setNote(type, idx, note) === true; } catch (e) { }
+      try { return window.__mgpAPI.setNote(type, idx, note, fp) === true; } catch (e) { }
     }
     return false;
+  }
+  // 记录指纹：与 keepSelection 用同一套（时间码 + 时刻），保证「改哪条」始终一致
+  function fpOf(type, rec) {
+    if (!rec) return null;
+    return type === 'mk'
+      ? { tc: rec.tc, time: rec.time }
+      : { inTC: rec.inTC, inTime: rec.inTime, outTime: rec.outTime };
   }
   // v2.0 标题重命名：写入 mpp_titles 并标记 custom，页面端保存记录时保留自定义标题
   function fnSetTitle(title) {
@@ -353,7 +369,7 @@ const MPP = (() => {
     ['红', '#e74c3c'], ['橙', '#ff7a1a'], ['蓝', '#3498db'], ['绿', '#2ecc71'], ['灰', '#9aa0a6']
   ];
   // 颜色查找表（颜色查找表）可选档位：与 content/lut.js 的 CATALOG 保持一致，默认 SLog3
-  const LUT_IDS = ['slog3', 'clog3', 'slog2', 'clog2'];
+  const LUT_IDS = ['slog3', 'clog3'];
   function markColor(m) { return (m && m.color) || null; }
   function colorName(hex) {
     const c = MARK_COLORS.find(([, v]) => v === hex);
@@ -616,7 +632,6 @@ const MPP = (() => {
     els.settingsMenu = $(cfg.settingsMenu);
     els.btnMode = $(cfg.btnMode);
     els.modeMenu = $(cfg.modeMenu);
-    els.togShot = $(cfg.togShot);
     els.togAvoid = $(cfg.togAvoid);
     els.togPip = $(cfg.togPip);
     els.togRt = $(cfg.togRt);
@@ -686,8 +701,7 @@ const MPP = (() => {
     if (els.setRowAll) els.setRowAll.hidden = onDefault;
     // 时间码显示回避：未手动设置过时按站点默认（芒果TV开、其他站点关）
     if (els.togAvoid) els.togAvoid.checked = settings.avoidTimecode === undefined ? isMgtv(res && res.host) : settings.avoidTimecode !== false;
-    // 打点自动截图：未手动设置过时按站点默认（百度网盘开、其他站点关）
-    if (els.togShot) els.togShot.checked = settings.autoShot === undefined ? (res && res.host === 'pan.baidu.com') : settings.autoShot === true;
+    // 打点自动截图功能已移除（打点不再自动截图）
     if (els.err) {
       els.err.innerHTML = settings.logEnabled === false
         ? '日志记录已关闭<br>点击右上角设置按钮重新开启'
@@ -712,9 +726,10 @@ const MPP = (() => {
     if (!valid) return false;
     const sig = JSON.stringify(res.logs);
     if (!force && sig === lastSig) return true;
-    // 备注 / 标题编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
+    // 备注 / 标题 / 时间码编辑中：跳过本轮刷新，避免重建列表销毁输入框打断编辑（保存后下一轮自动同步）
     if (!force && document.querySelector('.note-edit:not([hidden])')) return true;
     if (!force && document.querySelector('.pg-title-edit')) return true;
+    if (!force && document.querySelector('.tc-edit')) return true;
     lastSig = sig;
     // 数据变化时按记录指纹保留仍存在的选中项，避免轮询刷新打断勾选
     const prev = logs;
@@ -1017,7 +1032,9 @@ const MPP = (() => {
       const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
       const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
       const hasNote = !!(rec && rec.note);
-      el.hidden = !hasNote;
+      // 正在编辑这一行的备注时不要把它藏起来（否则输入会突然被打断）
+      const editingHere = !!el.querySelector('.note-edit:not([hidden])');
+      el.hidden = !hasNote && !editingHere;
       const text = el.querySelector('.note-text');
       if (text) {
         // 搜索命中处高亮（noteHTML 内部已逐段转义）
@@ -1080,22 +1097,35 @@ const MPP = (() => {
   function commitNoteEdit(edit) {
     // 防重提交：Enter 后失焦会再触发一次 blur 保存，跳过避免用旧值覆盖已存内容
     if (edit.dataset.committing) return;
-    edit.dataset.committing = '1';
     const line = edit.closest('.note-line');
-    const row = line.closest('.row');
+    const row = line && line.closest('.row');
     if (!row) return;
     const isMk = row.dataset.mk !== undefined;
     const idx = parseInt(isMk ? row.dataset.mk : row.dataset.io, 10);
     const rec = isMk ? logs.marks[idx] : logs.inOut[idx];
     const val = edit.value.trim();
-    if (!rec) return;
-    execInPage(fnSetNote, [isMk ? 'mk' : 'io', idx, val]).then(ok => {
-      if (!ok) { edit.value = val; delete edit.dataset.committing; return; } // 保存失败：恢复输入内容，停留编辑态
+    // rec 拿不到（列表刚好被刷新过）：放开标记、提示重试，不能把输入框卡死在「提交中」
+    if (!rec) { delete edit.dataset.committing; panelToast('记录已变化，请重新点击备注再保存'); return; }
+    edit.dataset.committing = '1';
+    const clear = () => { delete edit.dataset.committing; };
+    execInPage(fnSetNote, [isMk ? 'mk' : 'io', idx, val, fpOf(isMk ? 'mk' : 'io', rec)]).then(ok => {
+      if (!ok) {
+        // 保存失败：恢复输入内容、停留编辑态，并明确提示（不再静默失败）
+        edit.value = val;
+        clear();
+        panelToast('备注保存失败，请重试');
+        return;
+      }
       if (val) rec.note = val; else delete rec.note;
+      clear();
       // 原地更新显示，不重建整表（避免打断勾选等其他交互）
       cancelNoteEdit(edit);
       updateNoteLines();
-    }).catch(() => { edit.value = val; delete edit.dataset.committing; });
+    }).catch(() => {
+      edit.value = val;
+      clear();
+      panelToast('备注保存失败，请重试');
+    });
   }
 
   // ─── 侧边栏：折叠 + 标题点击全选 ─────────────
@@ -1152,9 +1182,9 @@ const MPP = (() => {
       if (!save || !val) return;
       execInPage(fnGetFps).catch(() => 25).then(fps => {
         const F = fps || 25;
-        const apply = sec => execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec]).then(ok => {
+        const apply = sec => execInPage(fnSetTime, [isMk ? 'mk' : 'io', idx, field, sec, fpOf(isMk ? 'mk' : 'io', rec)]).then(ok => {
           if (ok) { panelToast('已更新时间码'); load(true); }
-          else panelToast('时间码更新失败');
+          else panelToast('时间码更新失败，请刷新面板后重试');
         });
         const a = analyzeTcInput(val, F);
         if (a && !a.ok) { panelToast('无法识别的时间码：' + val); return; }
@@ -1296,8 +1326,8 @@ const MPP = (() => {
         if (!m) return;
         execInPage(fnNowTime).then(n => {
           if (!n || typeof n.sec !== 'number' || !isFinite(n.sec)) { panelToast('拿不到当前播放时间'); return; }
-          execInPage(fnSetTime, ['mk', idx, 'time', n.sec]).then(ok => {
-            if (!ok) { panelToast('时间码更新失败'); return; }
+          execInPage(fnSetTime, ['mk', idx, 'time', n.sec, fpOf('mk', m)]).then(ok => {
+            if (!ok) { panelToast('时间码更新失败，请刷新面板后重试'); return; }
             panelToast('已改为当前时间码');
             load(true);
           }).catch(() => panelToast('时间码更新失败'));
@@ -1314,8 +1344,8 @@ const MPP = (() => {
         const color = dot.dataset.c;
         if (!color) return;
         const next = (m.color === color) ? null : color;
-        execInPage(fnSetMarkColor, [idx, next]).then(ok => {
-          if (!ok) return;
+        execInPage(fnSetMarkColor, [idx, next, fpOf('mk', m)]).then(ok => {
+          if (!ok) { panelToast('颜色设置失败，请刷新面板后重试'); return; }
           if (next === null) delete m.color; else m.color = next;
           render();
           const name = dot.dataset.n || '';
@@ -1481,6 +1511,10 @@ const MPP = (() => {
   }
 
   async function exportExcel() {
+    // 导出前先把列表同步成页面的最新状态：备注刚改过（还在保存 / 面板本地还是旧值）也不会漏
+    const openEdit = document.querySelector('.note-edit:not([hidden])');
+    if (openEdit) { commitNoteEdit(openEdit); await new Promise(r => setTimeout(r, 260)); }
+    try { await load(true); } catch (e) { }
     const ioIdx = [...sel.io].sort((a, b) => a - b);
     const mkIdx = [...sel.mk].sort((a, b) => a - b);
     if (!ioIdx.length && !mkIdx.length) return;
@@ -2712,7 +2746,7 @@ const MPP = (() => {
       savePatch({ lut: id });
       panelToast('颜色查找表：' + b.textContent + '（按 Q 应用 / 取消）');
     });
-    // 实时时间：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
+    // 直播模式：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
     // 每次打开设置菜单都同步一次，避免与页面实际状态不一致
     const syncRtSwitch = () => {
       if (!els.togRt) return;
@@ -2723,11 +2757,10 @@ const MPP = (() => {
     // 设置保存统一经 background 中转：面板（popup/侧边栏）关闭会中断未完成的
     // storage 异步链，切换后立即关闭面板会导致保存丢失；service worker 不随面板关闭
     const savePatch = patch => chrome.runtime.sendMessage({ type: 'saveSettings', patch }).catch(() => { });
-    if (els.togShot) els.togShot.addEventListener('change', e => savePatch({ autoShot: e.target.checked }));
     if (els.togAvoid) els.togAvoid.addEventListener('change', e => savePatch({ avoidTimecode: e.target.checked }));
     if (els.togPip) els.togPip.addEventListener('change', e => savePatch({ pipRecord: e.target.checked }));
     if (els.togBar) els.togBar.addEventListener('change', e => savePatch({ barEnabled: e.target.checked }));
-    // 实时时间：只改页面状态，不写设置（默认关闭 / 每次手动开；直播页默认开）
+    // 直播模式：只改页面状态，不写设置（默认关闭 / 每次手动开；直播页默认开）
     if (els.togRt) els.togRt.addEventListener('change', e => {
       const want = e.target.checked;
       execInPage(fnSetRealtime, [want]).then(v => {

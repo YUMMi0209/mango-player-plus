@@ -148,7 +148,7 @@
 
   loadLogs();
 
-  // fps 可选：实时时间模式按固定 25fps 折算帧号（与视频自身帧率无关）
+  // fps 可选：直播模式按固定 25fps 折算帧号（与视频自身帧率无关）
   function fmtTC(sec, frames, fps) {
     if (frames === undefined) frames = true;
     const F = fps > 0 ? fps : FPS;
@@ -165,7 +165,7 @@
   // 带帧号文件名时间码 HH-MM-SS-FF：截图文件名与打点记录时间码精确对应，便于截图管理匹配
   function fmtTCPlainF(sec) { return fmtTC(sec, true).replace(/:/g, '-'); }
 
-  // ─── 实时时间模式（时间码取系统时间）─────────────
+  // ─── 直播模式（时间码取系统时间）─────────────
   // 开启后：顶部时间码显示系统时间 HHMMSSFF（固定按 25fps 折算帧号），状态标签由 PLAY 变为 LIVE；
   // 打点记录 / 截图 / 录制的**文件名时间码**也用它；同时禁用所有「按时间码跳转」的功能。
   // 直播页默认开启；普通视频默认关闭，且**不写存储、每次手动开**（刷新页面即回到默认）。
@@ -179,7 +179,7 @@
     const v = !!on;
     if (rtOn() === v) return rtOn();
     rtTime = v;
-    try { mgpToast(v ? '已开启实时时间：时间码取系统时间，按时间码跳转已停用' : '已关闭实时时间，恢复按视频时间码', true); } catch (e) { }
+    try { mgpToast(v ? '已开启直播模式：时间码取系统时间，按时间码跳转已停用' : '已关闭直播模式，恢复按视频时间码', true); } catch (e) { }
     updateTC();
     return rtOn();
   }
@@ -188,16 +188,16 @@
     const d = new Date();
     return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
   }
-  // 录制/截图取时刻：实时时间模式用系统时间，否则用画面时间
+  // 录制/截图取时刻：直播模式用系统时间，否则用画面时间
   function nowT() { return rtOn() ? rtSeconds() : dispTime(); }
-  // 记录时间码文本：实时时间模式取「此刻」的系统时间（固定 25fps 折算帧号），
+  // 记录时间码文本：直播模式取「此刻」的系统时间（固定 25fps 折算帧号），
   // 否则用给定时刻（画面时间）的时间码。注意记录的 time/inTime/outTime 仍存画面时间，
-  // 这样时长、排序、去重、#mpp= 链接都不受影响，只是**展示/导出/文件名**的时间码变成实时时间
+  // 这样时长、排序、去重、#mpp= 链接都不受影响，只是**展示/导出/文件名**的时间码变成系统时间
   function recTC(sec) {
     if (rtOn()) return fmtTC(rtSeconds(), true, RT_FPS);
     return fmtTC(sec, true);
   }
-  // 文件名时间码：实时时间模式必须用「动作发生那一刻」的系统时间（录制/截图保存有延迟），
+  // 文件名时间码：直播模式必须用「动作发生那一刻」的系统时间（录制/截图保存有延迟），
   // 所以动作发生时先记一份快照，保存时按时刻取回
   let rtStamp = { sec: null, tc: '' };
   function rtMarkTC(sec) { if (rtOn()) rtStamp = { sec: sec, tc: fmtTC(rtSeconds(), true, RT_FPS) }; return sec; }
@@ -319,7 +319,7 @@
   letter-spacing:.5px;
 }
 .b-pl{background:#ff5f00;color:#fff}
-/* 实时时间模式：播放中显示 LIVE（与 PLAY 同色，仅文案不同） */
+/* 直播模式：播放中显示 LIVE（与 PLAY 同色，仅文案不同） */
 .b-lv{background:#ff5f00;color:#fff}
 .b-st{background:#555;color:#ddd}
 .b-rec{background:#e74c3c;color:#fff}
@@ -825,7 +825,6 @@
     frameLag = 0; frameBasisExact = false;
     ptsOffset = 0; ptsOffsetVerified = false; ptsHist.length = 0;   // 换集后重测新片源
     dqSamples.length = 0;
-    pendingShot = null;          // 换 video 后丢弃未保存的入点截图
     loadState();
     if (state.markTime !== null || state.inPoint !== null) {
       updateTC();
@@ -1055,7 +1054,9 @@
   }
   // 时间码下移：常规下移量为视频宽度的 2.5%（平滑动画）；全屏固定下移 0.5%、不做移动动画
   // 「时间码显示回避」关闭时不再向下移动；未手动设置过时按站点默认（芒果TV开、其他站点关）
+  // **直播模式下一律关闭回避**：时间码恒为系统时间，位置不应再随鼠标上下移动
   function avoidTimecodeOn() {
+    if (rtOn()) return false;
     const s = window.__mgpSettings || {};
     if (s.avoidTimecode === true) return true;
     if (s.avoidTimecode === false) return false;
@@ -1183,8 +1184,8 @@
   function openSeek() {
     const tcEl = qs('#mgp-tc');
     if (!tcEl || !video) return;
-    // 实时时间模式下时间码是系统时间，按时间码跳转没有意义 → 停用
-    if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; }
+    // 直播模式下时间码是系统时间，按时间码跳转没有意义 → 停用
+    if (rtOn()) { mgpToast('直播模式：已停用按时间码跳转', true); return; }
     const old = tcEl.querySelector('#mgp-seek');
     if (old) old.remove();
     const box = document.createElement('div');
@@ -1276,7 +1277,7 @@
     const rt = rtOn();
     let dt, bl, bc;
     if (rt) {
-      // 实时时间：时间码恒为系统时间；状态标签照旧，播放中显示 LIVE
+      // 直播模式：时间码恒为系统时间；状态标签照旧，播放中显示 LIVE
       dt = rtSeconds();
       if (state.tcMode === 'rec' || recordingInternal) { bl = 'REC'; bc = 'b-rec'; }
       else if (state.tcMode === 'in') { bl = 'IN'; bc = 'b-in'; }
@@ -1409,7 +1410,23 @@
   }
   function captureScreenshot(copyOnly) {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
-    // 实时时间模式下：文件名的系统时间要取「按下的那一刻」，不能等校准（可能要几百毫秒）
+    // C（只复制不下载）：不需要文件名时间码，**不暂停也不校准**，直接复制当前画面 ——
+    // 边看边连续复制时不会打断播放
+    if (copyOnly) {
+      const c0 = document.createElement('canvas');
+      c0.width = video.videoWidth; c0.height = video.videoHeight;
+      try {
+        c0.getContext('2d').drawImage(video, 0, 0);
+        c0.toBlob(b => {
+          if (!b) { mgpToast('截图失败'); return; }
+          annCopyBlob(b).then(ok => {
+            mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true);
+          });
+        }, 'image/png');
+      } catch (e) { mgpToast('截图失败: 内容保护'); }
+      return;
+    }
+    // 直播模式下：文件名的系统时间要取「按下的那一刻」，不能等校准（可能要几百毫秒）
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
     let estT = null, canvas = null;
     const save = () => {
@@ -1422,18 +1439,11 @@
       try {
         cc.toBlob(b => {
           if (!b) { mgpToast('截图失败'); return; }
-          if (copyOnly) {
-            // C 键：截图复制（不下载），与标注窗口内的复制行为一致
-            annCopyBlob(b).then(ok => {
-              mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true);
-            });
-          } else {
-            downloadBlob(b, buildFileName(tcPlain, t, 'png'));
-            // S 键：下载并复制
-            annCopyBlob(b).then(ok => {
-              mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
-            });
-          }
+          downloadBlob(b, buildFileName(tcPlain, t, 'png'));
+          // S 键：下载并复制
+          annCopyBlob(b).then(ok => {
+            mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
+          });
         }, 'image/png');
       } catch(e) { mgpToast('截图失败: 内容保护'); }
     };
@@ -1441,31 +1451,6 @@
       if (t1 != null) estT = t1;   // 校准出的精确时间码
       save();
     }, 3500);   // 截图要等文件名，别拖太久（校准不出来就用当前读数）
-  }
-
-  // ─── 打点自动截图：M 打点立即保存；I 打入点暂存，O 打出点时保存最后一次 I 的截图 ──
-  let pendingShot = null;   // { blob, tcPlain } 入点暂存截图
-  // 未手动设置过时按站点默认：百度网盘开启，其他站点关闭
-  function autoShot() {
-    const s = window.__mgpSettings || {};
-    if (s.autoShot === true) return true;
-    if (s.autoShot === false) return false;
-    return location.hostname === 'pan.baidu.com';
-  }
-  function shotToBlob(cb) {
-    if (!video || !video.videoWidth) { cb(null); return; }
-    const c = document.createElement('canvas');
-    c.width = video.videoWidth; c.height = video.videoHeight;
-    try {
-      c.getContext('2d').drawImage(video, 0, 0);
-      c.toBlob(cb, 'image/png');
-    } catch (e) { cb(null); }
-  }
-  // 保存打点截图：前缀统一 SCS；t 为打点时刻（时间码与备注均取自该时刻，保持一致）
-  function saveShotBlob(b, t, toast) {
-    if (!b) { mgpToast('截图失败', true); return; }
-    downloadBlob(b, buildFileName(fileTC(t), t, 'png'));
-    if (toast) mgpToast(toast, true);
   }
 
   // ─── Recording (improved quality) ───────────
@@ -1683,7 +1668,7 @@
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
       if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
       if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
-      recCanvas = null; recCtx = null; pendingShot = null;
+      recCanvas = null; recCtx = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
       if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
       if (bar) bar.classList.remove('recording');
@@ -2060,10 +2045,6 @@
     state.tcMode = 'in'; saveState();
     if (video.paused) video.play().catch(()=>{});
     mgpToast('入点 ( ' + recTC(t) + ' | 0s )');
-    // 打点自动截图：暂存当前画面，待 O 打出点时保存（多次 I 只保留最后一次，与日志入点逻辑一致）
-    if (autoShot()) {
-      shotToBlob(b => { if (b) pendingShot = { blob: b, tcPlain: fileTC(rtMarkTC(t)) }; });
-    }
   }
 
   function markOut() {
@@ -2089,16 +2070,6 @@
     // 不自动复制片段时长（避免覆盖用户剪贴板）
     saveState();
     mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )', true);
-    // 保存最后一次 I 键时暂存的入点截图（记录已写入，备注可匹配）；
-    // 时间码与备注均取入点时刻，保证文件名内两者一致
-    if (autoShot() && pendingShot) {
-      const ps = pendingShot; pendingShot = null;
-      if (ps.blob) {
-        const inT = state.inPoint != null ? state.inPoint : 0;
-        downloadBlob(ps.blob, buildFileName(fileTC(inT), inT, 'png'));
-        mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's ) · 已截图', true);
-      }
-    }
     clearTimeout(stateTimer);
     stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000);
   }
@@ -2271,7 +2242,6 @@
       videoContainer.removeEventListener('mouseleave', onBarMouseLeave);
     }
     stopLoop();
-    pendingShot = null;
     if (webFsActive) exitWebFs();
     if (wrapper && wrapper.parentElement) wrapper.parentElement.removeChild(wrapper);
     wrapper = null; shadow = null; video = null; videoContainer = null;
@@ -2318,10 +2288,6 @@
     saveLogs();
     // 不自动复制时间码（避免覆盖用户剪贴板；需要时点击控制栏时间码或面板记录行复制）
     mgpToast('已标记 ( ' + fmtTC(t) + ' )', true);
-    // 打点自动截图：M 打点立即保存
-    if (autoShot()) {
-      shotToBlob(b => saveShotBlob(b, t, '已标记 ( ' + fmtTC(t) + ' ) · 已截图'));
-    }
     clearTimeout(stateTimer);
     stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000);
   }
@@ -2338,8 +2304,8 @@
   function enforceSpeed() { if (!video) return; if (curSpeed !== 1 && Math.abs(video.playbackRate - curSpeed) > 0.01) video.playbackRate = curSpeed; }
   // 跳转到记录时刻：统一走 jumpAligned（帧对齐 + 落点核对补偿），避免跳转后
   // 画面与记录时间码不符（站点播放器会把 seek 吸附到更早的位置）
-  function jumpIn() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.inPoint === null || !video) return; recStopTime = null; jumpAligned(state.inPoint); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
-  function jumpOut() { if (rtOn()) { mgpToast('实时时间模式：已停用按时间码跳转', true); return; } if (state.outPoint === null || !video) return; recStopTime = null; jumpAligned(state.outPoint); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpIn() { if (rtOn()) { mgpToast('直播模式：已停用按时间码跳转', true); return; } if (state.inPoint === null || !video) return; recStopTime = null; jumpAligned(state.inPoint); state.tcMode = 'in'; mgpToast('入点 ( ' + fmtTC(state.inPoint) + ' | 0s )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
+  function jumpOut() { if (rtOn()) { mgpToast('直播模式：已停用按时间码跳转', true); return; } if (state.outPoint === null || !video) return; recStopTime = null; jumpAligned(state.outPoint); const dur = state.outPoint - (state.inPoint||0); const sec = Math.round(dur*2)/2; state.tcMode = 'ot'; mgpToast('出点 ( ' + fmtTC(state.outPoint) + ' | ' + sec + 's )'); clearTimeout(stateTimer); stateTimer = setTimeout(() => { state.tcMode = 'live'; saveState(); }, 2000); }
 
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：快捷键由标注窗口接管
@@ -2644,7 +2610,7 @@
     if (annOpening) return;
     if (recordingInternal) { mgpToast('录制中无法标注截图'); return; }
     annOpening = true;
-    // 实时时间模式下：嵌入的系统时间取「按下的那一刻」（校准要几百毫秒，晚了就不准）
+    // 直播模式下：嵌入的系统时间取「按下的那一刻」（校准要几百毫秒，晚了就不准）
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
     // 先把冻结画面当底图（= 你按下时看到的画面）立刻开窗，再在后台把这帧的时间码校准准
     const opened = (t0, c) => {
@@ -2657,7 +2623,7 @@
       annShowTC = s.annotateTimecode === true;
       const shotT = rtMarkTC(t0 == null ? dispTime() : t0);
       annShotSec = shotT;
-      annTC = rtSnap || recTC(shotT);   // 标注右上角嵌入的时间码（实时时间模式下即系统时间）
+      annTC = rtSnap || recTC(shotT);   // 标注右上角嵌入的时间码（直播模式下即系统时间）
       // 命名与直接截图（S 键）完全一致：标题_时间码_备注.png
       annFileName = buildFileName(rtSnap || fileTC(shotT), shotT, 'png');
       annBuild();
@@ -2665,7 +2631,7 @@
     // 校准出精确时间码后：更新嵌入时间码与文件名（图片内容不受影响），并重绘
     const refine = t1 => {
       if (t1 == null || !annHost || annSource == null) return;
-      if (rtOn()) return;   // 实时时间模式下时间码是系统时间，不受视频帧影响
+      if (rtOn()) return;   // 直播模式下时间码是系统时间，不受视频帧影响
       annShotSec = t1;
       annTC = recTC(t1);
       annFileName = buildFileName(fileTC(t1), t1, 'png');
@@ -2921,7 +2887,6 @@
       }
       // 换集后重置：出点去重标记与新分集无关；#mpp= 定位需对新分集重新生效
       lastLogOutTime = null;
-      pendingShot = null;
       hashSeekDone = false;
       // 清理旧分集的 #mpp= hash：防止用旧分集定位参数误 seek 新分集
       if (location.hash) {
@@ -2956,7 +2921,7 @@
   // ─── Hash seek: links like #mpp=123.4 seek once on page open ──
   function applyHashSeek(v) {
     if (hashSeekDone || !v) return;
-    if (rtOn()) { hashSeekDone = true; return; }   // 实时时间模式：不按链接时间码跳转
+    if (rtOn()) { hashSeekDone = true; return; }   // 直播模式：不按链接时间码跳转
     hashSeekDone = true;
     try {
       const m = (location.hash || '').match(/mpp=([\d.]+)/);
@@ -3117,12 +3082,30 @@
 
   // ─── Log API (used by popup via executeScript) ───
   window.__mgpToast = mgpToast;
+  // 记录定位：**优先用「指纹」（时间码 + 时刻）**，序号只作兜底。
+  // 面板列表顺序可能与页面端不一致（导入 / 排序 / 其他窗口改过），按序号写会把备注写到
+  // 别的记录上、或写到不存在的记录上（表现为「保存不了 / 保存了但没生效」）
+  function resolveRecord(arr, type, idx, fp) {
+    if (fp && typeof fp === 'object') {
+      return arr.findIndex(r => {
+        if (!r) return false;
+        if (type === 'mk') {
+          return r.tc === fp.tc && Math.abs((r.time || 0) - (fp.time || 0)) < 0.002;
+        }
+        return r.inTC === fp.inTC &&
+          Math.abs((r.inTime || 0) - (fp.inTime || 0)) < 0.002 &&
+          Math.abs((r.outTime || 0) - (fp.outTime || 0)) < 0.002;
+      });
+      // 给了指纹却找不到：说明这条记录已经不存在了，绝不退回序号乱写
+    }
+    return (idx != null && arr[idx]) ? idx : -1;
+  }
   window.__mgpAPI = {
     getRealtime() { return rtOn(); },
     setRealtime(on) { return setRtTime(on); },
     getLogs() { return JSON.parse(JSON.stringify(logs)); },
     jumpTo(t) {
-      if (rtOn()) { try { mgpToast('实时时间模式：已停用按时间码跳转', true); } catch (e) { } return false; }
+      if (rtOn()) { try { mgpToast('直播模式：已停用按时间码跳转', true); } catch (e) { } return false; }
       if (!video) return false;
       // 提示在落点确定后再读：dispTime() 才是校正后的真实画面时间
       jumpAligned(t, { onDone: () => { try { mgpToast('已跳转 ' + fmtTC(dispTime())); } catch (e) { } } });
@@ -3176,27 +3159,31 @@
       if (added) saveLogs();
       return added;
     },
-    setMarkColor(i, color) {
-      if (!logs.marks[i]) return false;
+    // fp（可选）= 记录指纹：优先用它定位，找不到就返回 false（不按序号乱写）
+    setMarkColor(i, color, fp) {
+      const at = resolveRecord(logs.marks, 'mk', i, fp);
+      if (at < 0) { try { mgpToast('这条记录已不存在，请刷新面板', true); } catch (e) { } return false; }
       if (color === null || color === undefined) {
-        delete logs.marks[i].color;
+        delete logs.marks[at].color;
         saveLogs();
         try { mgpToast('已清除标记颜色'); } catch (e) { }
         return true;
       }
       if (typeof color !== 'string') return false;
-      logs.marks[i].color = color;
+      logs.marks[at].color = color;
       saveLogs();
       const name = Object.keys(MARK_COLORS).find(k => MARK_COLORS[k] === color);
       try { mgpToast('标记点已设为 ' + (name || '自定义色')); } catch (e) { }
       return true;
     },
-    // v2.0 打点备注：type 为 'mk'（标记点）或 'io'（入点到出点）；note 为空则删除备注
-    setNote(type, idx, note) {
+    // 打点备注：type 为 'mk'（标记点）或 'io'（入点到出点）；note 为空则删除备注。
+    // fp（可选）= 记录指纹，优先用它定位（面板与页面顺序不一致时也不会写错记录）
+    setNote(type, idx, note, fp) {
       const arr = type === 'io' ? logs.inOut : logs.marks;
-      if (!arr[idx]) return false;
-      if (note === undefined || note === null || String(note).trim() === '') delete arr[idx].note;
-      else arr[idx].note = String(note);
+      const at = resolveRecord(arr, type, idx, fp);
+      if (at < 0) { try { mgpToast('这条记录已不存在，请刷新面板', true); } catch (e) { } return false; }
+      if (note === undefined || note === null || String(note).trim() === '') delete arr[at].note;
+      else arr[at].note = String(note);
       saveLogs();
       return true;
     },
@@ -3280,14 +3267,16 @@
         perfNow: performance.now()
       };
     },
-    // 面板右键双击编辑记录时间码：type 'mk'|'io'，field 'time'|'in'|'out'，sec 为新秒数
-    setTime(type, idx, field, sec) {
+    // 面板编辑记录时间码：type 'mk'|'io'，field 'time'|'in'|'out'，sec 为新秒数
+    // fp（可选）= 记录指纹，优先用它定位（面板与页面顺序不一致时也不会改错记录）
+    setTime(type, idx, field, sec, fp) {
       const arr = type === 'io' ? logs.inOut : logs.marks;
-      const rec = arr[idx];
-      if (!rec || typeof sec !== 'number' || !isFinite(sec) || sec < 0) return false;
+      const at = resolveRecord(arr, type, idx, fp);
+      if (at < 0 || typeof sec !== 'number' || !isFinite(sec) || sec < 0) return false;
+      const rec = arr[at];
       const t = sec;
       if (type === 'mk') {
-        // 实时时间模式下时间码显示的是系统时间，这里也按同一口径写，避免列表里口径不一致
+        // 直播模式下时间码显示的是系统时间，这里也按同一口径写，避免列表里口径不一致
         rec.time = t; rec.tc = rtOn() ? recTC(t) : fmtTC(t);
       } else if (field === 'in') {
         rec.inTime = t; rec.inTC = fmtTC(t);

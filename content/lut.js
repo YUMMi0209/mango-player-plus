@@ -7,12 +7,10 @@
    对外接口：window.MPGLut = { CATALOG, get/set, apply, clear, isOn, parseCube, _debug } */
 'use strict';
 (() => {
-  // LUT 目录：面板里选的 id ↔ 扩展内文件。文件为相机官方 Look LUT（原文件名见 file 字段）
+  // LUT 目录：面板里选的 id ↔ 扩展内文件。只保留 SLog3 / CLog3 两条曲线（相机官方 Look LUT）
   const CATALOG = {
     slog3: { id: 'slog3', label: 'SLog3', desc: 'SLog3 / SGamut3.Cine → LC-709 TypeA（Sony）', file: 'luts/slog3-sgamut3cine-to-lc709-typea.cube' },
-    clog3: { id: 'clog3', label: 'CLog3', desc: 'Canon Log 3 / Cinema Gamut → Canon 709', file: 'luts/clog3-cinema-gamut-to-canon709.cube' },
-    slog2: { id: 'slog2', label: 'SLog2', desc: 'SLog2 / SGamut → LC-709 TypeA（Sony）', file: 'luts/slog2-sgamut-to-lc709-typea.cube' },
-    clog2: { id: 'clog2', label: 'CLog2', desc: 'Canon Log 2 / Cinema Gamut → Canon 709', file: 'luts/clog2-cinema-gamut-to-canon709.cube' }
+    clog3: { id: 'clog3', label: 'CLog3', desc: 'Canon Log 3 / Cinema Gamut → Canon 709', file: 'luts/clog3-cinema-gamut-to-canon709.cube' }
   };
   const cache = {};          // id → { size, data: Uint8Array }（解析后的 LUT）
   let on = false;            // 是否已应用（默认不应用）
