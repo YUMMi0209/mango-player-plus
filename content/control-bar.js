@@ -577,21 +577,28 @@
     const lag = frameBasisExact ? 0 : Math.max(0, Math.min(12, frameLag));
     return f.mediaTime + lag / F;
   }
-  // 测「首帧 PTS 偏移」（bootstrap）：只在视频最开头测，此时画面必然是首帧，
-  // 它的 mediaTime 就是首帧 PTS 偏移。只取 currentTime ≤ 1/fps 的样本，避免把
-  // 站点 seek 吸附的位置差当成偏移（seek 落点已核对的实测值优先，见 setPtsOffsetFrom）
+  // 测「首帧 PTS 偏移」：本质是 mediaTime 与「视频时间」的**常量差**（部分片源首帧 PTS 不从 0
+  // 开始，整条时间码都会偏大 —— 表现为视频开头停在第 0 帧、时间码却显示第 3 帧）。
+  // 做法：在 1x（或暂停）时采样 (mediaTime − currentTime)，按整帧取**中位数**：两个时间轴同步
+  // 前进，所以差值恒定，在任意位置采样都成立 —— 不依赖「正好抓到第一帧」，也不会被时钟与画面
+  // 之间的 ±1 帧抖动带偏（这是之前只在 currentTime ≤ 1/fps 采样、常常测不到的根因）。
   const ptsHist = [];
   function notePtsOffset() {
     if (ptsVerified()) return;
     if (!video || video.seeking || lastFrameMediaTime == null) return;
     const F = FPS > 0 ? FPS : 25;
-    if (video.currentTime > 1 / F) return;
-    const fr = Math.round(lastFrameMediaTime * F);
-    if (fr < 0 || fr > 6) return;
+    const rate = video.playbackRate || 1;
+    // 高倍速下播放头时钟明显滞后于画面，差值不可信
+    if (!video.paused && rate > 1.5) return;
+    const fr = Math.round((lastFrameMediaTime - video.currentTime) * F);
+    if (fr < -3 || fr > 8) return;
     ptsHist.push(fr);
-    if (ptsHist.length > 30) ptsHist.shift();
-    const minFr = Math.min.apply(null, ptsHist);
-    ptsOffset = ptsHist.filter(x => x === minFr).length >= 2 ? minFr / F : 0;
+    if (ptsHist.length > 24) ptsHist.shift();
+    if (ptsHist.length < 3) return;
+    const sorted = ptsHist.slice().sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    // 至少 3 个样本落在中位数 ±1 帧内才认（换集 / 广告插入时偏移会变，不认混合样本）
+    if (ptsHist.filter(x => Math.abs(x - med) <= 1).length >= 3) ptsOffset = med / F;
   }
   function ptsVerified() { return ptsOffsetVerified; }
   // 用「已核对过的 seek 落点」实测 PTS 偏移：落点那一帧的视频时间 = 目标帧，
@@ -717,12 +724,19 @@
   function dispTime() {
     const est = frameTimeNow();
     if (est == null) return video ? video.currentTime : 0;
+    const F = FPS > 0 ? FPS : 25;
     let t = est - ptsOffset;
-    // 暂停时画面与播放头都停在原地，currentTime 就是那一帧的位置，可以作为上界；
-    // 播放中 currentTime 是播放头时钟，高倍速/页面卡时会明显滞后于画面，不能拿来夹取
-    if (video && video.paused && !video.seeking) {
+    if (video && !video.seeking) {
       const ct = video.currentTime;
-      if (ct > 0 && ct < t) t = ct;
+      // 暂停时画面与播放头都停在原地，currentTime 就是那一帧的位置，可以作为上界；
+      // 播放中 currentTime 是播放头时钟，高倍速/页面卡时会明显滞后于画面，不能拿来夹取
+      if (video.paused && ct > 0 && ct < t) t = ct;
+      // 停在视频最开头：第 0 帧必须显示 0（片源首帧 PTS 偏移还没测出来时同样成立），
+      // 否则会看到「画面第 0 帧、时间码第 3 帧」
+      if (ct <= 1 / F) t = 0;
+      // 首帧 PTS 偏移还没测出来时（页面刚打开、刚开始播），视频开头 0.3s 内以播放头时钟为
+      // 上界：这一段里时钟与画面必定同步（差不过几帧），足以挡住「开头整体偏 2~3 帧」
+      else if (ptsHist.length < 2 && ct < 0.3 && ct < t) t = ct;
     }
     const dur = (video && video.duration && isFinite(video.duration)) ? video.duration : Infinity;
     // 上限压到「最后一帧」：位置走到 dur 时画面仍是最后一帧（否则时间码会多出一帧，
@@ -839,6 +853,10 @@
     detectFrameRate(video);
     // 倍速变了，回调滞后帧数也变（滞后按帧计），重新测
     video.addEventListener('ratechange', () => { frameLag = 0; frameBasisExact = false; });
+    // 任何 seek（含站点自己的进度条）之后：画面就是刚刚呈现的那一帧，回调随后上报的就是它，
+    // 所以「回调滞后」归零、按精确值读数 —— 否则会把高倍速时测到的滞后带到 1x 的新位置上，
+    // 时间码凭空多出几帧（视频开头显示第 3 帧的另一种成因）
+    video.addEventListener('seeked', () => { frameLag = 0; frameBasisExact = true; });
     video.addEventListener('ended', onVideoEnded);
     bindEvents();
     startLoop();
