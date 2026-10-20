@@ -368,8 +368,7 @@ const MPP = (() => {
   const MARK_COLORS = [
     ['红', '#e74c3c'], ['橙', '#ff7a1a'], ['蓝', '#3498db'], ['绿', '#2ecc71'], ['灰', '#9aa0a6']
   ];
-  // 颜色查找表（颜色查找表）可选档位：与 content/lut.js 的 CATALOG 保持一致，默认 SLog3
-  const LUT_IDS = ['slog3', 'clog3'];
+  // 颜色查找表：没有设置项 —— 由页面端按 Q 在 REC.709 / SLog3 / CLog3 之间循环
   function markColor(m) { return (m && m.color) || null; }
   function colorName(hex) {
     const c = MARK_COLORS.find(([, v]) => v === hex);
@@ -639,7 +638,6 @@ const MPP = (() => {
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
-    els.lutOpts = $(cfg.lutOpts);
     els.setRowAll = $(cfg.setRowAll);
     els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
@@ -2728,23 +2726,7 @@ const MPP = (() => {
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
-      syncLutOpts(s.lut);
       applyTheme(s.theme);
-    });
-    // 颜色查找表：选哪个只写设置（页面按选择在按 Q 时应用），默认 SLog3、默认不应用
-    function syncLutOpts(id) {
-      if (!els.lutOpts) return;
-      const cur = LUT_IDS.indexOf(String(id)) >= 0 ? String(id) : 'slog3';
-      els.lutOpts.querySelectorAll('.lut-opt').forEach(b => b.classList.toggle('on', b.dataset.lut === cur));
-    }
-    if (els.lutOpts) els.lutOpts.addEventListener('click', e => {
-      const b = e.target.closest('.lut-opt');
-      if (!b) return;
-      const id = b.dataset.lut;
-      if (LUT_IDS.indexOf(id) < 0) return;
-      syncLutOpts(id);
-      savePatch({ lut: id });
-      panelToast('颜色查找表：' + b.textContent + '（按 Q 应用 / 取消）');
     });
     // 直播模式：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
     // 每次打开设置菜单都同步一次，避免与页面实际状态不一致

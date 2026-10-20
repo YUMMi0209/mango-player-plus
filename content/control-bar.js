@@ -546,6 +546,7 @@
           lastFrameInfo = { mediaTime: mt, presentedAt: shown, presentedFrames: meta.presentedFrames == null ? null : meta.presentedFrames };
         }
         notePtsOffset();
+        noteFrameLagFromMeta(meta, shown, (typeof performance !== 'undefined' ? performance.now() : now));
       }
       if (mt != null && lastMedia > 0) {
         const iv = mt - lastMedia;
@@ -576,6 +577,24 @@
     const F = FPS > 0 ? FPS : 25;
     const lag = frameBasisExact ? 0 : Math.max(0, Math.min(12, frameLag));
     return f.mediaTime + lag / F;
+  }
+  // 回调滞后（按帧）的**无侵入**采样：expectedDisplayTime 是该帧预计上屏的时刻（与
+  // performance.now() 同时基），回调到达时与它的差 = 「这一帧上屏后过了多久」→ 换算成帧数。
+  // 播放中持续采样取中位数：1x 下通常 < 半帧（=0，保守不往前冲），高倍速 / 页面卡顿时会明显变大。
+  // 这样不用暂停、不用 seek 也能持续跟踪滞后（截图/标注不再停帧后仍能保持读数准确）。
+  const lagHist = [];
+  function noteFrameLagFromMeta(meta, shownAt, nowMs) {
+    if (!video || video.paused || video.seeking) return;
+    if (shownAt == null || !isFinite(shownAt) || shownAt <= 0) return;
+    const delay = nowMs - shownAt;
+    if (!isFinite(delay) || delay < 0 || delay > 250) return;
+    const F = FPS > 0 ? FPS : 25;
+    lagHist.push(delay * F / 1000);
+    if (lagHist.length > 30) lagHist.shift();
+    if (lagHist.length < 3) return;
+    const sorted = lagHist.slice().sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    frameLag = Math.max(0, Math.min(12, Math.round(med)));
   }
   // 测「首帧 PTS 偏移」：本质是 mediaTime 与「视频时间」的**常量差**（部分片源首帧 PTS 不从 0
   // 开始，整条时间码都会偏大 —— 表现为视频开头停在第 0 帧、时间码却显示第 3 帧）。
@@ -876,17 +895,13 @@
 
   function bindEvents() {
     // 单击延迟执行复制（250ms），双击时间码则取消复制并切换网页全屏——两者不冲突
-    let tcClickTimer = null;
-    qs('#mgp-tc').addEventListener('click', () => {
-      if (tcClickTimer) clearTimeout(tcClickTimer);
-      tcClickTimer = setTimeout(() => { tcClickTimer = null; onTC(); }, 250);
-    });
+    // 时间码：**双击**复制紧凑时间码（单击不再写入剪贴板，避免误触覆盖剪辑板）；
+    // 右键打开跳转输入框。全屏用 P / Q / Esc（原来双击切换全屏的入口已让给复制）
     qs('#mgp-tc').addEventListener('dblclick', e => {
-      if (tcClickTimer) { clearTimeout(tcClickTimer); tcClickTimer = null; }
+      if (e.target.closest('input')) return;   // 输入框内的双击是选词
       e.preventDefault();
       e.stopPropagation();
-      if (webFsActive) exitWebFs();
-      else enterWebFs();
+      onTC();
     });
     qs('#mgp-tc').addEventListener('contextmenu', e => {
       e.preventDefault();
@@ -1426,51 +1441,36 @@
     calibrateToFrozen(sig, done);
     setTimeout(() => done(null), deadlineMs || 8000);
   }
+  // 截图：**不暂停播放**，直接取当前上屏画面（S = 下载 + 复制；C = 只复制）。
+  // 时间码取当前读数（v3.9 起 1x 下与画面同帧），所以边看边连拍不打断播放；
+  // 需要「图里那一帧 = 嵌入时间码 = 文件名」严格同帧时用 Shift+S 的标注截图（会停帧）。
   function captureScreenshot(copyOnly) {
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
-    // C（只复制不下载）：不需要文件名时间码，**不暂停也不校准**，直接复制当前画面 ——
-    // 边看边连续复制时不会打断播放
-    if (copyOnly) {
-      const c0 = document.createElement('canvas');
-      c0.width = video.videoWidth; c0.height = video.videoHeight;
-      try {
-        c0.getContext('2d').drawImage(video, 0, 0);
-        c0.toBlob(b => {
-          if (!b) { mgpToast('截图失败'); return; }
-          annCopyBlob(b).then(ok => {
-            mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true);
-          });
-        }, 'image/png');
-      } catch (e) { mgpToast('截图失败: 内容保护'); }
-      return;
-    }
-    // 直播模式下：文件名的系统时间要取「按下的那一刻」，不能等校准（可能要几百毫秒）
+    // 直播模式下：文件名的系统时间取「按下的那一刻」
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
-    let estT = null, canvas = null;
-    const save = () => {
-      const cc = canvas;
-      if (!cc) { mgpToast('截图失败: 内容保护'); return; }
-      // 校准没成功时退回当前读数（画面内容仍是冻结那一帧）
-      const t = rtMarkTC(estT == null ? dispTime() : estT);
-      const tcPlain = rtSnap || fileTC(t);
-      lastCaptureTC = rtSnap || fmtTC(t);
-      try {
-        cc.toBlob(b => {
-          if (!b) { mgpToast('截图失败'); return; }
-          downloadBlob(b, buildFileName(tcPlain, t, 'png'));
-          // S 键：下载并复制
-          annCopyBlob(b).then(ok => {
-            mgpToast(ok ? '截图保存 · 已复制' : '截图保存（复制失败）', true);
-          });
-        }, 'image/png');
-      } catch(e) { mgpToast('截图失败: 内容保护'); }
-    };
-    captureFrozenFrame((t0, c) => { estT = t0; canvas = c; }, t1 => {
-      if (t1 != null) estT = t1;   // 校准出的精确时间码
-      save();
-    }, 3500);   // 截图要等文件名，别拖太久（校准不出来就用当前读数）
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    try {
+      const ctx = c.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      ctx.getImageData(0, 0, 1, 1);   // 受保护内容会在此抛错
+    } catch (e) { mgpToast('截图失败: 内容保护'); return; }
+    // 画面已经取到手，时间码取「按下这一刻」的读数（不 seek、不校准、不改播放状态）
+    const t = rtMarkTC(dispTime());
+    const tcPlain = rtSnap || fileTC(t);
+    lastCaptureTC = rtSnap || fmtTC(t);
+    try {
+      c.toBlob(blob => {
+        if (!blob) { mgpToast('截图失败'); return; }
+        if (!copyOnly) downloadBlob(blob, buildFileName(tcPlain, t, 'png'));
+        annCopyBlob(blob).then(ok => {
+          mgpToast(copyOnly
+            ? (ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限')
+            : (ok ? '截图保存 · 已复制' : '截图保存（复制失败）'), true);
+        });
+      }, 'image/png');
+    } catch (e) { mgpToast('截图失败: 内容保护'); }
   }
-
   // ─── Recording (improved quality) ───────────
   let lastExpectedTime = 0, lastWallClock = 0;
 
@@ -1957,7 +1957,7 @@
     recStopTime = video ? dispTime() : (state.recordingStart || 0);
     state.tcMode = 'ot';
     saveState();
-    if (video) video.pause(); resetSpeed();
+    // 不暂停播放：录制结束只是收尾（文件名 / 保存），用户继续看片
     // Remove recording UI state
     const bar = qs('#mgp-bar'); if (bar) bar.classList.remove('recording');
     if (video) video.classList.remove('mgp-rec-border');
@@ -2009,7 +2009,7 @@
     const name = buildFileName(fileTC(state.recordingStart || 0), state.recordingStart || 0, ext);
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
-    navigator.clipboard.writeText(String(sec)).catch(()=>{});
+    // 不再把片段时长写进剪贴板（会静默覆盖用户剪贴板；批量录制还会每段写一次）
     // 原始文件快照：arrayBuffer 转换期间 recChunks 可能被下一次录制覆盖，回退时用快照
     const rawBlob = new Blob(recChunks, { type: mimeType || 'video/mp4' });
     const saveAndToast = blob => {
@@ -2072,7 +2072,7 @@
     // 出点早于入点无意义（时长为 0 的垃圾记录），拒绝并保持入点状态
     if (outTime < state.inPoint) { mgpToast('出点早于入点，未记录'); return; }
     state.outPoint = outTime; state.tcMode = 'ot';
-    video.pause(); resetSpeed();
+    // 不暂停、不改倍速：打出点只是记录一条片段，用户继续看片
     if (lastLogOutTime === null || Math.abs(outTime - lastLogOutTime) > 0.001) {
       insertSorted(logs.inOut, {
         inTime: state.inPoint, inTC: recTC(state.inPoint),
@@ -2124,6 +2124,11 @@
   let webFsSaved = null;
   let fsDragState = null;   // 进度条拖动状态：{ anchor, timer, extended, range, moved, startX }
   let fsExitAnim = false;   // 退出微调动画中：暂停进度条 value 回写
+  // 颜色查找表档位（Q 循环）：REC.709 → SLog3 → CLog3 → REC.709…
+  // 声明放在这里是因为 exitWebFs() 会把它复位成 REC.709（函数体在初始化完成后才执行）
+  const LUT_MODES = ['rec709', 'slog3', 'clog3'];
+  const LUT_MODE_LABEL = { rec709: 'REC.709', slog3: 'SLog3', clog3: 'CLog3' };
+  let lutMode = 'rec709';   // 当前档位（运行时不落盘：刷新页面回到 REC.709）
   let activeEndDrag = null; // 当前进度条退出处理（换集/重建时先注销旧监听，防泄漏）
   function enterWebFs() {
     // 使用独立视频引用：视频控制关闭后控制栏被移除（video 变量置空），
@@ -2177,9 +2182,11 @@
   // 用保存的元素引用还原（换集/移除后 video/wrapper 可能已不是原对象）
   function exitWebFs() {
     if (!webFsActive) return false;
-    // 颜色查找表只在网页全屏里生效：退出全屏时一并关闭
+    // 颜色查找表只在网页全屏里生效：退出全屏时一并关闭，档位回到 REC.709
+    // （否则下次按 Q 会从一个「看不见的档位」往下走，第一次按好像没反应）
     const hadLut = !!(window.MPGLut && window.MPGLut.isOn());
     if (hadLut) { try { window.MPGLut.clear(); } catch (e) { } }
+    lutMode = 'rec709';
     if (webFsSaved) {
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
       if (webFsSaved.w) { webFsSaved.w.setAttribute('style', webFsSaved.wStyle); webFsSaved.w.classList.remove('fs-on'); }
@@ -2370,25 +2377,22 @@
     }
   });
 
-  // ─── 颜色查找表（Q 键：进全屏并应用 / 全屏内应用与取消；Esc·P 退出全屏）───────────
-  // 设置的「颜色查找表」里选 LUT（SLog3 / CLog3 / SLog2 / CLog2，默认 SLog3）。
-  // 颜色查找表**只在网页全屏里生效**：Q 进网页全屏并应用；全屏内再按 Q 只是应用/取消；Esc（或 P）退出全屏时
-  // 一并关闭。数据（.cube）由隔离世界的桥取回后 postMessage 送来。
-  let lutPending = null;   // 正在等待数据的 LUT id
-  function lutId() {
-    const s = window.__mgpSettings || {};
-    const id = String(s.lut || 'slog3');
-    return (window.MPGLut && window.MPGLut.CATALOG[id]) ? id : 'slog3';
-  }
+  // ─── 颜色查找表（Q 键：在 REC.709 / SLog3 / CLog3 之间循环）───────────
+  // 不再有设置项：Q 每次往前切一档，顺序 REC.709 → SLog3 → CLog3 → REC.709…（档位状态见网页全屏一节）
+  // REC.709 = 不套 LUT（原始 / 已调色画面）；另两档套相机官方 Look LUT。
+  // 颜色查找表**只在网页全屏里生效**：切到 LUT 档时若不在全屏会自动进全屏；
+  // Esc（或 P）退出全屏时一并关闭。数据（.cube）由隔离世界的桥取回后 postMessage 送来。
+  let lutPending = null;        // 正在等待数据的 LUT id
   function lutOn() { return !!(window.MPGLut && window.MPGLut.isOn()); }
+  function lutModeLabel() { return LUT_MODE_LABEL[lutMode] || lutMode; }
   // P：只切换网页全屏（不带颜色查找表效果）
   function toggleWebFsKey() {
     if (webFsActive) exitWebFs();
     else enterWebFs();
   }
-  // 应用当前档位的 LUT（已缓存直接应用；否则去取 .cube）
-  function applyLut() {
-    const id = lutId();
+  // 应用指定档位的 LUT（已缓存直接应用；否则去取 .cube）
+  function applyLut(id) {
+    if (!window.MPGLut) return false;
     const label = window.MPGLut.name(id) || id;
     if (window.MPGLut.apply(id, null, video)) { mgpToast('已应用LUT：' + label, true); return true; }
     const err = window.MPGLut.lastError();
@@ -2402,19 +2406,24 @@
     mgpToast(err === 'no-webgl2' ? '当前浏览器不支持 WebGL2，无法应用 LUT' : 'LUT 应用失败', true);
     return false;
   }
-  // Q：不在网页全屏 → 进网页全屏并应用；已在网页全屏 → 应用 / 取消（**不退出全屏**）。
-  // 退出网页全屏只能按 Esc / P（退出时若正应用着会自动关掉）
+  // 切到某个档位：REC.709 → 关掉 LUT；LUT 档 → 确保在网页全屏后应用（不退出全屏）
+  function setLutMode(mode) {
+    if (LUT_MODES.indexOf(mode) < 0) mode = 'rec709';
+    lutMode = mode;
+    if (mode === 'rec709') {
+      if (lutOn()) window.MPGLut.clear();
+      mgpToast('已切换：REC.709（原始画面）', true);
+      return true;
+    }
+    if (!webFsActive && !enterWebFs()) return false;
+    return applyLut(mode);
+  }
+  // Q：按 REC.709 → SLog3 → CLog3 → REC.709 循环（不退出网页全屏；退出只按 Esc / P）
   function toggleLut() {
     if (!window.MPGLut) { mgpToast('颜色查找表不可用（脚本未加载）', true); return false; }
     if (!video || !video.videoWidth) { mgpToast('无画面', true); return false; }
-    if (!webFsActive) { if (!enterWebFs()) return false; return applyLut(); }
-    if (lutOn()) {
-      const label = window.MPGLut.name(window.MPGLut.currentId()) || '';
-      window.MPGLut.clear();
-      mgpToast('已取消LUT' + (label ? '：' + label : ''), true);
-      return false;
-    }
-    return applyLut();
+    const i = LUT_MODES.indexOf(lutMode);
+    return setLutMode(LUT_MODES[(i + 1) % LUT_MODES.length]);
   }
   window.addEventListener('message', e => {
     if (e.source !== window) return;
@@ -2423,10 +2432,9 @@
     if (lutPending && d.name === lutPending) lutPending = null;
     if (d.error || !d.text) { mgpToast('LUT 载入失败', true); return; }
     if (!window.MPGLut || !video) return;
-    // 只有开着等待、或当前正应用这个 LUT 时才需要动作
-    const want = lutId();
-    if (d.name !== want) return;
-    if (window.MPGLut.isOn()) {   // 已开着：直接用新数据重画（换 LUT 时）
+    // 只有「正等这一档」或「当前档位就是它」时才需要动作（避免延迟数据把别的档位顶掉）
+    if (d.name !== lutMode) return;
+    if (window.MPGLut.isOn()) {   // 已开着：直接用新数据重画（重复按 Q 回到同一档时）
       window.MPGLut.apply(d.name, d.text, video);
       return;
     }
@@ -2830,18 +2838,6 @@
 
   window.addEventListener('mgp-video-found', syncBar);
   window.addEventListener('mgp-settings', syncBar);
-  // 颜色查找表：设置里换了档位且此刻正应用着 → 直接切到新 LUT（数据没缓存就去取）
-  window.addEventListener('mgp-settings', () => {
-    if (!window.MPGLut || !window.MPGLut.isOn()) return;
-    const id = lutId();
-    if (id === window.MPGLut.currentId()) return;
-    if (window.MPGLut.apply(id, null, video)) {
-      mgpToast('已切换LUT：' + (window.MPGLut.name(id) || id), true);
-    } else {
-      lutPending = id;
-      try { window.postMessage({ __mgp: 'lut', name: id }, '*'); } catch (e) { }
-    }
-  });
 
   // ─── 后台录制保护 ─────────────────────────────
   // 页面切到后台：渲染流水线被浏览器节流（rVFC/rAF 停、定时器 ≥1s），canvas 不再更新，
@@ -3256,13 +3252,16 @@
       const sec = dispTime();
       return { sec: sec, tc: recTC(sec), rt: rtOn() };
     },
-    // 颜色查找表：Q 键同款入口（面板 / 自检脚本用）
+    // 颜色查找表：Q 键同款入口（面板 / 自检脚本用）——调用一次 = 循环到下一档
     toggleLut() { return toggleLut(); },
+    lutMode() { return lutMode; },
+    setLutMode(mode) { return setLutMode(mode); },
     lutState() {
-      if (!window.MPGLut) return { available: false, webFs: webFsActive };
+      if (!window.MPGLut) return { available: false, webFs: webFsActive, mode: lutMode };
       const d = window.MPGLut._debug();
       return { available: true, on: d.on, id: d.id, lutSize: d.lutSize, frames: d.frames,
-        selected: lutId(), catalog: window.MPGLut.ids, webFs: webFsActive,
+        mode: lutMode, label: lutModeLabel(), modes: LUT_MODES.slice(),
+        catalog: window.MPGLut.ids, webFs: webFsActive,
         layout: window.MPGLut.layoutInfo ? window.MPGLut.layoutInfo() : null };
     },
     // 诊断：时间码相关的实时读数（自检脚本用；面板不用）
