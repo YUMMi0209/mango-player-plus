@@ -209,206 +209,178 @@
     return tc.replace(/:/g, '-');
   }
 
-  // ─── Material You 令牌（视频叠加层固定用深色方案：画面上「暗底亮字」更耐看）──
-  const M3VARS = (window.MPM3 && window.MPM3.cssVars) ? window.MPM3.cssVars(true) : {};
-  const TOKEN_BLOCK = ':host{' + Object.keys(M3VARS).map(k => k + ':' + M3VARS[k]).join(';') + '}';
-  const CSS = TOKEN_BLOCK + `
+  const CSS = `
 :host{all:initial;display:block;width:100%!important;contain:layout style}
-/* 顶部只留居中时间码；截屏 / 录制分别置于画面垂直中间左、右侧 */
+/* v2.0：顶部只留居中时间码；截屏 / 录制分别置于画面垂直中间左、右侧 */
 #mgp-bar{
   position:absolute;top:0;left:0;right:0;z-index:2147483647;pointer-events:none;
   display:flex;align-items:flex-start;justify-content:center;
-  height:52px;padding:10px 8px 0;
-  color:var(--md-sys-color-on-surface);font-size:12px;user-select:none;
-  font-family:var(--md-font);
+  height:46px;padding:8px 8px 0;
+  color:#ccc;font-size:12px;user-select:none;
 }
-/* M3 侧边按钮：44dp 圆形 FAB（surface-container + 模糊），按下缩放 + 状态层 */
 .mgp-side-btn{
   position:absolute;top:50%;transform:translateY(-50%);z-index:2147483647;
-  width:44px;height:44px;padding:0;
+  background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.1);color:#ccc;cursor:pointer;
+  border-radius:6px;font-size:12px;font-family:inherit;
+  transition:opacity .3s,background .15s,color .15s,border-color .15s;
   display:inline-flex;align-items:center;justify-content:center;
-  background:color-mix(in srgb, var(--md-sys-color-surface-container) 82%, transparent);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border:none;border-radius:var(--md-shape-full);
-  color:var(--md-sys-color-on-surface-variant);cursor:pointer;
-  box-shadow:var(--md-elev-1);
-  transition:background var(--md-dur-med) var(--md-ease-standard),
-    color var(--md-dur-med) var(--md-ease-standard),
-    transform var(--md-dur-short) var(--md-ease-spring),
-    opacity var(--md-dur-med) var(--md-ease-standard);
-  opacity:0;pointer-events:none;
+  flex-shrink:0;padding:8px;opacity:0;pointer-events:none;
 }
+/* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
 #mgp-bar.show-btns ~ .mgp-side-btn,
 #mgp-bar.recording ~ .mgp-side-btn{opacity:1;pointer-events:auto}
-#mgp-btn-ss{left:1.2%}
-#mgp-btn-rec{right:1.2%}
-.mgp-side-btn:hover{background:color-mix(in srgb, var(--md-sys-color-primary-container) 88%, transparent);
-  color:var(--md-sys-color-on-primary-container);transform:translateY(-50%) scale(1.06)}
-.mgp-side-btn:active{transform:translateY(-50%) scale(.94)}
-.mgp-side-btn.active{background:var(--md-sys-color-error-container);color:var(--md-sys-color-on-error-container)}
-.mgp-side-btn.active:hover{background:var(--md-sys-color-error);color:var(--md-sys-color-on-error)}
-/* M3 提示气泡（tooltip）：surface-container + 8dp 圆角 + 淡入缩放 */
+/* 距视频边框边距统一为视频宽度的 1% */
+#mgp-btn-ss{left:1%}
+#mgp-btn-rec{right:1%}
+.mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
+.mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
+/* hover 提示：视觉样式与时间码气泡一致；截图在左向右弹、录制在右向左弹 */
 .mgp-side-btn::after{
-  content:attr(data-tip);position:absolute;top:50%;transform:translateY(-50%) scale(.92);
-  padding:6px 10px;border-radius:var(--md-shape-sm);
-  background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);
-  font-size:11px;line-height:1.2;font-family:var(--md-font);letter-spacing:.2px;
-  white-space:nowrap;pointer-events:none;opacity:0;
-  box-shadow:var(--md-elev-2);
-  transition:opacity var(--md-dur-short) var(--md-ease-standard),transform var(--md-dur-med) var(--md-ease-emph-dec);
+  content:attr(data-tip);position:absolute;top:50%;transform:translateY(-50%);
+  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
+  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
+  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
 }
-.mgp-side-btn:hover::after{opacity:1;transform:translateY(-50%) scale(1)}
-#mgp-btn-ss::after{left:calc(100% + 10px)}
-#mgp-btn-rec::after{right:calc(100% + 10px)}
-.mgp-icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
-/* 时间码：M3 「surface 芯片」——surface-container 82% + 模糊，12dp 圆角，tabular 数字 */
+.mgp-side-btn:hover::after{opacity:1}
+#mgp-btn-ss::after{left:calc(100% + 8px)}
+#mgp-btn-rec::after{right:calc(100% + 8px)}
+.mgp-icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 #mgp-tc{
-  position:relative;
-  display:flex;align-items:center;gap:8px;
-  background:color-mix(in srgb, var(--md-sys-color-surface-container) 80%, transparent);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  padding:7px 12px;border-radius:var(--md-shape-md);cursor:pointer;
-  font-family:var(--md-mono);font-size:19px;letter-spacing:.5px;line-height:1;
-  font-variant-numeric:tabular-nums;
-  color:var(--md-sys-color-on-surface);
+  display:flex;align-items:center;gap:5px;
+  background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.08);
+  padding:6px 8px;border-radius:6px;cursor:pointer;
+  font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+  font-size:18px;color:#fff;letter-spacing:1px;line-height:1;
   flex-shrink:0;pointer-events:auto;white-space:nowrap;
-  box-shadow:var(--md-elev-1);
-  transition:transform .22s var(--md-ease-standard),opacity var(--md-dur-long) var(--md-ease-standard),
-    background var(--md-dur-med) var(--md-ease-standard);
+  /* 悬浮画面时右移动画：位移由 JS 计算写入 transform；全屏无操作 5s 淡出 */
+  transition:transform .2s ease,opacity .3s ease;
 }
 #mgp-tc.tc-hidden{opacity:0;pointer-events:none}
-#mgp-tc:hover{background:color-mix(in srgb, var(--md-sys-color-primary-container) 78%, transparent)}
-#mgp-tc-frames{color:var(--md-sys-color-primary);font-size:15px;opacity:.9}
-/* 网页全屏进度条：M3 slider（4dp 轨道 + 16dp 拇指），底部居中，可拖动 */
+#mgp-tc:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
+#mgp-tc-frames{color:#ff5f00;font-size:14px;opacity:.85}
+/* 网页全屏悬浮进度条：仅全屏时显示，底部居中，可拖动调整播放位置 */
+/* 进度条容器：定位与拉长动画在容器上；input 占满容器，轨道视觉仅 4px。
+   长度左右各缩短 8px（背景槽与进度条等宽，间距通过缩短进度条实现） */
 #mgp-fs-wrap{
   position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
   width:calc(min(72vw,680px) - 16px);height:16px;z-index:2147483647;
   display:none;pointer-events:none;
-  transition:width var(--md-dur-med) var(--md-ease-emph-dec);
+  transition:width .25s ease;
 }
-:host(.fs-on) #mgp-fs-wrap{display:block;animation:mgp-sheet-in var(--md-dur-long) var(--md-ease-emph-dec) both}
-@keyframes mgp-sheet-in{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+:host(.fs-on) #mgp-fs-wrap{display:block}
+/* 深色背景槽：让进度条在明亮画面中也清晰可见（置于最底层，轨道显示在槽上方） */
 #mgp-fs-wrap::before{
-  content:'';position:absolute;top:50%;left:0;right:0;height:36px;transform:translateY(-50%);
-  background:color-mix(in srgb, var(--md-sys-color-surface-container) 78%, transparent);
-  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  border-radius:var(--md-shape-full);box-shadow:var(--md-elev-2);
+  content:'';position:absolute;top:50%;left:0;right:0;height:32px;transform:translateY(-50%);
+  background:rgba(0,0,0,.55);border-radius:16px;border:1px solid rgba(255,255,255,.12);
   z-index:0;
 }
+/* 自绘轨道：绝对定位垂直居中（不受浏览器 input track 布局差异影响），左右与 input 对齐（各 16px 空隙） */
 #mgp-fs-track{
   position:absolute;top:50%;left:16px;right:16px;height:4px;transform:translateY(-50%);
-  border-radius:var(--md-shape-full);z-index:0;pointer-events:none;
-  background:linear-gradient(to right,
-    var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) var(--fill),
-    color-mix(in srgb, var(--md-sys-color-on-surface) 28%, transparent) var(--fill));
+  border-radius:2px;z-index:0;pointer-events:none;
+  background:linear-gradient(to right, #ff5f00 0%, #ff5f00 var(--fill), rgba(255,255,255,.22) var(--fill));
 }
 #mgp-fs-progress{
   position:relative;z-index:1;display:block;width:calc(100% - 32px);height:16px;pointer-events:auto;
   -webkit-appearance:none;appearance:none;cursor:pointer;
   background:transparent;outline:none;margin:0 auto;padding:0;--fill:0%;
 }
+/* 拖动时播放点上方的时间码气泡 */
 #mgp-fs-tip{
-  position:absolute;bottom:calc(100% + 10px);left:0;transform:translateX(-50%) scale(.94);
-  background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);
-  padding:4px 10px;border-radius:var(--md-shape-sm);
-  font-size:12px;font-family:var(--md-mono);letter-spacing:.4px;
-  font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:var(--md-elev-2);
+  position:absolute;bottom:calc(100% + 8px);left:0;transform:translateX(-50%);
+  background:rgba(0,0,0,.85);color:#fff;padding:3px 8px;border-radius:4px;
+  font-size:12px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+  letter-spacing:.5px;border:1px solid rgba(255,255,255,.15);white-space:nowrap;
   display:none;pointer-events:none;z-index:2147483647;
-  transition:transform var(--md-dur-med) var(--md-ease-emph-dec);
 }
-#mgp-fs-progress::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:transparent}
+/* input 自带轨道透明化：轨道视觉由 #mgp-fs-track 绘制 */
+#mgp-fs-progress::-webkit-slider-runnable-track{
+  height:4px;border-radius:2px;background:transparent;
+}
 #mgp-fs-progress::-webkit-slider-thumb{
-  -webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;
-  background:var(--md-sys-color-primary);border:2px solid var(--md-sys-color-on-primary);
-  box-shadow:0 1px 3px rgba(0,0,0,.4);margin-top:-6px;
-  transition:transform var(--md-dur-short) var(--md-ease-spring),box-shadow var(--md-dur-short) var(--md-ease-standard)}
-#mgp-fs-progress:hover::-webkit-slider-thumb{transform:scale(1.25);box-shadow:0 0 0 8px var(--md-primary-hover)}
-#mgp-fs-progress:active::-webkit-slider-thumb{transform:scale(1.35);box-shadow:0 0 0 10px var(--md-primary-press)}
-#mgp-fs-progress::-moz-range-track{height:4px;border-radius:2px;background:transparent}
-#mgp-fs-progress::-moz-range-progress{height:4px;border-radius:2px;background:transparent}
+  -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#ff5f00;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);
+  margin-top:-5px;
+}
+#mgp-fs-progress::-moz-range-track{
+  height:4px;border-radius:2px;background:transparent;
+}
+#mgp-fs-progress::-moz-range-progress{
+  height:4px;border-radius:2px;background:transparent;
+}
 #mgp-fs-progress::-moz-range-thumb{
-  width:16px;height:16px;border-radius:50%;background:var(--md-sys-color-primary);
-  border:2px solid var(--md-sys-color-on-primary);cursor:pointer}
-/* 状态徽标：M3 语义色（播放 primary / 暂停 surface / 入点蓝 / 出点绿 / 标记黄 / 录制红） */
+  width:14px;height:14px;border-radius:50%;background:#ff5f00;border:2px solid #fff;cursor:pointer;
+}
 #mgp-tc-badge{
-  font-size:11px;font-weight:500;padding:3px 8px;border-radius:var(--md-shape-sm);
-  letter-spacing:.6px;line-height:1;font-family:var(--md-font);
-  transition:background var(--md-dur-med) var(--md-ease-standard),color var(--md-dur-med) var(--md-ease-standard)
+  font-size:11px;font-weight:700;padding:2px 6px;border-radius:2px;
+  letter-spacing:.5px;
 }
-.b-pl,.b-lv{background:var(--md-sys-color-primary);color:var(--md-sys-color-on-primary)}
-.b-st{background:var(--md-sys-color-surface-container-highest);color:var(--md-sys-color-on-surface-variant)}
-.b-rec{background:var(--md-sys-color-error);color:var(--md-sys-color-on-error)}
-.b-in{background:var(--md-sys-color-sem-in-container);color:var(--md-sys-color-sem-on-in-container)}
-.b-ot{background:var(--md-sys-color-sem-out-container);color:var(--md-sys-color-sem-on-out-container)}
-.b-mk{background:var(--md-sys-color-sem-mk-container);color:var(--md-sys-color-sem-on-mk-container)}
-/* 录制呼吸点（M3 强调动效） */
-#mgp-rec-dot{display:none;width:8px;height:8px;background:var(--md-sys-color-error);border-radius:50%;
-  position:absolute;top:2px;right:2px;animation:mgp-pulse 1.6s var(--md-ease-standard) infinite}
-@keyframes mgp-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
-/* 时间码提示气泡：双击复制 */
-#mgp-tc::after{
-  content:'双击复制时间码';position:absolute;top:calc(100% + 10px);left:50%;
-  transform:translateX(-50%) scale(.94);
-  background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);
-  padding:6px 10px;border-radius:var(--md-shape-sm);
-  font-size:11px;line-height:1.2;font-family:var(--md-font);letter-spacing:.2px;
-  white-space:nowrap;pointer-events:none;opacity:0;box-shadow:var(--md-elev-2);
-  transition:opacity var(--md-dur-short) var(--md-ease-standard),transform var(--md-dur-med) var(--md-ease-emph-dec);
-}
-#mgp-tc:hover::after{opacity:1;transform:translateX(-50%) scale(1)}
-#mgp-tc.seek-open::after{display:none}
-/* 跳转输入框：M3 filled field + 弹出动画 */
-#mgp-seek{
-  position:absolute;top:calc(100% + 10px);left:50%;transform:translateX(-50%);
-  z-index:2147483647;display:flex;flex-direction:column;align-items:stretch;gap:8px;
-  background:var(--md-sys-color-surface-container);border-radius:var(--md-shape-lg);
-  padding:10px;box-shadow:var(--md-elev-3);
-  pointer-events:auto;white-space:nowrap;
-  font-family:var(--md-font);
-  animation:mgp-pop-in var(--md-dur-med) var(--md-ease-emph-dec) both;
-}
-@keyframes mgp-pop-in{from{opacity:0;transform:translate(-50%,-4px) scale(.96)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
-#mgp-seek .mgp-seek-row{display:flex;align-items:center;gap:8px}
-#mgp-seek-in{
-  width:176px;height:36px;padding:0 12px;
-  background:var(--md-sys-color-surface-container-highest);border:none;border-radius:var(--md-shape-sm);
-  color:var(--md-sys-color-on-surface);font-size:12px;font-family:var(--md-mono);outline:none;
-  box-shadow:inset 0 -1px 0 var(--md-sys-color-on-surface-variant);
-  transition:box-shadow var(--md-dur-med) var(--md-ease-standard),background var(--md-dur-med) var(--md-ease-standard);
-}
-#mgp-seek-in:focus{box-shadow:inset 0 -2px 0 var(--md-sys-color-primary);background:var(--md-sys-color-surface-container-high)}
-#mgp-seek-in::placeholder{color:var(--md-sys-color-on-surface-variant);font-family:var(--md-font)}
-#mgp-seek-go{
-  height:36px;padding:0 18px;border:none;border-radius:var(--md-shape-full);
-  background:var(--md-sys-color-primary);color:var(--md-sys-color-on-primary);
-  font-size:13px;font-weight:500;font-family:var(--md-font);cursor:pointer;
-  transition:box-shadow var(--md-dur-med) var(--md-ease-standard),transform var(--md-dur-short) var(--md-ease-spring);
-}
-#mgp-seek-go:hover{box-shadow:var(--md-elev-1)}
-#mgp-seek-go:active{transform:scale(.96)}
-/* 时间码读法选择：M3 对话框 */
-#mgp-tc-modal{position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;
-  background:var(--md-scrim-40);backdrop-filter:blur(2px);pointer-events:auto;
-  animation:mgp-fade var(--md-dur-med) var(--md-ease-standard) both}
-@keyframes mgp-fade{from{opacity:0}to{opacity:1}}
-#mgp-tc-modal .mgp-tc-card{
-  min-width:220px;max-width:min(340px,90%);box-sizing:border-box;padding:20px;
-  background:var(--md-sys-color-surface-container-high);border-radius:var(--md-shape-xl);
-  box-shadow:var(--md-elev-3);color:var(--md-sys-color-on-surface);
-  font-family:var(--md-font);
-  animation:mgp-dialog-in var(--md-dur-long) var(--md-ease-emph-dec) both;
-}
-@keyframes mgp-dialog-in{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:none}}
-#mgp-tc-modal .mgp-tc-opts{display:flex;flex-direction:column;gap:2px}
-#mgp-tc-modal .mgp-tc-opt{
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:12px;cursor:pointer;border-radius:var(--md-shape-md);
-  background:transparent;transition:background var(--md-dur-short) var(--md-ease-standard);
-}
-#mgp-tc-modal .mgp-tc-opt:hover{background:var(--md-state-hover)}
-#mgp-tc-modal .mgp-tc-opt.on{background:var(--md-sys-color-secondary-container);color:var(--md-sys-color-on-secondary-container)}
-#mgp-tc-modal .mgp-tc-opt em{font-style:normal;font-size:12px;color:var(--md-sys-color-on-surface-variant)}
-#mgp-tc-modal .mgp-tc-opt b{font-weight:500;font-size:12px;color:var(--md-sys-color-primary);font-family:var(--md-mono);font-variant-numeric:tabular-nums}
+.b-pl{background:#ff5f00;color:#fff}
+/* 直播模式：播放中显示 LIVE（与 PLAY 同色，仅文案不同） */
+.b-lv{background:#ff5f00;color:#fff}
+.b-st{background:#555;color:#ddd}
+.b-rec{background:#e74c3c;color:#fff}
+.b-in{background:#3498db;color:#fff}
+.b-ot{background:#2ecc71;color:#fff}
+.b-mk{background:#f39c12;color:#000}
+#mgp-rec-dot{display:none;width:5px;height:5px;background:#e74c3c;border-radius:50%;animation:pulse 1s infinite;position:absolute;top:3px;right:3px}
+	/* Timecode custom tooltip */
+	#mgp-tc{position:relative}
+	#mgp-tc::after{
+	  content:'复制当前时间码';position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
+	  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
+	  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+	  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
+	  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
+	}
+	#mgp-tc:hover::after{opacity:1}
+	/* 右键时间码：输入跳转弹窗（输入时隐藏“复制”提示气泡） */
+	#mgp-tc.seek-open::after{display:none}
+	#mgp-seek{
+	  position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
+	  z-index:2147483647;display:flex;flex-direction:column;align-items:stretch;gap:6px;
+	  background:rgba(20,20,26,.96);
+	  border:1px solid rgba(255,255,255,.15);border-radius:6px;
+	  padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+	  pointer-events:auto;white-space:nowrap;
+	}
+	#mgp-seek .mgp-seek-row{display:flex;align-items:center;gap:6px}
+	#mgp-seek-in{
+	  width:168px;height:24px;padding:0 8px;
+	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:4px;
+	  color:#fff;font-size:11px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+	  outline:none;
+	}
+	#mgp-seek-in:focus{border-color:#ff5f00}
+	#mgp-seek-in::placeholder{color:#777;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+	#mgp-seek-go{
+	  height:24px;padding:0 10px;
+	  background:#ff5f00;border:none;border-radius:4px;color:#fff;
+	  font-size:12px;font-family:inherit;cursor:pointer;
+	}
+	#mgp-seek-go:hover{background:#ff6a1a}
+	/* 6 位数字两种读法：居中弹窗，只有两个选项（默认分:秒:帧，点一下即跳转） */
+	#mgp-tc-modal{position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:auto}
+	#mgp-tc-modal .mgp-tc-card{
+	  min-width:200px;max-width:min(320px,90%);box-sizing:border-box;
+	  background:rgba(20,20,26,.98);border:1px solid rgba(255,255,255,.15);border-radius:8px;
+	  padding:10px;box-shadow:0 12px 32px rgba(0,0,0,.6);
+	  font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#fff;
+	}
+	#mgp-tc-modal .mgp-tc-opts{display:flex;flex-direction:column;gap:6px}
+	#mgp-tc-modal .mgp-tc-opt{
+	  display:flex;align-items:center;justify-content:space-between;gap:12px;
+	  padding:7px 9px;cursor:pointer;
+	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:5px;
+	}
+	#mgp-tc-modal .mgp-tc-opt:hover{border-color:#ff5f00}
+	#mgp-tc-modal .mgp-tc-opt.on{border-color:#ff5f00;background:rgba(255,95,0,.14)}
+	#mgp-tc-modal .mgp-tc-opt em{font-style:normal;font-size:11px;color:#cfcfd6}
+	#mgp-tc-modal .mgp-tc-opt b{font-weight:600;font-size:11px;color:#ff9d5c;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace}
+@keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
 `;
 
   // 弹幕容器类名统一含 danmu / danmaku，属性选择器兜底匹配（屏蔽弹幕开关与设置一并隐藏）
@@ -2128,17 +2100,7 @@
       // 居中方式用 left/right:0 + margin:auto + width:fit-content：
       // 旧的 left:50% + translateX(-50%) 会让「自动宽度」的可分配空间只剩半屏，
       // 稍长的提示（批量进度等）提前折行、看起来显示不全
-      // M3 Snackbar：inverse-surface + 12dp 圆角 + elevation，淡入上浮
-      toastEl.style.cssText = 'position:fixed;bottom:80px;left:0;right:0;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);box-sizing:border-box;'
-        + 'text-align:center;z-index:2147483647;padding:10px 18px;'
-        + 'background:var(--md-sys-color-inverse-surface,rgba(20,18,17,.94));'
-        + 'color:var(--md-sys-color-inverse-on-surface,#efe8e5);'
-        + 'border:none;border-radius:var(--md-shape-md,12px);'
-        + 'box-shadow:var(--md-elev-3,0 6px 16px rgba(0,0,0,.4));'
-        + 'font-size:13px;line-height:1.5;pointer-events:none;opacity:0;transform:translateY(10px);'
-        + 'transition:opacity var(--md-dur-med,220ms) cubic-bezier(.2,0,0,1),transform var(--md-dur-med,220ms) cubic-bezier(.05,.7,.1,1);'
-        + 'font-family:var(--md-font,"PingFang SC","Microsoft YaHei",sans-serif);'
-        + 'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);';
+      toastEl.style.cssText = 'position:fixed;bottom:80px;left:0;right:0;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;z-index:2147483647;padding:8px 20px;background:rgba(0,0,0,.85);color:#fff;border:1px solid #ff5f00;border-radius:4px;font-size:13px;line-height:1.5;pointer-events:none;opacity:0;transition:opacity .3s;font-family:"PingFang SC","Microsoft YaHei",sans-serif;';
       document.body.appendChild(toastEl);
     } else if (toastEl.parentElement) {
       // 重新挂到 body 末尾：标注窗口等后插入的 fixed 元素 z-index 与 toast 相同（2147483647）
@@ -2146,17 +2108,10 @@
       document.body.appendChild(toastEl);
     }
     clearTimeout(toastTimer);
-    toastEl.textContent = msg;
-    // 上浮 + 淡入（M3 Snackbar 入场），隐藏时回到下方
-    toastEl.style.opacity = '1';
-    toastEl.style.transform = 'translateY(0)';
-    toastTimer = setTimeout(() => { toastEl.style.opacity = '0'; toastEl.style.transform = 'translateY(10px)'; }, 5000);
+    toastEl.textContent = msg; toastEl.style.opacity = '1';
+    toastTimer = setTimeout(() => { toastEl.style.opacity = '0'; }, 5000);
   }
-  function mgpHideToast() {
-    if (!toastEl) return;
-    toastEl.style.opacity = '0';
-    toastEl.style.transform = 'translateY(10px)';
-  }
+  function mgpHideToast() { if (toastEl) toastEl.style.opacity = '0'; }
 
   function downloadBlob(blob, name) {
     const u = URL.createObjectURL(blob), a = document.createElement('a');
@@ -2723,69 +2678,28 @@
     const style = document.createElement('style');
     // 亮/暗色主题由 CSS 变量驱动：annApplyTheme 按设置「亮色模式」切换 :host(.light)
     style.textContent = `
-:host{all:initial;
-  --ann-bg:var(--md-sys-color-surface-container-high,#1e1e24);
-  --ann-brd:var(--md-sys-color-outline-variant,rgba(255,255,255,.14));
-  --ann-line:var(--md-sys-color-outline-variant,rgba(255,255,255,.1));
-  --ann-text:var(--md-sys-color-on-surface,#eee);
-  --ann-muted:var(--md-sys-color-on-surface-variant,#9aa0a6);
-  --ann-primary:var(--md-sys-color-primary,#ffb193);
-  --ann-on-primary:var(--md-sys-color-on-primary,#552100);
-  --ann-ghost:var(--md-sys-color-outline,rgba(255,255,255,.3));
-  --ann-ghost-hover:var(--md-state-hover,rgba(255,255,255,.08))}
-:host(.light){--ann-bg:var(--md-sys-color-surface-container-high,#f3ecea);
-  --ann-brd:var(--md-sys-color-outline-variant,rgba(0,0,0,.16));
-  --ann-line:var(--md-sys-color-outline-variant,rgba(0,0,0,.08));
-  --ann-text:var(--md-sys-color-on-surface,#1a1a20);
-  --ann-muted:var(--md-sys-color-on-surface-variant,#52433e);
-  --ann-primary:var(--md-sys-color-primary,#9f3800);
-  --ann-on-primary:var(--md-sys-color-on-primary,#fff)}
-/* M3 对话框式窗口：28dp 圆角 + elevation 3 + 上浮入场 */
-.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border-radius:var(--md-shape-xl,28px);
-  box-shadow:var(--md-elev-3,0 12px 40px rgba(0,0,0,.5));max-width:92vw;max-height:92vh;overflow:hidden;
-  font-family:var(--md-font,"PingFang SC","Microsoft YaHei",sans-serif);color:var(--ann-text);font-size:13px;
-  animation:ann-in var(--md-dur-long,380ms) var(--md-ease-emph-dec,cubic-bezier(.05,.7,.1,1)) both}
-@keyframes ann-in{from{opacity:0;transform:scale(.94) translateY(10px)}to{opacity:1;transform:none}}
-.ann-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--ann-line)}
-.ann-title{font-size:22px;line-height:28px;font-weight:400}
+:host{all:initial;--ann-bg:rgba(24,24,30,.97);--ann-brd:rgba(255,255,255,.14);--ann-line:rgba(255,255,255,.1);--ann-text:#eee;--ann-muted:#9aa0a6;--ann-ghost:rgba(255,255,255,.25);--ann-ghost-hover:rgba(255,255,255,.08)}
+:host(.light){--ann-bg:rgba(250,250,252,.98);--ann-brd:rgba(0,0,0,.18);--ann-line:rgba(0,0,0,.08);--ann-text:#1a1a20;--ann-muted:#6a6a72;--ann-ghost:rgba(0,0,0,.28);--ann-ghost-hover:rgba(0,0,0,.06)}
+.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border:1px solid var(--ann-brd);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);max-width:92vw;max-height:92vh;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ann-text);font-size:13px}
+.ann-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ann-line)}
+.ann-title{font-weight:700;font-size:14px}
 .ann-tip{color:var(--ann-muted);font-size:12px}
 .ann-grow{flex:1}
-.ann-btn{position:relative;height:36px;padding:0 18px;border:none;border-radius:var(--md-shape-full,999px);
-  background:var(--ann-primary);color:var(--ann-on-primary);font-size:13px;font-weight:500;cursor:pointer;
-  font-family:inherit;overflow:hidden;
-  transition:box-shadow var(--md-dur-med,220ms) var(--md-ease-standard,cubic-bezier(.2,0,0,1)),transform var(--md-dur-short,120ms) var(--md-ease-spring,cubic-bezier(.34,1.32,.64,1))}
-.ann-btn:hover{box-shadow:var(--md-elev-1,0 1px 2px rgba(0,0,0,.3))}
-.ann-btn:active{transform:scale(.96)}
-.ann-btn.ghost{background:transparent;border:1px solid var(--ann-ghost);color:var(--ann-text);box-shadow:none}
+.ann-btn{background:#ff5f00;border:none;color:#fff;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit}
+.ann-btn:hover{background:#ff6a1a}
+.ann-btn.ghost{background:transparent;border:1px solid var(--ann-ghost);color:var(--ann-text)}
 .ann-btn.ghost:hover{background:var(--ann-ghost-hover)}
 .ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto}
-/* 拖拽画布：12dp 圆角 + 细描边 */
-#ann-canvas{cursor:crosshair;border-radius:var(--md-shape-md,12px);
-  box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
-/* 文字标注输入框：M3 高亮描边 */
-.ann-text{position:absolute;z-index:2;background:var(--md-sys-color-surface-container-lowest,#fff);
-  color:var(--md-sys-color-primary,#e65400);border:2px solid var(--ann-primary);
-  border-radius:var(--md-shape-sm,8px);padding:6px 10px;font-weight:700;outline:none;min-width:160px;
-  font-family:inherit;box-shadow:var(--md-elev-2,0 4px 16px rgba(0,0,0,.4))}
-.ann-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-right:4px}
+#ann-canvas{cursor:crosshair;border-radius:4px;box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
+.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.ann-switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-right:2px}
 .ann-sw-label{font-size:12px;color:var(--ann-muted);white-space:nowrap}
 .ann-switch input{display:none}
-/* M3 开关（32×20 紧凑版，拇指带过渡） */
-.ann-sw-track{width:34px;height:20px;border-radius:var(--md-shape-full,999px);
-  background:var(--md-sys-color-surface-container-highest,rgba(255,255,255,.18));
-  border:2px solid var(--md-sys-color-outline,var(--ann-ghost));position:relative;
-  transition:background var(--md-dur-med,220ms) var(--md-ease-standard,cubic-bezier(.2,0,0,1)),
-    border-color var(--md-dur-med,220ms) var(--md-ease-standard,cubic-bezier(.2,0,0,1));
-  flex-shrink:0;box-sizing:border-box}
-.ann-sw-track::after{content:'';position:absolute;top:50%;left:3px;width:12px;height:12px;border-radius:50%;
-  background:var(--md-sys-color-outline,var(--ann-ghost));transform:translateY(-50%);
-  transition:left var(--md-dur-med,220ms) var(--md-ease-emph-dec,cubic-bezier(.05,.7,.1,1)),
-    width var(--md-dur-med,220ms) var(--md-ease-emph-dec,cubic-bezier(.05,.7,.1,1)),
-    height var(--md-dur-med,220ms) var(--md-ease-emph-dec,cubic-bezier(.05,.7,.1,1)),
-    background var(--md-dur-med,220ms) var(--md-ease-standard,cubic-bezier(.2,0,0,1))}
-.ann-switch input:checked + .ann-sw-track{background:var(--ann-primary);border-color:var(--ann-primary)}
-.ann-switch input:checked + .ann-sw-track::after{left:17px;width:14px;height:14px;
-  background:var(--ann-on-primary)}
+.ann-sw-track{width:28px;height:16px;border-radius:8px;background:rgba(255,255,255,.18);position:relative;transition:background .15s;flex-shrink:0}
+:host(.light) .ann-sw-track{background:rgba(0,0,0,.16)}
+.ann-sw-track::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.ann-switch input:checked + .ann-sw-track{background:#ff5f00}
+.ann-switch input:checked + .ann-sw-track::after{transform:translateX(12px)}
 `;
     sr.appendChild(style);
     const win = document.createElement('div');

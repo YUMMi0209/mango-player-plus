@@ -677,32 +677,6 @@ const MPP = (() => {
     bindHistory();
     bindTitleEdit();
     bindBatchKeys();   // 面板内按 S / R 批量截图、录制
-    bindRipple();      // Material You 涟漪（纯装饰）
-  }
-
-  // ─── M3 涟漪：按下时从指针位置扩散一圈高光（失败不影响任何功能）──
-  function bindRipple() {
-    const SEL = 'button,.row,.mode-item,.hist-item,.set-action-btn,.qc-item,.qc-way-opt,.mpp-tc-opt,.tag,.tab';
-    if (bindRipple.done) return;
-    bindRipple.done = true;
-    document.addEventListener('pointerdown', e => {
-      let host = null;
-      try { host = e.target.closest(SEL); } catch (err) { return; }
-      if (!host || host.disabled) return;
-      if (!host.offsetWidth) return;
-      const cs = getComputedStyle(host);
-      if (cs.position === 'static') host.style.position = 'relative';
-      if (cs.overflow === 'visible') host.style.overflow = 'hidden';
-      const r = host.getBoundingClientRect();
-      const size = Math.max(r.width, r.height) * 2.2;
-      const span = document.createElement('span');
-      span.className = 'md-ripple';
-      span.style.width = span.style.height = size + 'px';
-      span.style.left = (e.clientX - r.left - size / 2) + 'px';
-      span.style.top = (e.clientY - r.top - size / 2) + 'px';
-      host.appendChild(span);
-      setTimeout(() => { try { span.remove(); } catch (err) { } }, 620);
-    }, true);
   }
 
   // ─── 数据加载 ───────────────────────────────
