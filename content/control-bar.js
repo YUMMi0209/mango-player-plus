@@ -2466,6 +2466,7 @@
   let annBrushIdx = 1;           // 粗细档位：0 细 / 1 中 / 2 粗（默认中）
   let annFontIdx = 1;            // 字号档位：0 小 / 1 中 / 2 大（默认中）
   let annStroke = null;          // 正在画的笔画 {color, w, pts:[{x,y}]}
+  let annFitHandler = null;      // 窗口 resize 时重新适配标注窗口
   let annFileName = '';
   let annShowTC = false;   // 是否在截图右上角嵌入当前画面时间码（设置记忆，默认关）
   let annTC = '';          // 嵌入的时间码文本（进入标注时捕获，HH:MM:SS:FF）
@@ -2746,6 +2747,44 @@
     inp.style.top = Math.round(baseT + Math.max(2, Math.min(top, H - bh - 2))) + 'px';
   }
 
+  // 让标注窗口整窗适配视口：按「视口 − 头部 − 工具条 − 内边距」算缩放，
+  // 再按实测反复收紧，直到画布 + 头部 + 工具条都在一屏内（不出现任何滚动条）。
+  // 工具条会因宽度换行、字体加载也会改变高度，所以用「改一次 → 量一次」的循环收敛。
+  function annFitToViewport() {
+    if (!annCanvas || !annSource) return;
+    const win = annCanvas.closest('.ann-win');
+    if (!win) return;
+    const head = win.querySelector('.ann-head');
+    const foot = win.querySelector('.ann-foot');
+    const body = win.querySelector('.ann-body');
+    const bcs = body ? getComputedStyle(body) : null;
+    const padH = bcs ? (parseFloat(bcs.paddingLeft) || 0) + (parseFloat(bcs.paddingRight) || 0) : 24;
+    const padV = bcs ? (parseFloat(bcs.paddingTop) || 0) + (parseFloat(bcs.paddingBottom) || 0) : 24;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    // 两侧各留 2% 余量，避免贴边时被系统滚动条/圆角吃掉
+    const boxW = Math.min(vw * 0.96, vw - 16);
+    const boxH = vh * 0.96;
+    const cw = annCanvas.width, ch = annCanvas.height;
+    if (!cw || !ch) return;
+    const chrome = () => (head ? head.offsetHeight : 0) + (foot ? foot.offsetHeight : 0) + padV + 2;
+    let scale = Math.min((boxW - padH - 2) / cw, (boxH - chrome()) / ch);
+    scale = Math.max(0.06, Math.min(scale, 2));
+    for (let i = 0; i < 8; i++) {
+      annScale = scale;
+      annCanvas.style.width = Math.max(1, Math.round(cw * scale)) + 'px';
+      annCanvas.style.height = Math.max(1, Math.round(ch * scale)) + 'px';
+      // 读取布局（强制回流）后按实测判断是否还超
+      const needH = chrome() + annCanvas.offsetHeight;
+      const needW = padH + annCanvas.offsetWidth + 2;
+      const fitsH = needH <= boxH + 0.5;
+      const fitsW = needW <= boxW + 0.5;
+      const bodyFits = body ? (body.scrollHeight <= body.clientHeight + 1 && body.scrollWidth <= body.clientWidth + 1) : true;
+      if (fitsH && fitsW && bodyFits) return;
+      scale *= 0.94;                      // 收一档再来
+      if (scale < 0.06) break;
+    }
+  }
+
   // 确认文本标注：绘制到截图并关闭输入框
   function annCommitText() {
     if (!annPendingText || !annTextInput) return;
@@ -2797,6 +2836,7 @@
     if (annHost && annHost.parentElement) annHost.parentElement.removeChild(annHost);
     annHost = null; annSource = null; annCanvas = null; annCtx = null;
     annAnnots = []; annDrag = null; annPendingText = null; annTextInput = null; annFileName = '';
+    if (annFitHandler) { window.removeEventListener('resize', annFitHandler); annFitHandler = null; }
     try { delete window.__mgpAnnDebug; } catch (e) { window.__mgpAnnDebug = null; }
   }
 
@@ -2852,20 +2892,21 @@
     style.textContent = `
 :host{all:initial;--ann-bg:rgba(24,24,30,.97);--ann-brd:rgba(255,255,255,.14);--ann-line:rgba(255,255,255,.1);--ann-text:#eee;--ann-muted:#9aa0a6;--ann-ghost:rgba(255,255,255,.25);--ann-ghost-hover:rgba(255,255,255,.08)}
 :host(.light){--ann-bg:rgba(250,250,252,.98);--ann-brd:rgba(0,0,0,.18);--ann-line:rgba(0,0,0,.08);--ann-text:#1a1a20;--ann-muted:#6a6a72;--ann-ghost:rgba(0,0,0,.28);--ann-ghost-hover:rgba(0,0,0,.06)}
-.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border:1px solid var(--ann-brd);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);max-width:92vw;max-height:92vh;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ann-text);font-size:13px}
-.ann-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ann-line)}
+.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border:1px solid var(--ann-brd);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);max-width:96vw;max-height:96vh;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ann-text);font-size:13px}
+.ann-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ann-line);flex-shrink:0;min-width:0}
 .ann-title{font-weight:700;font-size:14px}
-.ann-tip{color:var(--ann-muted);font-size:12px}
+.ann-tip{color:var(--ann-muted);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width: 760px){ .ann-tip{display:none} }
 .ann-grow{flex:1}
 .ann-btn{background:#ff5f00;border:none;color:#fff;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit}
 .ann-btn:hover{background:#ff6a1a}
 .ann-btn.ghost{background:transparent;border:1px solid var(--ann-ghost);color:var(--ann-text)}
 .ann-btn.ghost:hover{background:var(--ann-ghost-hover)}
-.ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto}
+.ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
 #ann-canvas{cursor:crosshair;border-radius:4px;box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
 .ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;max-width:calc(100% - 8px);box-sizing:border-box;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
 /* 底部工具条：颜色 / 画笔 / 笔宽 / 撤销 */
-.ann-foot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--ann-line);flex-wrap:wrap;row-gap:6px}
+.ann-foot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--ann-line);flex-wrap:wrap;row-gap:6px;flex-shrink:0;min-width:0}
 .ann-colors{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
 .ann-dot{width:18px;height:18px;padding:0;border-radius:50%;cursor:pointer;border:none;flex-shrink:0;
   background:var(--c,#ff5f00);box-shadow:inset 0 0 0 1px rgba(0,0,0,.28);
@@ -2984,16 +3025,17 @@
     annCanvas = canvas;   // 必须赋值给全局引用：annRedraw / annPos / annClose 均依赖它
     canvas.width = annSource.width;
     canvas.height = annSource.height;
-    // 按可用空间等比缩放显示（原始像素不缩放，坐标按 scale 换算）
-    const maxW = Math.min(window.innerWidth * 0.9 - 48, 1280);
-    const maxH = window.innerHeight * 0.9 - 100;
-    annScale = Math.min(maxW / canvas.width, maxH / canvas.height);
-    annScale = Math.max(0.1, Math.min(annScale, 2));
-    canvas.style.width = Math.round(canvas.width * annScale) + 'px';
-    canvas.style.height = Math.round(canvas.height * annScale) + 'px';
     annCtx = canvas.getContext('2d');
     annAnnots = [];
+    // 按实测可用空间等比缩放（原始像素不缩放，坐标按 scale 换算）：整窗不出滚动条
+    annFitToViewport();
     annRedraw();
+
+    // 窗口尺寸变化 / 工具条换行变化时重新适配，避免出现滚动条
+    annFitHandler = () => { try { annFitToViewport(); } catch (e) { } };
+    window.addEventListener('resize', annFitHandler);
+    // 字体加载完成、工具条换行等也可能改变高度：再补一次
+    setTimeout(() => { try { annFitToViewport(); } catch (e) { } }, 60);
 
     const inp = sr.querySelector('#ann-text');
     annTextInput = inp;
