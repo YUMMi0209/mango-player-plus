@@ -2462,7 +2462,7 @@
     { c: '#2ecc71', n: '绿' }, { c: '#3498db', n: '蓝' }, { c: '#ffffff', n: '白' }
   ];
   let annColor = '#ff5f00';      // 当前颜色（新标注用；已画的保持自己的颜色）
-  let annTool = 'select';        // 'select'（画框 / 加字）| 'pen'（画笔）
+  let annTool = 'rect';          // 'rect'（拖拽画框）| 'pen'（画笔）—— 二选一，都受笔宽控制
   let annBrushIdx = 1;           // 笔宽档位：0 细 / 1 中 / 2 粗
   let annStroke = null;          // 正在画的笔画 {color, w, pts:[{x,y}]}
   let annFileName = '';
@@ -2490,12 +2490,12 @@
       }
       return;
     }
-    // B：切换画笔工具
+    // B：画笔 / 矩形 之间切换
     if (k === 'b') {
       e.preventDefault();
       e.stopPropagation();
-      const penBtn = sr.querySelector('#ann-pen');
-      if (penBtn) penBtn.click();
+      const btn = sr.querySelector(annTool === 'pen' ? '#ann-rect' : '#ann-pen');
+      if (btn) btn.click();
       return;
     }
     // C（或 Ctrl+C / Cmd+C）：复制带标注的截图到剪贴板——不按 Ctrl 也可触发
@@ -2555,11 +2555,12 @@
       if (a.type === 'rect') {
         // 白边包裹彩色框：先画白色粗边框，再叠标注色
         const rc = a.color || ANN_THEME;
+        const sw = a.sw || lw;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = lw * 2.6;
+        ctx.lineWidth = sw + Math.max(2, Math.round(sw * 0.6));
         ctx.strokeRect(a.x, a.y, a.w, a.h);
         ctx.strokeStyle = rc;
-        ctx.lineWidth = lw;
+        ctx.lineWidth = sw;
         ctx.strokeRect(a.x, a.y, a.w, a.h);
       } else if (a.type === 'text') {
         // 折行 + 贴边收进画面（与输入框预览、保存结果完全一致）
@@ -2579,14 +2580,15 @@
     if (annDrag) {
       const x = Math.min(annDrag.x0, annDrag.x1), y = Math.min(annDrag.y0, annDrag.y1);
       const w = Math.abs(annDrag.x1 - annDrag.x0), h = Math.abs(annDrag.y1 - annDrag.y0);
-      // 预览：白边虚线 + 主题色虚线（确认后同样白边包裹）
+      // 预览：白边虚线 + 标注色虚线（粗细跟随当前档位，确认后同样白边包裹）
+      const pw = annBrushWidth();
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = lw * 2.6;
+      ctx.lineWidth = pw + Math.max(2, Math.round(pw * 0.6));
       ctx.setLineDash([8, 6]);
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
-      ctx.strokeStyle = ANN_THEME;
-      ctx.lineWidth = lw;
+      ctx.strokeStyle = annColor || ANN_THEME;
+      ctx.lineWidth = pw;
       ctx.setLineDash([8, 6]);
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
@@ -2852,9 +2854,13 @@
 .ann-tool:hover{background:var(--ann-ghost-hover)}
 .ann-tool.on{background:var(--ann-primary);border-color:var(--ann-primary);color:var(--ann-on-primary)}
 .ann-tool.ghost{color:var(--ann-muted);border-color:transparent}
-.ann-sizes{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--ann-ghost-hover);
-  opacity:.45;pointer-events:none;transition:opacity 120ms;flex-shrink:0}
-.ann-sizes.active{opacity:1;pointer-events:auto}
+.ann-tools{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--ann-ghost-hover);flex-shrink:0}
+.ann-tools .ann-tool{border-color:transparent;height:26px;padding:0 10px}
+.ann-tools .ann-tool.on{border-color:var(--ann-primary)}
+/* 头部：保存左侧的复制按钮与保存同高 */
+.ann-head #ann-copy{margin-left:2px}
+.ann-sizes{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;
+  background:var(--ann-ghost-hover);flex-shrink:0}
 .ann-size{height:24px;min-width:30px;padding:0 6px;border:none;border-radius:999px;background:transparent;
   color:var(--ann-muted);font-size:11px;font-family:inherit;cursor:pointer;transition:background 120ms,color 120ms}
 .ann-size:hover{color:var(--ann-text)}
@@ -2874,14 +2880,10 @@
     win.innerHTML =
       '<div class="ann-head">' +
         '<span class="ann-title">标注截图</span>' +
-        '<span class="ann-tip">拖拽画框 · 点击加字（编辑中点画面即完成）· Ctrl+C 复制 · Ctrl+Z 撤销</span>' +
+        '<span class="ann-tip">拖拽标注 · 点击加字</span>' +
         '<span class="ann-grow"></span>' +
-        '<label class="ann-switch" title="在截图右上角嵌入当前画面时间码">' +
-          '<span class="ann-sw-label">嵌入时间码</span>' +
-          '<input type="checkbox" id="ann-tc">' +
-          '<span class="ann-sw-track"></span>' +
-        '</label>' +
         '<button type="button" class="ann-btn ghost" id="ann-cancel">取消 (Esc)</button>' +
+        '<button type="button" class="ann-btn ghost" id="ann-copy" title="复制到剪贴板（C）">复制 (C)</button>' +
         '<button type="button" class="ann-btn" id="ann-save">保存 (Enter)</button>' +
       '</div>' +
       '<div class="ann-body">' +
@@ -2894,16 +2896,27 @@
           ANN_COLORS.map(o => '<button type="button" class="ann-dot" data-c="' + o.c + '" title="' + o.n + '" style="--c:' + o.c + '" aria-label="' + o.n + '"></button>').join('') +
         '</span>' +
         '<span class="ann-foot-sep"></span>' +
-        '<button type="button" class="ann-tool" id="ann-pen" aria-pressed="false" title="画笔（B）">' +
-          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5l1-3.5 6.8-6.8a1.4 1.4 0 0 1 2 2L5.5 12z"/><path d="M9.8 4.6l1.6 1.6"/></svg>' +
-          '<span>画笔</span>' +
-        '</button>' +
-        '<span class="ann-sizes" id="ann-sizes" role="group" aria-label="笔宽">' +
+        '<span class="ann-tools" role="group" aria-label="标注工具">' +
+          '<button type="button" class="ann-tool on" id="ann-rect" aria-pressed="true" title="矩形（拖拽画框，单击加字）">' +
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/></svg>' +
+            '<span>矩形</span>' +
+          '</button>' +
+          '<button type="button" class="ann-tool" id="ann-pen" aria-pressed="false" title="画笔（B，拖拽画线 / 单击加字）">' +
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5l1-3.5 6.8-6.8a1.4 1.4 0 0 1 2 2L5.5 12z"/><path d="M9.8 4.6l1.6 1.6"/></svg>' +
+            '<span>画笔</span>' +
+          '</button>' +
+        '</span>' +
+        '<span class="ann-sizes" id="ann-sizes" role="group" aria-label="粗细">' +
           '<button type="button" class="ann-size" data-b="0" title="细">细</button>' +
           '<button type="button" class="ann-size on" data-b="1" title="中">中</button>' +
           '<button type="button" class="ann-size" data-b="2" title="粗">粗</button>' +
         '</span>' +
         '<span class="ann-foot-grow"></span>' +
+        '<label class="ann-switch" title="在截图右上角嵌入当前画面时间码">' +
+          '<span class="ann-sw-label">嵌入时间码</span>' +
+          '<input type="checkbox" id="ann-tc">' +
+          '<span class="ann-sw-track"></span>' +
+        '</label>' +
         '<button type="button" class="ann-tool ghost" id="ann-undo" title="撤销（Z）">撤销</button>' +
       '</div>';
     sr.appendChild(win);
@@ -2951,13 +2964,14 @@
       // 正在编辑文本：这一下只负责「完成当前输入」，不再新建文本框 / 画框 / 笔画
       if (annPendingText) { annCommitText(); return; }
       const p = annPos(e);
-      // 画笔模式：按下开始一条自由笔画（松手才落到 annAnnots，Z 可撤）
+      // 画笔模式：按下开始一条自由笔画；若整段位移很小则视为「单击」→ 加字
       if (annTool === 'pen') {
-        annStroke = { color: annColor, w: annBrushWidth(), pts: [p] };
+        annStroke = { color: annColor, w: annBrushWidth(), pts: [p], moved: 0 };
         try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
         annRedraw();
         return;
       }
+      // 矩形模式：拖拽画框，单击加字
       annDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
       annDragged = false;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
@@ -2969,6 +2983,7 @@
         const last = pts[pts.length - 1];
         // 采样抽稀：移动很近的点不重复记（笔画更顺、也不占内存）
         const minGap = Math.max(1, annStroke.w * 0.35);
+        if (last) annStroke.moved += Math.hypot(sp.x - last.x, sp.y - last.y);
         if (!last || Math.hypot(sp.x - last.x, sp.y - last.y) >= minGap) {
           pts.push(sp);
           annRedraw();
@@ -2989,9 +3004,13 @@
         const last = sp.pts[sp.pts.length - 1];
         const p2 = annPos(e);
         if (!last || Math.hypot(p2.x - last.x, p2.y - last.y) > 0.5) sp.pts.push(p2);
-        if (sp.pts.length > 1) {
-          annAnnots.push({ type: 'stroke', pts: sp.pts, color: sp.color, w: sp.w });
+        // 几乎没移动 → 当作单击：加字（画笔模式也支持单击输入文本）
+        if (sp.moved < 4) {
+          annRedraw();
+          annStartText(p2);
+          return;
         }
+        annAnnots.push({ type: 'stroke', pts: sp.pts, color: sp.color, w: sp.w });
         annRedraw();
         return;
       }
@@ -3007,7 +3026,7 @@
         const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
         const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
         if (w > 2 && h > 2) {
-          annAnnots.push({ type: 'rect', x, y, w, h, color: annColor });
+          annAnnots.push({ type: 'rect', x, y, w, h, color: annColor, sw: annBrushWidth() });
           annRedraw();
         }
       } else {
@@ -3042,6 +3061,8 @@
         canvas: { left: cRect.left, top: cRect.top, right: cRect.right, bottom: cRect.bottom,
           w: canvas.clientWidth, h: canvas.clientHeight, pxW: canvas.width, pxH: canvas.height, scale: annScale },
         layout: L,
+        stroke: annStroke ? { moved: Math.round(annStroke.moved), n: annStroke.pts.length } : null,
+        dragging: !!annDrag,
         color: annColor,
         tool: annTool,
         brushIdx: annBrushIdx,
@@ -3054,16 +3075,20 @@
     const colorsEl = sr.querySelector('.ann-colors');
     const sizesEl = sr.querySelector('#ann-sizes');
     const penBtn = sr.querySelector('#ann-pen');
+    const rectBtn = sr.querySelector('#ann-rect');
     const syncColors = () => {
       sr.querySelectorAll('.ann-dot').forEach(b => b.classList.toggle('on', b.dataset.c === annColor));
     };
+    // 两个工具二选一（都受粗细控制，粗细常开）
     const syncTool = () => {
       const pen = annTool === 'pen';
       penBtn.classList.toggle('on', pen);
       penBtn.setAttribute('aria-pressed', pen ? 'true' : 'false');
-      sizesEl.classList.toggle('active', pen);
+      rectBtn.classList.toggle('on', !pen);
+      rectBtn.setAttribute('aria-pressed', pen ? 'false' : 'true');
+      sizesEl.classList.add('active');
       sr.querySelectorAll('.ann-size').forEach(b => b.classList.toggle('on', +b.dataset.b === annBrushIdx));
-      canvas.style.cursor = pen ? 'crosshair' : 'crosshair';
+      canvas.style.cursor = 'crosshair';
     };
     if (colorsEl) colorsEl.addEventListener('click', e => {
       const b = e.target.closest('.ann-dot');
@@ -3074,12 +3099,14 @@
       syncColors();
       annRedraw();
     });
-    penBtn.addEventListener('click', () => {
+    const setTool = tool => {
       if (annPendingText) annCommitText();      // 切换工具前先把正在编辑的文字落定
-      annTool = annTool === 'pen' ? 'select' : 'pen';
+      annTool = tool === 'pen' ? 'pen' : 'rect';
       syncTool();
       annRedraw();
-    });
+    };
+    penBtn.addEventListener('click', () => setTool('pen'));
+    rectBtn.addEventListener('click', () => setTool('rect'));
     if (sizesEl) sizesEl.addEventListener('click', e => {
       const b = e.target.closest('.ann-size');
       if (!b) return;
@@ -3094,6 +3121,12 @@
     syncColors();
     syncTool();
 
+    sr.querySelector('#ann-copy').addEventListener('click', () => {
+      if (annPendingText) annCommitText();      // 先把正在编辑的文字落定，复制到的是最终图
+      annCopyToClipboard().then(ok => {
+        try { mgpToast(ok ? '已复制截图' : '复制失败，请检查浏览器剪贴板权限', true); } catch (err) { }
+      });
+    });
     sr.querySelector('#ann-save').addEventListener('click', () => annClose(true));
     sr.querySelector('#ann-cancel').addEventListener('click', () => annClose(false));
   }
