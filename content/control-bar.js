@@ -2456,6 +2456,15 @@
   let annDragged = false;  // 本次拖拽是否超过阈值（区分「画框」与「点击加文本」）
   let annTextInput = null; // 文本输入框（shadow 内）
   let annPendingText = null; // 待确认文本标注位置 {x,y,fs}
+  // 标注工具：颜色（画笔 / 框 / 文字共用）、当前工具、笔宽档位、正在画的笔画
+  const ANN_COLORS = [
+    { c: '#ff5f00', n: '主题橙' }, { c: '#e74c3c', n: '红' }, { c: '#f5c518', n: '黄' },
+    { c: '#2ecc71', n: '绿' }, { c: '#3498db', n: '蓝' }, { c: '#ffffff', n: '白' }
+  ];
+  let annColor = '#ff5f00';      // 当前颜色（新标注用；已画的保持自己的颜色）
+  let annTool = 'select';        // 'select'（画框 / 加字）| 'pen'（画笔）
+  let annBrushIdx = 1;           // 笔宽档位：0 细 / 1 中 / 2 粗
+  let annStroke = null;          // 正在画的笔画 {color, w, pts:[{x,y}]}
   let annFileName = '';
   let annShowTC = false;   // 是否在截图右上角嵌入当前画面时间码（设置记忆，默认关）
   let annTC = '';          // 嵌入的时间码文本（进入标注时捕获，HH:MM:SS:FF）
@@ -2479,6 +2488,14 @@
         annRedraw();
         try { mgpToast('已撤销标注', true); } catch (err) { }
       }
+      return;
+    }
+    // B：切换画笔工具
+    if (k === 'b') {
+      e.preventDefault();
+      e.stopPropagation();
+      const penBtn = sr.querySelector('#ann-pen');
+      if (penBtn) penBtn.click();
       return;
     }
     // C（或 Ctrl+C / Cmd+C）：复制带标注的截图到剪贴板——不按 Ctrl 也可触发
@@ -2536,21 +2553,28 @@
     const lw = Math.max(3, Math.round(c.width / 300));   // 矩形线宽随分辨率
     for (const a of annAnnots) {
       if (a.type === 'rect') {
-        // 白边包裹主题色框：先画白色粗边框，再叠主题色边框
+        // 白边包裹彩色框：先画白色粗边框，再叠标注色
+        const rc = a.color || ANN_THEME;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = lw * 2.6;
         ctx.strokeRect(a.x, a.y, a.w, a.h);
-        ctx.strokeStyle = ANN_THEME;
+        ctx.strokeStyle = rc;
         ctx.lineWidth = lw;
         ctx.strokeRect(a.x, a.y, a.w, a.h);
       } else if (a.type === 'text') {
-        ctx.font = 'bold ' + a.fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
-        ctx.lineWidth = Math.max(3, Math.round(a.fs / 6));
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeText(a.text, a.x, a.y);
-        ctx.fillStyle = ANN_THEME;
-        ctx.fillText(a.text, a.x, a.y);
+        // 折行 + 贴边收进画面（与输入框预览、保存结果完全一致）
+        annDrawText(a.text, a.x, a.y, a.fs, null, a.color);
+      } else if (a.type === 'stroke') {
+        annStrokePath(a.pts, a.color, a.w, 1);
       }
+    }
+    // 正在画的笔画：实时显示（白边 + 标注色，与最终一致）
+    if (annStroke && annStroke.pts.length > 1) {
+      annStrokePath(annStroke.pts, annStroke.color, annStroke.w, 1);
+    }
+    // 正在输入的文本：画布上实时预览（所见即所得，位置已按边界收好）
+    if (annPendingText && annPendingText.txt) {
+      annDrawText(annPendingText.txt, annPendingText.x, annPendingText.y, annPendingText.fs, 0.92, annColor);
     }
     if (annDrag) {
       const x = Math.min(annDrag.x0, annDrag.x1), y = Math.min(annDrag.y0, annDrag.y1);
@@ -2585,9 +2609,112 @@
   // （1080p 64px、720p 43px、下限 40px）。用户反馈偏小，已两次上调：
   // width/50 → width/38 → width/30，现在与时间码一致。
   // 输入框预览字号按 annScale 同比例换算，所以框里框外一致
+  // 画笔宽度：按截图原始宽度换算（细 / 中 / 粗），保证不同分辨率下视觉一致
+  function annBrushWidth() {
+    const w = (annSource && annSource.width) || 1280;
+    const base = Math.max(3, Math.round(w / 300));
+    return [base, base * 2, base * 3][annBrushIdx] || base;
+  }
+
   function annTextFontSize() {
     const w = (annSource && annSource.width) || 1280;
     return Math.max(40, Math.round(w / 30));
+  }
+
+  // 文本排版：按画面宽度折行，并把整段压在画面内 —— 贴着边缘点击加字时，
+  // 文本和输入框都不会画到画面外（这是之前「文本框超出画面」的根因）
+  function annLayoutText(text, px, py, fs) {
+    const c = annCanvas, ctx = annCtx;
+    const W = c ? c.width : 0, H = c ? c.height : 0;
+    const lh = Math.max(12, fs * 1.25);
+    if (!ctx || !W || !H || !text) return { lines: [], x: px, y: py, lh: lh };
+    ctx.save();
+    ctx.font = 'bold ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+    const maxW = Math.max(fs * 2, W - 12);
+    const lines = [];
+    let cur = '';
+    for (const ch of String(text)) {
+      const next = cur + ch;
+      if (cur && ctx.measureText(next).width > maxW) { lines.push(cur); cur = ch; }
+      else cur = next;
+    }
+    if (cur) lines.push(cur);
+    let widest = 0;
+    lines.forEach(l => { widest = Math.max(widest, ctx.measureText(l).width); });
+    ctx.restore();
+    // 水平：靠右点击时整段左移（右端不出画面）；垂直：多行往下放不下就整体上移
+    const x = Math.max(2, Math.min(px, Math.max(2, W - widest - 2)));
+    let y = Math.max(fs, Math.min(py, H - 2));
+    const need = (lines.length - 1) * lh;
+    if (y + need > H - 2) y = Math.max(fs, H - 2 - need);
+    return { lines: lines, x: x, y: y, lh: lh, widest: widest };
+  }
+  // 在画布上画一段文本（白边 + 主题色，与最终保存的样式一致）
+  function annDrawText(text, px, py, fs, alpha, color) {
+    if (!annCtx || !text) return;
+    const L = annLayoutText(text, px, py, fs);
+    if (!L.lines.length) return;
+    const ctx = annCtx;
+    ctx.save();
+    if (alpha != null) ctx.globalAlpha = alpha;
+    ctx.font = 'bold ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+    const lw = Math.max(3, Math.round(fs / 6));
+    ctx.textBaseline = 'alphabetic';
+    L.lines.forEach((line, i) => {
+      const ly = L.y + i * L.lh;
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = '#ffffff';
+      ctx.strokeText(line, L.x, ly);
+      ctx.fillStyle = color || ANN_THEME;
+      ctx.fillText(line, L.x, ly);
+    });
+    ctx.restore();
+  }
+
+  // 画一条笔画：圆头圆角 + 白色描边打底（亮/暗画面上都看得清）
+  function annStrokePath(pts, color, w, alpha) {
+    if (!annCtx || !pts || pts.length < 2) return;
+    const ctx = annCtx;
+    ctx.save();
+    if (alpha != null) ctx.globalAlpha = alpha;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const path = () => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    };
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = w + Math.max(2, Math.round(w * 0.6));
+    path();
+    ctx.strokeStyle = color || annColor || ANN_THEME;
+    ctx.lineWidth = w;
+    path();
+    ctx.restore();
+  }
+
+  // 文本输入框摆放：贴着落点，但始终收在画面内（右侧/底部放不下就翻到另一侧）
+  function annPlaceTextInput(px, py) {
+    const inp = annTextInput, c = annCanvas;
+    if (!inp || !c) return;
+    const baseL = c.offsetLeft, baseT = c.offsetTop;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W || !H) return;
+    inp.hidden = false;
+    const maxW = Math.max(140, W - 8);
+    inp.style.maxWidth = maxW + 'px';
+    const bw = Math.min(inp.offsetWidth || 160, maxW);
+    const bh = inp.offsetHeight || 30;
+    const gap = 6;
+    let left = px * annScale + gap;
+    let top = py * annScale + gap;
+    if (left + bw > W - 2) left = px * annScale - bw - gap;      // 右侧放不下 → 翻到落点左侧
+    if (left < 2) left = W - bw - 2;                            // 左侧也放不下 → 贴右边
+    if (top + bh > H - 2) top = py * annScale - bh - gap;        // 底部放不下 → 翻到落点上方
+    if (top < 2) top = H - bh - 2;
+    inp.style.left = Math.round(baseL + Math.max(2, Math.min(left, W - bw - 2))) + 'px';
+    inp.style.top = Math.round(baseT + Math.max(2, Math.min(top, H - bh - 2))) + 'px';
   }
 
   // 确认文本标注：绘制到截图并关闭输入框
@@ -2596,15 +2723,30 @@
     const t = annTextInput.value.trim();
     const p = annPendingText;
     annPendingText = null;
-    if (t) {
-      annAnnots.push({ type: 'text', x: p.x, y: p.y, text: t, fs: p.fs });
-      annRedraw();
-    }
     annTextInput.hidden = true;
+    if (annCanvas) annCanvas.style.cursor = '';
+    if (t) annAnnots.push({ type: 'text', x: p.x, y: p.y, text: t, fs: p.fs, color: p.color || annColor });
+    annRedraw();
   }
   function annCancelText() {
     annPendingText = null;
     if (annTextInput) annTextInput.hidden = true;
+    if (annCanvas) annCanvas.style.cursor = '';
+    annRedraw();
+  }
+  // 开始编辑一段新文本（点击空白处触发）
+  function annStartText(p) {
+    const inp = annTextInput;
+    if (!inp || !annCanvas) return;
+    annPendingText = { x: p.x, y: p.y, fs: annTextFontSize(), txt: '', color: annColor };
+    inp.value = '';
+    inp.style.fontSize = Math.max(13, Math.round(annPendingText.fs * annScale * 0.62)) + 'px';
+    annPlaceTextInput(p.x, p.y);
+    inp.hidden = false;
+    annCanvas.style.cursor = 'text';
+    inp.focus();
+    try { inp.select(); } catch (e) { }
+    annRedraw();
   }
 
   // 保存（仅下载带标注的 PNG，不自动复制）或取消（关闭窗口）
@@ -2626,6 +2768,7 @@
     if (annHost && annHost.parentElement) annHost.parentElement.removeChild(annHost);
     annHost = null; annSource = null; annCanvas = null; annCtx = null;
     annAnnots = []; annDrag = null; annPendingText = null; annTextInput = null; annFileName = '';
+    try { delete window.__mgpAnnDebug; } catch (e) { window.__mgpAnnDebug = null; }
   }
 
   function openAnnotate() {
@@ -2691,7 +2834,31 @@
 .ann-btn.ghost:hover{background:var(--ann-ghost-hover)}
 .ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto}
 #ann-canvas{cursor:crosshair;border-radius:4px;box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
-.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;max-width:calc(100% - 8px);box-sizing:border-box;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+/* 底部工具条：颜色 / 画笔 / 笔宽 / 撤销 */
+.ann-foot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--ann-line);flex-wrap:nowrap}
+.ann-colors{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+.ann-dot{width:18px;height:18px;padding:0;border-radius:50%;cursor:pointer;border:none;flex-shrink:0;
+  background:var(--c,#ff5f00);box-shadow:inset 0 0 0 1px rgba(0,0,0,.28);
+  transition:transform 120ms cubic-bezier(.34,1.32,.64,1),box-shadow 120ms cubic-bezier(.2,0,0,1)}
+.ann-dot:hover{transform:scale(1.15)}
+.ann-dot.on{box-shadow:0 0 0 2px var(--ann-bg),0 0 0 4px var(--c,#ff5f00);transform:scale(1.08)}
+.ann-foot-sep{width:1px;height:18px;background:var(--ann-line);flex-shrink:0;margin:0 2px}
+.ann-foot-grow{flex:1;min-width:0}
+.ann-tool{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;border-radius:999px;
+  border:1px solid var(--ann-ghost);background:transparent;color:var(--ann-text);font-size:12px;font-family:inherit;
+  cursor:pointer;flex-shrink:0;transition:background 120ms cubic-bezier(.2,0,0,1),color 120ms,border-color 120ms}
+.ann-tool svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ann-tool:hover{background:var(--ann-ghost-hover)}
+.ann-tool.on{background:var(--ann-primary);border-color:var(--ann-primary);color:var(--ann-on-primary)}
+.ann-tool.ghost{color:var(--ann-muted);border-color:transparent}
+.ann-sizes{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--ann-ghost-hover);
+  opacity:.45;pointer-events:none;transition:opacity 120ms;flex-shrink:0}
+.ann-sizes.active{opacity:1;pointer-events:auto}
+.ann-size{height:24px;min-width:30px;padding:0 6px;border:none;border-radius:999px;background:transparent;
+  color:var(--ann-muted);font-size:11px;font-family:inherit;cursor:pointer;transition:background 120ms,color 120ms}
+.ann-size:hover{color:var(--ann-text)}
+.ann-size.on{background:var(--ann-primary);color:var(--ann-on-primary)}
 .ann-switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-right:2px}
 .ann-sw-label{font-size:12px;color:var(--ann-muted);white-space:nowrap}
 .ann-switch input{display:none}
@@ -2707,7 +2874,7 @@
     win.innerHTML =
       '<div class="ann-head">' +
         '<span class="ann-title">标注截图</span>' +
-        '<span class="ann-tip">拖拽画框 · 点击加字 · Ctrl+C 复制 · Ctrl+Z 撤销</span>' +
+        '<span class="ann-tip">拖拽画框 · 点击加字（编辑中点画面即完成）· Ctrl+C 复制 · Ctrl+Z 撤销</span>' +
         '<span class="ann-grow"></span>' +
         '<label class="ann-switch" title="在截图右上角嵌入当前画面时间码">' +
           '<span class="ann-sw-label">嵌入时间码</span>' +
@@ -2720,6 +2887,24 @@
       '<div class="ann-body">' +
         '<canvas id="ann-canvas"></canvas>' +
         '<input id="ann-text" class="ann-text" spellcheck="false" placeholder="输入标注文字，Enter 确认" hidden>' +
+      '</div>' +
+      // 底部工具条：颜色 / 画笔（含笔宽）/ 撤销
+      '<div class="ann-foot">' +
+        '<span class="ann-colors" role="group" aria-label="标注颜色">' +
+          ANN_COLORS.map(o => '<button type="button" class="ann-dot" data-c="' + o.c + '" title="' + o.n + '" style="--c:' + o.c + '" aria-label="' + o.n + '"></button>').join('') +
+        '</span>' +
+        '<span class="ann-foot-sep"></span>' +
+        '<button type="button" class="ann-tool" id="ann-pen" aria-pressed="false" title="画笔（B）">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5l1-3.5 6.8-6.8a1.4 1.4 0 0 1 2 2L5.5 12z"/><path d="M9.8 4.6l1.6 1.6"/></svg>' +
+          '<span>画笔</span>' +
+        '</button>' +
+        '<span class="ann-sizes" id="ann-sizes" role="group" aria-label="笔宽">' +
+          '<button type="button" class="ann-size" data-b="0" title="细">细</button>' +
+          '<button type="button" class="ann-size on" data-b="1" title="中">中</button>' +
+          '<button type="button" class="ann-size" data-b="2" title="粗">粗</button>' +
+        '</span>' +
+        '<span class="ann-foot-grow"></span>' +
+        '<button type="button" class="ann-tool ghost" id="ann-undo" title="撤销（Z）">撤销</button>' +
       '</div>';
     sr.appendChild(win);
     // 亮/暗色主题：初始应用 + 设置「亮色模式」切换时实时生效
@@ -2763,13 +2948,33 @@
     // 拖拽画框 / 点击加文本：pointer 事件 + 指针捕获（拖出画布也不丢失 mouseup）
     canvas.addEventListener('pointerdown', e => {
       e.preventDefault();
-      if (annPendingText) annCommitText();   // 先提交上一个未确认的文本
+      // 正在编辑文本：这一下只负责「完成当前输入」，不再新建文本框 / 画框 / 笔画
+      if (annPendingText) { annCommitText(); return; }
       const p = annPos(e);
+      // 画笔模式：按下开始一条自由笔画（松手才落到 annAnnots，Z 可撤）
+      if (annTool === 'pen') {
+        annStroke = { color: annColor, w: annBrushWidth(), pts: [p] };
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
+        annRedraw();
+        return;
+      }
       annDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
       annDragged = false;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
     });
     canvas.addEventListener('pointermove', e => {
+      if (annStroke) {
+        const sp = annPos(e);
+        const pts = annStroke.pts;
+        const last = pts[pts.length - 1];
+        // 采样抽稀：移动很近的点不重复记（笔画更顺、也不占内存）
+        const minGap = Math.max(1, annStroke.w * 0.35);
+        if (!last || Math.hypot(sp.x - last.x, sp.y - last.y) >= minGap) {
+          pts.push(sp);
+          annRedraw();
+        }
+        return;
+      }
       if (!annDrag) return;
       const p = annPos(e);
       annDrag.x1 = p.x; annDrag.y1 = p.y;
@@ -2777,6 +2982,19 @@
       annRedraw();
     });
     canvas.addEventListener('pointerup', e => {
+      if (annStroke) {
+        const sp = annStroke;
+        annStroke = null;
+        try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
+        const last = sp.pts[sp.pts.length - 1];
+        const p2 = annPos(e);
+        if (!last || Math.hypot(p2.x - last.x, p2.y - last.y) > 0.5) sp.pts.push(p2);
+        if (sp.pts.length > 1) {
+          annAnnots.push({ type: 'stroke', pts: sp.pts, color: sp.color, w: sp.w });
+        }
+        annRedraw();
+        return;
+      }
       if (!annDrag) return;
       const p = annPos(e);
       annDrag.x1 = p.x; annDrag.y1 = p.y;
@@ -2789,18 +3007,12 @@
         const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
         const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
         if (w > 2 && h > 2) {
-          annAnnots.push({ type: 'rect', x, y, w, h });
+          annAnnots.push({ type: 'rect', x, y, w, h, color: annColor });
           annRedraw();
         }
       } else {
-        // 点击 → 在该位置打开文本标注输入框
-        annPendingText = { x: p.x, y: p.y, fs: annTextFontSize() };
-        inp.value = '';
-        inp.style.left = Math.round(p.x * annScale + 10) + 'px';
-        inp.style.top = Math.round(p.y * annScale + 10) + 'px';
-        inp.style.fontSize = Math.max(13, Math.round(annPendingText.fs * annScale * 0.6)) + 'px';
-        inp.hidden = false;
-        inp.focus();
+        // 点击 → 在该位置打开文本标注输入框（位置会收进画面内）
+        annStartText(p);
       }
     });
     // 文本输入：Enter 确认标注 / Esc 取消输入；失焦确认（点保存按钮时文本先落定）
@@ -2810,7 +3022,78 @@
       if (e.key === 'Enter') { e.preventDefault(); annCommitText(); }
       else if (e.key === 'Escape') { e.preventDefault(); annCancelText(); }
     });
+    // 输入时画布上实时预览（折行 / 贴边都按最终效果显示）
+    inp.addEventListener('input', () => {
+      if (!annPendingText) return;
+      annPendingText.txt = inp.value;
+      annRedraw();
+    });
     inp.addEventListener('blur', () => { if (annPendingText) annCommitText(); });
+    // 自检钩子（只读快照）：文本输入框位置 / 待确认文本的排版 / 已确认标注
+    window.__mgpAnnDebug = () => {
+      const inpRect = inp && !inp.hidden ? inp.getBoundingClientRect() : null;
+      const cRect = canvas.getBoundingClientRect();
+      const p = annPendingText;
+      const L = p && p.txt ? annLayoutText(p.txt, p.x, p.y, p.fs) : null;
+      return {
+        pending: p ? { x: p.x, y: p.y, fs: p.fs, txt: p.txt, hidden: inp.hidden } : null,
+        input: inpRect ? { left: inpRect.left, top: inpRect.top, right: inpRect.right, bottom: inpRect.bottom,
+          w: inpRect.width, h: inpRect.height, hidden: inp.hidden } : null,
+        canvas: { left: cRect.left, top: cRect.top, right: cRect.right, bottom: cRect.bottom,
+          w: canvas.clientWidth, h: canvas.clientHeight, pxW: canvas.width, pxH: canvas.height, scale: annScale },
+        layout: L,
+        color: annColor,
+        tool: annTool,
+        brushIdx: annBrushIdx,
+        brushW: annBrushWidth(),
+        colors: ANN_COLORS.map(o => o.c),
+        annots: JSON.parse(JSON.stringify(annAnnots))
+      };
+    };
+    // ── 底部工具条：颜色 / 画笔 / 笔宽 / 撤销 ──
+    const colorsEl = sr.querySelector('.ann-colors');
+    const sizesEl = sr.querySelector('#ann-sizes');
+    const penBtn = sr.querySelector('#ann-pen');
+    const syncColors = () => {
+      sr.querySelectorAll('.ann-dot').forEach(b => b.classList.toggle('on', b.dataset.c === annColor));
+    };
+    const syncTool = () => {
+      const pen = annTool === 'pen';
+      penBtn.classList.toggle('on', pen);
+      penBtn.setAttribute('aria-pressed', pen ? 'true' : 'false');
+      sizesEl.classList.toggle('active', pen);
+      sr.querySelectorAll('.ann-size').forEach(b => b.classList.toggle('on', +b.dataset.b === annBrushIdx));
+      canvas.style.cursor = pen ? 'crosshair' : 'crosshair';
+    };
+    if (colorsEl) colorsEl.addEventListener('click', e => {
+      const b = e.target.closest('.ann-dot');
+      if (!b) return;
+      annColor = b.dataset.c || ANN_THEME;
+      // 正在输入的文本跟着换色（预览即时更新）
+      if (annPendingText) annPendingText.color = annColor;
+      syncColors();
+      annRedraw();
+    });
+    penBtn.addEventListener('click', () => {
+      if (annPendingText) annCommitText();      // 切换工具前先把正在编辑的文字落定
+      annTool = annTool === 'pen' ? 'select' : 'pen';
+      syncTool();
+      annRedraw();
+    });
+    if (sizesEl) sizesEl.addEventListener('click', e => {
+      const b = e.target.closest('.ann-size');
+      if (!b) return;
+      annBrushIdx = Math.max(0, Math.min(2, +b.dataset.b || 0));
+      syncTool();
+    });
+    sr.querySelector('#ann-undo').addEventListener('click', () => {
+      if (annPendingText) { annCancelText(); return; }
+      if (annAnnots.length) { annAnnots.pop(); annRedraw(); }
+      syncTool();
+    });
+    syncColors();
+    syncTool();
+
     sr.querySelector('#ann-save').addEventListener('click', () => annClose(true));
     sr.querySelector('#ann-cancel').addEventListener('click', () => annClose(false));
   }
