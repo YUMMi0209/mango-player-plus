@@ -2924,7 +2924,6 @@
 .ann-tool.ghost{color:var(--ann-muted);border-color:transparent}
 .ann-tools{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--ann-ghost-hover);flex-shrink:0}
 .ann-glabel{font-size:10px;color:var(--ann-muted);padding:0 4px 0 6px;white-space:nowrap}
-.ann-foot #ann-cancel{color:var(--ann-muted)}
 .ann-tools .ann-tool{border-color:transparent;height:26px;padding:0 10px}
 .ann-tools .ann-tool.on{border-color:var(--ann-primary)}
 /* 头部：保存左侧的复制按钮与保存同高 */
@@ -2952,6 +2951,7 @@
         '<span class="ann-title">标注截图</span>' +
         '<span class="ann-tip">拖拽标注 · 点击加字</span>' +
         '<span class="ann-grow"></span>' +
+        '<button type="button" class="ann-btn ghost" id="ann-cancel" title="取消（Esc）">取消 (Esc)</button>' +
         '<button type="button" class="ann-btn ghost" id="ann-copy" title="复制到剪贴板（C）">复制 (C)</button>' +
         '<button type="button" class="ann-btn" id="ann-save">保存 (Enter)</button>' +
       '</div>' +
@@ -2998,7 +2998,6 @@
           '<span class="ann-sw-track"></span>' +
         '</label>' +
         '<button type="button" class="ann-tool ghost" id="ann-undo" title="撤销（Z）">撤销</button>' +
-        '<button type="button" class="ann-tool ghost" id="ann-cancel" title="取消（Esc）">取消</button>' +
       '</div>';
     sr.appendChild(win);
     // 亮/暗色主题：初始应用 + 设置「亮色模式」切换时实时生效
