@@ -189,12 +189,20 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-stp.on{color:#fff;background:var(--orange);border-color:var(--orange);font-weight:600}
 .qc-stage[hidden]{display:none}
 .qc-file{font-size:10px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qc-step{font-size:11px;color:var(--muted);margin:8px 0 6px}
+/* 整个弹窗都能接拖放：悬停时整窗高亮，读取中显示进度感 */
+#mpp-qc.dropping .qc-modal{outline:2px dashed var(--orange);outline-offset:-6px}
+#mpp-qc.dropping .qc-drop{border-color:var(--orange);background:var(--orange-dk)}
+.qc-drop.loading{opacity:.6;pointer-events:none}
+.qc-drop.loading::after{content:"读取中…";position:absolute;right:8px;top:8px;font-size:10px;color:var(--orange)}
+.qc-drop{position:relative}
+/* ③ 汇总条：一眼看到「导入几条 / 跳过几条」 */
+.qc-summary{font-size:11px;line-height:1.6;color:var(--text);background:var(--orange-dk);border:1px solid rgba(255,95,0,.35);border-radius:8px;padding:7px 9px;margin-bottom:8px}
+.qc-summary.warn{color:var(--orange);background:transparent;border-color:var(--card-brd)}
 /* 非本插件导出的表格：顶部提示 */
 .qc-notice{font-size:11px;line-height:1.5;color:var(--orange);background:rgba(255,95,0,.10);border:1px solid rgba(255,95,0,.35);border-radius:8px;padding:6px 8px;margin-bottom:8px}
-#mpp-qc.ai-first .qc-step{color:var(--orange)}
 /* ① 上传表格：拖放引导区 */
-.qc-drop{display:flex;flex-direction:column;align-items:center;gap:5px;padding:16px 10px;border:1px dashed var(--card-brd);border-radius:10px;background:var(--row);text-align:center;transition:border-color .12s,background .12s}
+.qc-drop{display:flex;flex-direction:column;align-items:center;gap:5px;padding:16px 10px;border:1px dashed var(--card-brd);border-radius:10px;background:var(--row);text-align:center;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s}
+.qc-drop:hover{border-color:var(--orange)}
 .qc-drop.over{border-color:var(--orange);background:var(--orange-dk)}
 .qc-drop.has-file{border-style:solid;border-color:var(--orange);padding:10px}
 .qc-drop-main{font-size:12px;color:var(--text)}
@@ -203,7 +211,6 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-drop .qc-choose:hover{border-color:var(--orange);color:var(--orange)}
 .qc-drop .qc-file{max-width:100%;font-size:11px;color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qc-drop .qc-file[hidden]{display:none}
-.qc-or{margin:10px 0 6px;font-size:11px;color:var(--faint);text-align:center}
 /* ② 工作表（单选）+ 导入方式 */
 .qc-cands[hidden]{display:none}
 .qc-pick-hint{font-size:10px;color:var(--faint);line-height:1.5;padding:2px 2px 4px}
@@ -215,48 +222,21 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-name{flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qc-item .qc-count{margin-left:0}
 .qc-hint{font-size:10px;color:var(--faint);padding:0 4px 5px 25px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* 弹窗里的单选（工作表 / 导入方式）：用主题色 */
+/* 弹窗里的单选（工作表）：用主题色 */
 .qc-radio{accent-color:var(--orange);width:14px;height:14px;margin:0;cursor:pointer}
-.qc-way-row{display:flex;gap:8px;margin-top:2px}
-.qc-way-opt{flex:1;min-width:0;display:flex;align-items:center;gap:6px;padding:7px 8px;border:1px solid var(--card-brd);border-radius:8px;background:var(--row);cursor:pointer;font-size:12px;color:var(--text)}
-.qc-way-opt:has(input:checked){border-color:var(--orange);background:var(--orange-dk);font-weight:600}
-.qc-way-opt em{font-style:normal;font-size:10px;color:var(--orange);margin-left:3px}
-.qc-tip{margin-top:6px;font-size:10px;color:var(--faint);line-height:1.5}
-/* ③ AI 提示词 + 清单确认 */
-.qc-ai-box[hidden]{display:none}
-.qc-tip2{font-size:10px;color:var(--faint);line-height:1.4;min-width:0}
+/* ③ 确认清单 */
 .qc-preview{margin-top:10px;border-top:1px solid var(--card-brd);padding-top:7px}
 .qc-preview-head{font-size:11px;color:var(--muted);margin-bottom:4px}
 .qc-preview-list{max-height:24vh;overflow-y:auto;border:1px solid var(--card-brd);border-radius:8px;background:var(--row);padding:6px 8px}
 .qc-pline{font-size:11px;line-height:1.7;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qc-ptc{display:inline-block;min-width:74px;margin-right:8px;font-family:var(--mono);color:var(--orange)}
 .qc-pempty{font-size:11px;color:var(--faint);padding:2px}
-/* AI 提示词 / 粘贴区 */
-.ai-bar{display:flex;align-items:center;gap:6px}
-.ai-bar button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s;flex-shrink:0}
-.ai-bar button:hover{border-color:var(--orange);color:var(--orange)}
-.ai-bar button:disabled{opacity:.45;cursor:not-allowed}
-.ai-bar button:disabled:hover{border-color:var(--card-brd);color:var(--text)}
-.ai-prompt,.ai-input,.ai-input2{width:100%;box-sizing:border-box;background:var(--row);border:1px solid var(--card-brd);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.55;padding:7px 8px;outline:none;
-  /* 长行折行 + 只保留一条细竖滚动条：避免右边 / 下边同时出现滚动条 */
-  white-space:pre-wrap;word-break:break-word;overflow-x:hidden;overflow-y:auto;
-  scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
-.ai-prompt{height:112px;margin-top:6px;resize:vertical}
-.ai-input,.ai-input2{height:72px;margin-top:6px;resize:none}   /* 高度随内容自动增长（JS） */
-.ai-prompt::-webkit-scrollbar,.ai-input::-webkit-scrollbar,.ai-input2::-webkit-scrollbar{width:6px;height:0}
-.ai-prompt::-webkit-scrollbar-track,.ai-input::-webkit-scrollbar-track,.ai-input2::-webkit-scrollbar-track{background:transparent}
-.ai-prompt::-webkit-scrollbar-thumb,.ai-input::-webkit-scrollbar-thumb,.ai-input2::-webkit-scrollbar-thumb{background:var(--row-brd);border-radius:3px}
-.ai-prompt::-webkit-scrollbar-thumb:hover,.ai-input::-webkit-scrollbar-thumb:hover,.ai-input2::-webkit-scrollbar-thumb:hover{background:var(--faint)}
-.ai-prompt:focus,.ai-input:focus,.ai-input2:focus{border-color:var(--orange)}
-.qc-total{color:var(--orange)}
-/* 粘贴了 AI 结果：候选被忽略，整体压暗 */
-#mpp-qc.ai-active .qc-cands{opacity:.45;pointer-events:none}
 /* 底部：状态 + 操作同一行 */
 .qc-foot{display:flex;align-items:center;gap:8px;margin-top:11px}
 /* 空表下载：超链接样式，固定在底部最左 */
 .qc-foot .qc-tpl{flex:0 0 auto;font-size:11px;line-height:1.4;color:var(--orange);text-decoration:underline;text-underline-offset:2px;cursor:pointer;white-space:nowrap}
 .qc-foot .qc-tpl:hover{color:var(--text)}
-.qc-foot .ai-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.qc-foot .qc-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .qc-foot button{height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;flex-shrink:0;transition:all .12s}
 .qc-foot button:hover{border-color:var(--orange)}
 .qc-foot button[hidden]{display:none}

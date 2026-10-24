@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v4.0 使用教程</title>
+<title>芒着拉片 | MG Player+ v4.1 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v4.0</span>
+<span class="sub">使用教程 · v4.1</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -99,12 +99,12 @@ li{margin:4px 0}
 <h3>导入记录</h3>
 <ul>
 <li>入口：历史记录栏的「导入」按钮，或把 .xlsx 拖进面板。</li>
-<li>弹窗三步走，每步点「下一步」：<b>① 选择来源</b>（拖入表格 / 点「点击选择文件」，或直接粘贴时间码清单）→ <b>② 工作表与方式</b>（选要导入哪张表，选 AI 导入或直接导入）→ <b>③ 确认清单</b>。</li>
-<li><b>AI 导入（推荐）</b>：点「复制提示词」（只针对你选的那张表），把表格和提示词发给 AI，再把结果粘贴回弹窗；<b>直接导入</b>：直接把自动识别结果列出来。</li>
+<li>弹窗三步：<b>① 选择文件</b>（拖入 .xlsx 或点「选择文件」，可一次拖多个）→ <b>② 选择工作表</b>（多张表时选一张）→ <b>③ 确认导入</b>（先看清单，再点「导入 N 条」）。单表文件会直接跳到第 ③ 步。</li>
+<li>键盘也顺手：<b>↑ ↓</b> 切换工作表、<b>Enter</b> 下一步 / 导入、<b>Esc</b> 回上一步；文件可以拖到弹窗任意位置。</li>
 <li>两条路都会先把清单列出来（「将导入 N 条」），确认无误再点「确认导入」；当前视频已有记录时会再确认一次「是否导入到当前视频」。</li>
 <li>粘贴时间码清单的话，第一步点「下一步」就直接到确认清单（跳过选表）。</li>
 <li><b>日志记录空表</b>：弹窗左下角有「下载空表」（标记表两栏「时间码 / 备注」，片段表三栏「入点时间码 / 出点时间码 / 备注」），只填<b>时间码</b>就能用，导入到<b>当前视频</b>。</li>
-<li>不是本插件导出的表格，弹窗顶部会提示优先用 AI 导入。</li>
+<li>不是本插件导出的表格，弹窗顶部会提示「确认工作表后导入到当前视频」。</li>
 </ul>
 <h3>时间码输入写法</h3>
 <p>控制栏右键输入、面板里右键双击时间码、导入的清单，都认这些写法（中英文冒号、分号、有没有分隔符都可以）：<span class="mono">00:01:12:18</span>、<span class="mono">00：01：12：18</span>、<span class="mono">01:12:18</span>、<span class="mono">01:12</span>、<span class="mono">00011218</span>、<span class="mono">011218</span>、<span class="mono">0112</span>。</p>
@@ -178,11 +178,11 @@ li{margin:4px 0}
 </details>
 <details>
 <summary>导出的 Excel 打不开 / 导入的表格识别不出时间码？</summary>
-<div class="body">导出的是标准 .xlsx，Excel、WPS、腾讯文档都能打开，提示损坏请先更新软件版本。识别不出时间码时改用弹窗里的 AI 导入：把提示词连同表格发给 AI，再粘贴结果。</div>
+<div class="body">导出的是标准 .xlsx，Excel、WPS、腾讯文档都能打开，提示损坏请先更新软件版本。识别不出时间码时，会留在第一步提示「确认时间码与说明在同一行（或同一列）」。</div>
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v4.0</span>
+<span>芒着拉片 | MG Player+ v4.1</span>
 <span>YUMMi</span>
 </footer>
 </div>
