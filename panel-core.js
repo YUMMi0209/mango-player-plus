@@ -1933,7 +1933,7 @@ const MPP = (() => {
           '</div>' +
           // ── ② 选择工作表 ──
           '<div class="qc-stage" data-stage="2" hidden>' +
-            '<div class="qc-pick-hint"></div>' +
+  
             '<div class="qc-list" role="radiogroup" aria-label="选择要导入的工作表"></div>' +
             '<div class="qc-hint">↑ ↓ 切换 · Enter 下一步</div>' +
           '</div>' +
@@ -1958,7 +1958,6 @@ const MPP = (() => {
       const stage1 = m.querySelector('.qc-stage[data-stage="1"]');
       const stage2 = m.querySelector('.qc-stage[data-stage="2"]');
       const stage3 = m.querySelector('.qc-stage[data-stage="3"]');
-      const hintEl = m.querySelector('.qc-pick-hint');
       const listEl = m.querySelector('.qc-list');
       const summaryEl = m.querySelector('.qc-summary');
       const previewList = m.querySelector('.qc-preview-list');
@@ -1999,21 +1998,14 @@ const MPP = (() => {
       };
 
       // ② 候选（工作表 / 分节）：单选，只有一张表时不给多余说明
+      // 只显示工作表名 + 记录数（不展示表内内容；记录数固定一行、右对齐不换行）
       function renderCands() {
-        if (!cands.length) { listEl.innerHTML = ''; hintEl.textContent = ''; return; }
-        const single = cands.length === 1;
-        listEl.innerHTML = cands.map((c, i) => {
-          const hint = c.marks.slice(0, 2).map(x => fmtMark(x.time) + ' ' + (x.note || '（无备注）')).join(' · ');
-          return '<label class="qc-item" data-i="' + i + '">' +
-              '<input type="radio" name="qc-sheet" class="qc-radio"' + ((cands.length === 1 || i === 0) ? ' checked' : '') + '>' +
-              '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
-              '<span class="qc-count">' + c.marks.length + ' 条</span>' +
-              (single ? '' : '<span class="qc-hint" title="' + esc(hint) + '">' + esc(hint) + '</span>') +
-            '</label>';
-        }).join('');
-        hintEl.textContent = single
-          ? '已选中' + (sheetHint ? '（' + sheetHint + '）' : '')
-          : '共 ' + cands.length + ' 张表，选一张';
+        if (!cands.length) { listEl.innerHTML = ''; return; }
+        listEl.innerHTML = cands.map((c, i) => '<label class="qc-item" data-i="' + i + '">' +
+            '<input type="radio" name="qc-sheet" class="qc-radio"' + ((cands.length === 1 || i === 0) ? ' checked' : '') + '>' +
+            '<span class="qc-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>' +
+            '<span class="qc-count">' + c.marks.length + ' 条</span>' +
+          '</label>').join('');
       }
 
       // ③ 汇总 + 清单（所见即所导）
@@ -2056,10 +2048,8 @@ const MPP = (() => {
           okBtn.textContent = '下一步';
           okBtn.disabled = false;
         }
-        const sel = selectedCand();
-        statusEl.textContent = stage === 1
-          ? (cands.length ? '已读取 ' + cands.length + ' 张表' : '')
-          : (stage === 2 ? (sel ? '已选：' + sel.label : '') : '');
+        // 选表这一步不额外提示「已选」（选中态由单选按钮和高亮表达）
+        statusEl.textContent = stage === 1 ? (cands.length ? '已读取 ' + cands.length + ' 张表' : '') : '';
       };
 
       // 读完文件 → 构建候选；只有一张表时直接进入清单确认（少点一次）

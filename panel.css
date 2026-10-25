@@ -213,15 +213,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .qc-drop .qc-file[hidden]{display:none}
 /* ② 工作表（单选）+ 导入方式 */
 .qc-cands[hidden]{display:none}
-.qc-pick-hint{font-size:10px;color:var(--faint);line-height:1.5;padding:2px 2px 4px}
-.qc-count{font-size:10px;color:var(--faint);padding:0 2px 2px}
+.qc-count{font-size:11px;color:var(--faint);padding:0 2px;margin-left:auto;flex-shrink:0;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .qc-list{max-height:22vh;overflow-y:auto;padding:2px 0 0}
 .qc-item{display:flex;align-items:center;gap:7px;padding:5px 4px;border-radius:7px;cursor:pointer;transition:background .12s}
 .qc-item:hover{background:var(--row)}
 .qc-item .qc-radio{flex-shrink:0}
 .qc-name{flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qc-item .qc-count{margin-left:0}
-.qc-hint{font-size:10px;color:var(--faint);padding:0 4px 5px 25px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 弹窗里的单选（工作表）：用主题色 */
 .qc-radio{accent-color:var(--orange);width:14px;height:14px;margin:0;cursor:pointer}
 /* ③ 确认清单 */
