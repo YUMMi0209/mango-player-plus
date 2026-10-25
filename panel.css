@@ -178,68 +178,125 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mpp-tc-opt .mpp-tc-name{flex:1;min-width:0;font-size:12px;color:var(--text)}
 .mpp-tc-opt .mpp-tc-val{font-family:var(--mono);font-size:11px;color:var(--orange);letter-spacing:.5px}
 
-/* ─── 记录表导入弹窗（三步：①来源 → ②工作表与方式 → ③确认清单）── */
+/* ─── 导入记录弹窗（① 选择文件 → ② 选择工作表 → ③ 确认导入）──
+   设计要点：步骤条用「数字圆点 + 连接线」表达进度；拖放区整块可点、拖入时整窗高亮；
+   选表行选中态用主题色描边 + 浅底；底部操作把主按钮做成实心主题色。 */
 .mpp-modal.wide{width:344px}
-.qc-modal{padding:14px}
-.qc-title{font-size:13px;font-weight:600;color:var(--text)}
-/* 步骤指示 */
-.qc-steps{display:flex;align-items:center;gap:5px;margin:7px 0 10px;font-size:10px;color:var(--faint);flex-wrap:wrap}
-.qc-stp{padding:2px 7px;border-radius:9px;background:var(--row);border:1px solid var(--card-brd);white-space:nowrap}
+.qc-modal{padding:16px 16px 12px}
+
+/* 标题 + 步骤条 */
+.qc-title{font-size:14px;font-weight:600;color:var(--text);letter-spacing:.2px}
+.qc-steps{display:flex;align-items:center;gap:6px;margin:10px 0 12px;font-size:11px;color:var(--faint);flex-wrap:wrap}
+.qc-stp{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--faint);
+  transition:color .15s}
+.qc-stp b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;
+  border-radius:50%;background:var(--row);border:1px solid var(--card-brd);
+  font-size:10px;font-weight:600;color:var(--faint);line-height:1;
+  transition:background .15s,color .15s,border-color .15s}
+.qc-stp i{font-style:normal}
+.qc-stp + .qc-stp::before{content:"";display:inline-block;width:12px;height:1px;margin-right:2px;
+  background:var(--card-brd);flex-shrink:0}
+.qc-stp.on{color:var(--text);font-weight:600}
+.qc-stp.on b{background:var(--orange);border-color:var(--orange);color:#fff}
 .qc-stp.done{color:var(--muted)}
-.qc-stp.on{color:#fff;background:var(--orange);border-color:var(--orange);font-weight:600}
+.qc-stp.done b{background:var(--orange-dk);border-color:var(--orange);color:var(--orange)}
+.qc-stp.done b::before{content:"";width:8px;height:8px;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9.6 16.6 4.4 11.4l1.4-1.4 3.8 3.8 8.6-8.6L19.6 6z'/></svg>") center/8px no-repeat;
+  mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9.6 16.6 4.4 11.4l1.4-1.4 3.8 3.8 8.6-8.6L19.6 6z'/></svg>") center/8px no-repeat}
+.qc-stp.done b{font-size:0}      /* 已完成的步骤只显示勾 */
 .qc-stage[hidden]{display:none}
+
+/* ① 拖放区 */
+.qc-drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:20px 12px;border:1.5px dashed var(--card-brd);border-radius:12px;background:var(--row);
+  text-align:center;cursor:pointer;
+  transition:border-color .15s,background .15s,transform .15s}
+.qc-drop:hover{border-color:var(--orange);background:var(--orange-dk)}
+.qc-drop:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.qc-drop.over{border-color:var(--orange);background:var(--orange-dk);transform:scale(1.01)}
+.qc-drop.has-file{border-style:solid;border-color:var(--orange);padding:14px 12px 12px}
+.qc-drop-icon{width:26px;height:26px;fill:none;stroke:var(--orange);stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+.qc-drop.has-file .qc-drop-icon{width:18px;height:18px}
+.qc-drop-main{font-size:12px;color:var(--text)}
+.qc-drop-sub{font-size:11px;color:var(--faint)}
+.qc-drop .qc-choose{height:26px;padding:0 12px;border-radius:7px;border:1px solid var(--card-brd);
+  background:var(--card);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;
+  transition:all .15s}
+.qc-drop .qc-choose:hover{border-color:var(--orange);color:var(--orange)}
+.qc-drop .qc-file{max-width:100%;font-size:11px;color:var(--orange);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.qc-drop .qc-file[hidden]{display:none}
 .qc-file{font-size:10px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* 整个弹窗都能接拖放：悬停时整窗高亮，读取中显示进度感 */
 #mpp-qc.dropping .qc-modal{outline:2px dashed var(--orange);outline-offset:-6px}
 #mpp-qc.dropping .qc-drop{border-color:var(--orange);background:var(--orange-dk)}
 .qc-drop.loading{opacity:.6;pointer-events:none}
-.qc-drop.loading::after{content:"读取中…";position:absolute;right:8px;top:8px;font-size:10px;color:var(--orange)}
-.qc-drop{position:relative}
-/* ③ 汇总条：一眼看到「导入几条 / 跳过几条」 */
-.qc-summary{font-size:11px;line-height:1.6;color:var(--text);background:var(--orange-dk);border:1px solid rgba(255,95,0,.35);border-radius:8px;padding:7px 9px;margin-bottom:8px}
-.qc-summary.warn{color:var(--orange);background:transparent;border-color:var(--card-brd)}
-/* 非本插件导出的表格：顶部提示 */
-.qc-notice{font-size:11px;line-height:1.5;color:var(--orange);background:rgba(255,95,0,.10);border:1px solid rgba(255,95,0,.35);border-radius:8px;padding:6px 8px;margin-bottom:8px}
-/* ① 上传表格：拖放引导区 */
-.qc-drop{display:flex;flex-direction:column;align-items:center;gap:5px;padding:16px 10px;border:1px dashed var(--card-brd);border-radius:10px;background:var(--row);text-align:center;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s}
-.qc-drop:hover{border-color:var(--orange)}
-.qc-drop.over{border-color:var(--orange);background:var(--orange-dk)}
-.qc-drop.has-file{border-style:solid;border-color:var(--orange);padding:10px}
-.qc-drop-main{font-size:12px;color:var(--text)}
-.qc-drop-sub{font-size:11px;color:var(--faint)}
-.qc-drop .qc-choose{height:24px;padding:0 10px;border-radius:6px;border:1px solid var(--card-brd);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;transition:all .12s}
-.qc-drop .qc-choose:hover{border-color:var(--orange);color:var(--orange)}
-.qc-drop .qc-file{max-width:100%;font-size:11px;color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qc-drop .qc-file[hidden]{display:none}
-/* ② 工作表（单选）+ 导入方式 */
+.qc-drop.loading::after{content:"读取中…";position:absolute;right:10px;top:10px;font-size:10px;color:var(--orange)}
+
+/* ② 选表：一行一个工作表 */
 .qc-cands[hidden]{display:none}
-.qc-count{font-size:11px;color:var(--faint);padding:0 2px;margin-left:auto;flex-shrink:0;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
-.qc-list{max-height:22vh;overflow-y:auto;padding:2px 0 0}
-.qc-item{display:flex;align-items:center;gap:7px;padding:5px 4px;border-radius:7px;cursor:pointer;transition:background .12s}
+.qc-list{max-height:24vh;overflow-y:auto;padding:2px 0;display:flex;flex-direction:column;gap:2px}
+.qc-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;
+  border:1px solid transparent;transition:background .15s,border-color .15s}
 .qc-item:hover{background:var(--row)}
+.qc-item:has(input:checked){background:var(--orange-dk);border-color:rgba(255,95,0,.45)}
 .qc-item .qc-radio{flex-shrink:0}
 .qc-name{flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* 弹窗里的单选（工作表）：用主题色 */
+.qc-item:has(input:checked) .qc-name{color:var(--text);font-weight:600}
+.qc-count{font-size:11px;color:var(--faint);padding:0 2px;margin-left:auto;flex-shrink:0;
+  white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.qc-item:has(input:checked) .qc-count{color:var(--orange)}
 .qc-radio{accent-color:var(--orange);width:14px;height:14px;margin:0;cursor:pointer}
-/* ③ 确认清单 */
-.qc-preview{margin-top:10px;border-top:1px solid var(--card-brd);padding-top:7px}
+.qc-hint{font-size:10px;color:var(--faint);line-height:1.5;padding:4px 2px 0}
+
+/* ③ 汇总 + 清单 */
+.qc-summary{font-size:11px;line-height:1.6;color:var(--text);background:var(--orange-dk);
+  border-left:3px solid var(--orange);border-radius:6px;padding:8px 10px;margin-bottom:8px}
+.qc-summary.warn{color:var(--orange);background:transparent;border-left-color:var(--card-brd);
+  border:1px solid var(--card-brd);border-left-width:3px}
+.qc-preview{margin-top:2px}
 .qc-preview-head{font-size:11px;color:var(--muted);margin-bottom:4px}
-.qc-preview-list{max-height:24vh;overflow-y:auto;border:1px solid var(--card-brd);border-radius:8px;background:var(--row);padding:6px 8px}
-.qc-pline{font-size:11px;line-height:1.7;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qc-ptc{display:inline-block;min-width:74px;margin-right:8px;font-family:var(--mono);color:var(--orange)}
-.qc-pempty{font-size:11px;color:var(--faint);padding:2px}
-/* 底部：状态 + 操作同一行 */
-.qc-foot{display:flex;align-items:center;gap:8px;margin-top:11px}
-/* 空表下载：超链接样式，固定在底部最左 */
-.qc-foot .qc-tpl{flex:0 0 auto;font-size:11px;line-height:1.4;color:var(--orange);text-decoration:underline;text-underline-offset:2px;cursor:pointer;white-space:nowrap}
+.qc-preview-list{max-height:26vh;overflow-y:auto;border:1px solid var(--card-brd);border-radius:8px;
+  background:var(--row);padding:6px 8px;display:flex;flex-direction:column;gap:1px}
+.qc-pline{font-size:11px;line-height:1.7;color:var(--text);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;padding:1px 2px;border-radius:4px}
+.qc-pline:nth-child(even){background:rgba(255,255,255,.02)}
+.qc-ptc{display:inline-block;min-width:74px;margin-right:8px;font-family:var(--mono);
+  color:var(--orange);font-variant-numeric:tabular-nums}
+.qc-pempty{font-size:11px;color:var(--faint);padding:6px 2px;text-align:center}
+
+/* 顶部提示（外部表格） */
+.qc-notice{font-size:11px;line-height:1.5;color:var(--orange);background:rgba(255,95,0,.10);
+  border-left:3px solid var(--orange);border-radius:6px;padding:7px 10px;margin-bottom:10px}
+
+/* 底部：下载空表 + 状态 + 操作 */
+.qc-foot{display:flex;align-items:center;gap:8px;margin-top:12px}
+.qc-foot .qc-tpl{flex:0 0 auto;font-size:11px;line-height:1.4;color:var(--orange);
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer;white-space:nowrap}
 .qc-foot .qc-tpl:hover{color:var(--text)}
-.qc-foot .qc-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
-.qc-foot button{height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--card-brd);background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;flex-shrink:0;transition:all .12s}
+.qc-foot .qc-status{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.4;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.qc-foot button{height:30px;padding:0 14px;border-radius:8px;border:1px solid var(--card-brd);
+  background:var(--row);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;
+  flex-shrink:0;transition:background .15s,border-color .15s,color .15s,transform .08s}
 .qc-foot button:hover{border-color:var(--orange)}
+/* 底部「取消」：低调些，避免和主按钮抢注意力 */
+.qc-foot .mpp-cancel{color:var(--muted)}
+.qc-foot .mpp-cancel:hover{border-color:var(--card-brd);color:var(--text)}
+/* 键盘可达性：统一主题色焦点环 */
+.qc-modal button:focus-visible,.qc-modal a:focus-visible,.qc-modal input:focus-visible,.qc-item:focus-visible{
+  outline:2px solid var(--orange);outline-offset:2px}
+/* 列表滚动条收细，跟面板整体一致 */
+.qc-list::-webkit-scrollbar,.qc-preview-list::-webkit-scrollbar{width:6px}
+.qc-list::-webkit-scrollbar-thumb,.qc-preview-list::-webkit-scrollbar-thumb{
+  background:var(--card-brd);border-radius:3px}
+.qc-list::-webkit-scrollbar-thumb:hover,.qc-preview-list::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+.qc-foot button:active{transform:scale(.97)}
 .qc-foot button[hidden]{display:none}
-.qc-foot .mpp-ok{background:var(--orange-dk);border-color:var(--orange);font-weight:600}
-.qc-foot .mpp-ok:hover{background:var(--orange);color:#fff}
-.qc-foot .mpp-ok:disabled{opacity:.45;cursor:not-allowed;background:var(--row);border-color:var(--card-brd);color:var(--muted)}
+.qc-foot .mpp-ok{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600}
+.qc-foot .mpp-ok:hover{background:#ff6a1a;border-color:#ff6a1a;color:#fff}
+.qc-foot .mpp-ok:disabled{opacity:.45;cursor:not-allowed;background:var(--row);
+  border-color:var(--card-brd);color:var(--muted);transform:none}
 
 /* ─── 面板轻提示（导入 / 删除 / 导出等操作反馈）── */
 #mpp-toast{position:fixed;left:0;right:0;bottom:64px;margin:0 auto;width:fit-content;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--card-brd);color:var(--text);font-size:12px;line-height:1.5;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);text-align:center;box-sizing:border-box;transform:translateY(10px);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120}

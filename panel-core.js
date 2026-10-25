@@ -1917,20 +1917,20 @@ const MPP = (() => {
         '<div class="mpp-modal wide qc-modal">' +
           '<div class="qc-title">导入记录</div>' +
           '<div class="qc-steps">' +
-            '<span class="qc-stp" data-s="1">① 选择文件</span>' +
-            '<span class="qc-stp" data-s="2">② 选择工作表</span>' +
-            '<span class="qc-stp" data-s="3">③ 确认导入</span>' +
+            '<span class="qc-stp" data-s="1"><b>1</b><i>选择文件</i></span>' +
+            '<span class="qc-stp" data-s="2"><b>2</b><i>选择工作表</i></span>' +
+            '<span class="qc-stp" data-s="3"><b>3</b><i>确认导入</i></span>' +
           '</div>' +
           '<div class="qc-notice" hidden></div>' +
           // ── ① 选择文件 ──
           '<div class="qc-stage" data-stage="1">' +
             '<div class="qc-drop" tabindex="0" role="button" aria-label="拖入或选择表格文件">' +
+              '<svg class="qc-drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>' +
               '<div class="qc-drop-main">把 .xlsx 拖到这里</div>' +
               '<div class="qc-drop-sub">或 <button type="button" class="qc-choose">选择文件</button></div>' +
               '<div class="qc-file" hidden></div>' +
             '</div>' +
-            '<div class="qc-hint">可一次拖入多个表格；本插件导出的表格会按链接自动归属</div>' +
-          '</div>' +
+            '</div>' +
           // ── ② 选择工作表 ──
           '<div class="qc-stage" data-stage="2" hidden>' +
   
