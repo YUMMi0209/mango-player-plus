@@ -847,7 +847,18 @@ const MPP = (() => {
       '</span>';
   }
 
+  // 渲染时的「序号 → 记录指纹」：批量开始前用它把过期的勾选序号校正到当前 logs，
+  // 避免轮询刷新后序号错位（会表现为「跳错位置 / 文件名没备注」）
+  const renderFp = { mk: new Map(), io: new Map() };
+  function fpKey(type, rec) {
+    const f = fpOf(type, rec);
+    if (!f) return '';
+    return type === 'mk'
+      ? String(f.tc || '') + '@' + String(f.time)
+      : String(f.inTC || '') + '@' + String(f.inTime) + '>' + String(f.outTime);
+  }
   function renderMarks(list) {
+    renderFp.mk.clear();
     if (!logs.marks.length) { list.innerHTML = '<div class="empty">暂无标记点记录</div>'; return; }
     const idxs = filteredIdx('mk');
     if (!idxs.length) { list.innerHTML = '<div class="empty">' + esc(noMatchText('标记点')) + '</div>'; return; }
@@ -857,6 +868,7 @@ const MPP = (() => {
       const row = document.createElement('div');
       row.className = 'row' + (sel.mk.has(i) ? ' sel' : '');
       row.dataset.mk = i;
+      renderFp.mk.set(i, fpKey('mk', m));
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.mk.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + seqNo(i) + '</span>' +
@@ -876,6 +888,7 @@ const MPP = (() => {
   }
 
   function renderIO(list) {
+    renderFp.io.clear();
     if (!logs.inOut.length) { list.innerHTML = '<div class="empty">暂无入点到出点记录</div>'; return; }
     const idxs = filteredIdx('io');
     if (!idxs.length) { list.innerHTML = '<div class="empty">' + esc(noMatchText('片段')) + '</div>'; return; }
@@ -885,6 +898,7 @@ const MPP = (() => {
       const row = document.createElement('div');
       row.className = 'row' + (sel.io.has(i) ? ' sel' : '');
       row.dataset.io = i;
+      renderFp.io.set(i, fpKey('io', u));
       row.innerHTML =
         '<input type="checkbox" class="chk"' + (sel.io.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + seqNo(i) + '</span>' +
@@ -1247,6 +1261,38 @@ const MPP = (() => {
     return type !== 'checkbox' && type !== 'radio' && type !== 'button' && type !== 'submit';
   }
 
+  // 组装批量条目：先刷新一次记录（避免用到轮询前的旧数据），再按渲染时指纹校正序号。
+  // 每条都带上 note / tc —— 页面端据此命名，不再靠「时刻 ±0.02s 匹配备注」这套易失效的逻辑。
+  function buildBatchItems(isShot, idxs) {
+    // 复制一份：load() 会重新渲染列表并 clear() 掉 renderFp，直接用引用会拿到刷新后的映射
+    const fpMap = new Map(isShot ? renderFp.mk : renderFp.io);
+    return load(true).catch(() => { }).then(() => {
+      const items = [];
+      let lost = 0;
+      idxs.forEach(i => {
+        const want = fpMap.get(i) || '';
+        const arr = isShot ? logs.marks : logs.inOut;
+        let rec = arr[i];
+        if (!want || !rec || fpKey(isShot ? 'mk' : 'io', rec) !== want) {
+          // 序号已过期：在当前记录里按指纹找回来（找不到就跳过这一条）
+          const j = arr.findIndex(x => fpKey(isShot ? 'mk' : 'io', x) === want);
+          if (j < 0) { lost++; return; }
+          rec = arr[j];
+        }
+        if (!rec) { lost++; return; }
+        if (isShot) {
+          if (rec.time == null) { lost++; return; }
+          items.push({ type: 'mk', time: rec.time, note: rec.note || '', tc: rec.tc || '' });
+        } else {
+          if (rec.inTime == null || rec.outTime == null) { lost++; return; }
+          items.push({ type: 'io', start: rec.inTime, end: rec.outTime, note: rec.note || '', tc: rec.inTC || '' });
+        }
+      });
+      items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
+      return { items, lost };
+    });
+  }
+
   function bindBatchKeys() {
     document.addEventListener('keydown', e => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;   // 放行浏览器组合键
@@ -1291,17 +1337,17 @@ const MPP = (() => {
           if (els.pageTitle) { els.pageTitle.textContent = t; els.pageTitle.title = t; els.pageTitle.hidden = false; }
           execInPage(fnSetTitle, [t]).catch(() => { });
         }
-        const items = [];
-        if (isShot) idxs.forEach(i => { const m = logs.marks[i]; if (m && m.time != null) items.push({ type: 'mk', time: m.time }); });
-        else idxs.forEach(i => { const u = logs.inOut[i]; if (u && u.inTime != null && u.outTime != null) items.push({ type: 'io', start: u.inTime, end: u.outTime }); });
-        items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
-        if (!items.length) { panelToast('选中的' + kindName + '没有可用时间码'); return; }
-        panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）· 按 Esc 取消');
-        batchActive = true;
-        startBatchWatch(isShot);
-        execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).then(r => {
-          if (r && (r.ok === true || r.ok === false)) batchEnded(isShot, r);
-        }).catch(() => { });
+        buildBatchItems(isShot, idxs).then(built => {
+          const items = built.items;
+          if (!items.length) { panelToast('选中的' + kindName + '没有可用时间码'); return; }
+          if (built.lost) panelToast(built.lost + ' 条已失效，跳过');
+          panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）· 按 Esc 取消');
+          batchActive = true;
+          startBatchWatch(isShot);
+          execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).then(r => {
+            if (r && (r.ok === true || r.ok === false)) batchEnded(isShot, r);
+          }).catch(() => { });
+        });
       });
     });
     // 面板重新打开时：页面端可能仍在跑批量任务，同步一次状态，使 Esc 仍可取消

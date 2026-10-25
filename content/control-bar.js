@@ -1353,19 +1353,27 @@
   }
 
   // 备注进入文件名（可开关）：截图/录制时若当前时刻恰好命中带备注的标记点/入点/出点则附加备注
-  function noteForFile(t) {
+  // 文件名里的备注：显式传入优先（批量任务会带上该条的备注），否则按时刻匹配记录。
+  // 匹配容差按帧量化并取「最近」的一条 —— 之前写死 ±0.02s，而 25fps 一帧就是 40ms、
+  // 批量截图/录制取的是落点时刻（可能比记录时刻晚半帧到一帧），于是「有概率文件名没有备注」。
+  function noteForFile(t, explicit) {
     const s = window.__mgpSettings || {};
     if (s.noteFileName === false) return '';
-    for (const m of logs.marks) {
-      if (m.note && m.time != null && Math.abs(m.time - t) < 0.02) return m.note;
-    }
+    if (explicit != null && String(explicit).trim()) return String(explicit).trim();
+    const F = FPS > 0 ? FPS : 25;
+    const tol = Math.max(0.03, 1.05 / F);   // 一帧多一点：seek 落点可能比记录时刻晚一帧
+    let best = '', bestD = Infinity;
+    const consider = (time, note) => {
+      if (!note || time == null || !isFinite(time)) return;
+      const d = Math.abs(time - t);
+      if (d <= tol && d < bestD) { bestD = d; best = note; }
+    };
+    for (const m of logs.marks) consider(m.time, m.note);
     for (const u of logs.inOut) {
-      if (u.note) {
-        if (u.inTime != null && Math.abs(u.inTime - t) < 0.02) return u.note;
-        if (u.outTime != null && Math.abs(u.outTime - t) < 0.02) return u.note;
-      }
+      consider(u.inTime, u.note);
+      consider(u.outTime, u.note);
     }
-    return '';
+    return best;
   }
   // 备注段（不含分隔下划线）：用于「时间码 + 备注」拼接——有备注时备注紧跟时间码
   // 注意 noteSeg 的入参是「时间码对应的时刻」：时间码与备注必须取自同一时刻，
@@ -1381,10 +1389,19 @@
   // - noteTime：与时间码对应的时刻（截图 = 当前时刻；录制 = 入点时刻），
   //   备注取自该时刻命中的标记点 / 片段，保证文件名内时间码与备注一致
   // - 无类型前缀与保存时间戳，靠扩展名区分类型
-  function buildFileName(tcPlain, noteTime, ext) {
+  function buildFileName(tcPlain, noteTime, ext, noteOverride) {
     const tc = String(tcPlain).replace(/[^0-9]/g, '');
-    const note = noteSeg(noteTime);
-    return titleForFile() + tc + (note ? '_' + note : '') + '.' + ext;
+    const rawNote = noteForFile(noteTime, noteOverride);
+    const clean = rawNote ? String(rawNote).replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) : '';
+    return titleForFile() + tc + (clean ? '_' + clean : '') + '.' + ext;
+  }
+  // 批量任务用：这一段产出的文件名身份严格按「记录」来（记录的时间码 + 备注），
+  // 不受 seek 落点 / 显示时刻漂移影响；用完由调用方清空
+  let fileOverride = null;
+  function fileNameWith(tcPlain, noteTime, ext) {
+    const o = fileOverride;
+    if (o && (o.tc || o.note)) return buildFileName(o.tc || tcPlain, o.time != null ? o.time : noteTime, ext, o.note);
+    return buildFileName(tcPlain, noteTime, ext);
   }
   // 标题段（始终写入文件名，附尾部分隔下划线）：面板重命名过的标题优先，
   // 否则取网页标题；清洗非法字符并截断 24 字——与面板显示、导出表格保持一致
@@ -2006,7 +2023,8 @@
     const ext = 'mp4';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
     // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
-    const name = buildFileName(fileTC(state.recordingStart || 0), state.recordingStart || 0, ext);
+    const name = fileNameWith(fileTC(state.recordingStart || 0), state.recordingStart || 0, ext);
+    fileOverride = null;   // 只作用于这一段的命名
     const dur = recStopTime !== null ? Math.max(0, recStopTime - (state.recordingStart || 0)) : 0;
     const sec = Math.round(dur * 2) / 2;
     // 不再把片段时长写进剪贴板（会静默覆盖用户剪贴板；批量录制还会每段写一次）
@@ -3395,8 +3413,23 @@
       timer = setTimeout(finish, 5000);   // 整体超时兜底
     });
   }
+  // 跳到目标帧并核对落点：批量任务不允许「时间码与画面对不上」，
+  // 偏差超过 1 帧就重跳（最多 2 次），还偏就返回 false 交给上层记为失败
+  async function seekExact(t) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (batchCancel) return false;
+      await seekAndSettle(t);
+      if (batchCancel) return false;
+      const err = landedError(t);
+      if (err == null) return true;                                  // 拿不到实测值：按原流程放行
+      if (Math.abs(err) <= 1.25 / (FPS > 0 ? FPS : 25)) return true;  // 落在目标帧（含半帧容差）
+      await delay(120);
+    }
+    return false;
+  }
+
   // 单次截图（等待 toBlob 完成后再继续下一条）
-  function shotOnce(t) {
+  function shotOnce(t, note, tc) {
     return new Promise(resolve => {
       if (!video || !video.videoWidth || batchCancel) { resolve(false); return; }
       const c = document.createElement('canvas');
@@ -3405,17 +3438,32 @@
         c.getContext('2d').drawImage(video, 0, 0);
         c.toBlob(b => {
           if (!b || batchCancel) { resolve(false); return; }   // 取消后不再产出这张截图
-          downloadBlob(b, buildFileName(fileTC(t), t, 'png'));
+          // 文件名：时间码 / 备注都按「记录」来（批量时显式传入），不随落点漂移
+          fileOverride = tc || note ? { tc: tc || '', time: t, note: note || '' } : null;
+          const name = fileNameWith(fileTC(t), t, 'png');
+          fileOverride = null;
+          downloadBlob(b, name);
           resolve(true);
         }, 'image/png');
       } catch (e) { resolve(false); }
     });
   }
+  // 落点是否真的落在目标帧上（批量任务用来判定「精准定位」）
+  function landedError(t) {
+    const F = FPS > 0 ? FPS : 25;
+    const target = Math.floor(t * F + 1e-6) / F;
+    let mt = null;
+    if (lastFrameMediaTime != null) mt = lastFrameMediaTime - ptsOffset;
+    else if (video && isFinite(video.currentTime)) mt = video.currentTime;
+    return mt == null ? null : (mt - target);
+  }
   // 录制指定区间（复用「从入点录制 → 到出点自动停止」流程），等录制与保存完成
-  function recordSegment(start, end) {
+  function recordSegment(start, end, note, tc) {
     return new Promise(resolve => {
       if (!video || recordingInternal || start == null || end == null || !(end > start) || batchCancel) { resolve(false); return; }
       const dur = Math.max(0, end - start);
+      // 本段文件名按记录来：时间码 = 入点时间码，备注 = 该条记录备注
+      fileOverride = { tc: tc || '', time: start, note: note || '' };
       let settled = false, guardStop = null, guardGiveUp = null;
       // 收尾统一清理兜底定时器：定时器若不清，会在几十秒后误杀后续片段的录制
       // （表现为批量录制中某一段「提前结束」，此前为偶发）
@@ -3423,6 +3471,7 @@
         if (settled) return;
         settled = true;
         clearTimeout(guardStop); clearTimeout(guardGiveUp);
+        fileOverride = null;   // 本段已结束，别再影响后续命名
         resolve(ok && !batchCancel);
       };
       state.inPoint = start; state.outPoint = end;
@@ -3463,9 +3512,10 @@
             const t = it.time != null ? it.time : it.start;
             if (t == null || !isFinite(t)) { failed++; continue; }
             mgpToast('批量截图 ' + label + ' · Esc 取消', true);
-            await seekAndSettle(t);
+            const landed = await seekExact(t);
             if (batchCancel) break;
-            const okShot = await shotOnce(t);
+            if (!landed) { failed++; await delay(150); continue; }   // 定位不准：不出图，记失败
+            const okShot = await shotOnce(t, it.note, it.tc);
             if (batchCancel) break;   // 取消：本条不计入成功 / 失败
             okShot ? done++ : failed++;
             await delay(250);
@@ -3474,9 +3524,10 @@
             const s = it.start, e2 = it.end;
             if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
             mgpToast('批量录制 ' + label + ' · Esc 取消', true);
-            await seekAndSettle(s);
+            const landed = await seekExact(s);
             if (batchCancel) break;
-            const okRec = await recordSegment(s, e2);
+            if (!landed) { failed++; await delay(150); continue; }   // 入点没落准：不录，记失败
+            const okRec = await recordSegment(s, e2, it.note, it.tc);
             if (batchCancel) break;   // 取消：本段作废，不计入成功 / 失败
             okRec ? done++ : failed++;
             await delay(400);
