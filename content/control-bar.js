@@ -3413,19 +3413,38 @@
       timer = setTimeout(finish, 5000);   // 整体超时兜底
     });
   }
-  // 跳到目标帧并核对落点：批量任务不允许「时间码与画面对不上」，
-  // 偏差超过 1 帧就重跳（最多 2 次），还偏就返回 false 交给上层记为失败
-  async function seekExact(t) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (batchCancel) return false;
+  // 跳到目标帧并核对落点：返回 { ok, err, cancelled, bestFrames }
+  // 截图要「图 = 时间码」严格一致（容差 1.25 帧）；录制只要求入点大致对上（容差可配），
+  // 因为录制的出点由 recStopTarget 精确控制，入点差一两帧不该整段丢弃。
+  async function seekExact(t, opts) {
+    const F = FPS > 0 ? FPS : 25;
+    const attempts = (opts && opts.attempts) || 3;
+    const tolFrames = (opts && opts.toleranceFrames) || 1.25;
+    let lastErr = null, best = Infinity;
+    for (let i = 0; i < attempts; i++) {
+      if (batchCancel) return { ok: false, cancelled: true };
       await seekAndSettle(t);
-      if (batchCancel) return false;
+      if (batchCancel) return { ok: false, cancelled: true };
       const err = landedError(t);
-      if (err == null) return true;                                  // 拿不到实测值：按原流程放行
-      if (Math.abs(err) <= 1.25 / (FPS > 0 ? FPS : 25)) return true;  // 落在目标帧（含半帧容差）
-      await delay(120);
+      if (err == null) return { ok: true, err: null, bestFrames: 0 };   // 拿不到实测值：放行
+      lastErr = err;
+      if (Math.abs(err) < best) best = Math.abs(err);
+      if (Math.abs(err) <= tolFrames / F) return { ok: true, err: err, bestFrames: Math.abs(err) * F };
+      await delay(110);
     }
-    return false;
+    return { ok: false, err: lastErr, bestFrames: best * F };
+  }
+  // 等上一段录制真正收尾（编码器 / remux 可能还在跑）：最多等 6s，别直接判失败跳过
+  function waitRecorderIdle(maxMs) {
+    return new Promise(resolve => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (!recordingInternal || batchCancel) { resolve(!batchCancel); return; }
+        if (Date.now() - t0 >= maxMs) { resolve(false); return; }
+        setTimeout(tick, 120);
+      };
+      tick();
+    });
   }
 
   // 单次截图（等待 toBlob 完成后再继续下一条）
@@ -3458,9 +3477,15 @@
     return mt == null ? null : (mt - target);
   }
   // 录制指定区间（复用「从入点录制 → 到出点自动停止」流程），等录制与保存完成
-  function recordSegment(start, end, note, tc) {
+  async function recordSegment(start, end, note, tc) {
+    if (!video || start == null || end == null || !(end > start)) return false;
+    // 上一段可能还在收尾（remux 异步）：等它结束再开录，避免「整段被跳过」
+    if (recordingInternal && !(await waitRecorderIdle(6000))) {
+      try { stopRecording(); } catch (e) { }
+      if (!(await waitRecorderIdle(2000))) return false;
+    }
+    if (batchCancel) return false;
     return new Promise(resolve => {
-      if (!video || recordingInternal || start == null || end == null || !(end > start) || batchCancel) { resolve(false); return; }
       const dur = Math.max(0, end - start);
       // 本段文件名按记录来：时间码 = 入点时间码，备注 = 该条记录备注
       fileOverride = { tc: tc || '', time: start, note: note || '' };
@@ -3483,7 +3508,16 @@
       // 兜底 2：再过 15s 仍未收到录制结束通知 → 放弃本段，避免整批卡死
       guardGiveUp = setTimeout(() => done(false), dur * 1000 + 45000);
       toggleRecording();                       // atIn 成立 → 播放到出点自动停止
-      if (!recordingInternal) { done(false); return; }
+      if (!recordingInternal) {
+        // 起录失败（视频还在加载等）：稍等再试一次，仍失败才算这段失败
+        setTimeout(() => {
+          if (settled || batchCancel) return;
+          try { toggleRecording(); } catch (e) { }
+          if (!recordingInternal) { done(false); return; }
+          recStopTarget = end; state.outPoint = end; recAutoStop = true;
+        }, 500);
+        return;
+      }
       // 强化自动停止目标：atIn 判定受帧对齐 / 播放器 seek 影响，未命中时会退回
       // 日志片段匹配（可能匹配到别的出点）或完全不自动停止；批量录制必须严格停在
       // 本段出点，因此启动后统一以本段 end 为准
@@ -3512,9 +3546,9 @@
             const t = it.time != null ? it.time : it.start;
             if (t == null || !isFinite(t)) { failed++; continue; }
             mgpToast('批量截图 ' + label + ' · Esc 取消', true);
-            const landed = await seekExact(t);
+            const landed = await seekExact(t, { attempts: 4, toleranceFrames: 1.25 });
             if (batchCancel) break;
-            if (!landed) { failed++; await delay(150); continue; }   // 定位不准：不出图，记失败
+            if (!landed.ok) { failed++; await delay(150); continue; }   // 定位不准：不出图，记失败
             const okShot = await shotOnce(t, it.note, it.tc);
             if (batchCancel) break;   // 取消：本条不计入成功 / 失败
             okShot ? done++ : failed++;
@@ -3524,9 +3558,21 @@
             const s = it.start, e2 = it.end;
             if (s == null || e2 == null || !isFinite(s) || !isFinite(e2) || !(e2 > s)) { failed++; continue; }
             mgpToast('批量录制 ' + label + ' · Esc 取消', true);
-            const landed = await seekExact(s);
+            // 录制只要求入点大致对上（容差 8 帧、多试两次）：录制的出点由 recStopTarget 精确停止，
+            // 入点差一两帧不该把整段丢掉 —— 之前这里会「自动跳过片段」，是用户报的问题
+            const landed = await seekExact(s, { attempts: 4, toleranceFrames: 8 });
             if (batchCancel) break;
-            if (!landed) { failed++; await delay(150); continue; }   // 入点没落准：不录，记失败
+            // 偏差小（一两帧 / 播放器吸附）→ 照录；偏差大到画面已经不是这一段（>3.6s）
+            // → 才记失败，避免产出内容对不上的废文件
+            if (!landed.ok && (landed.bestFrames || 0) > 90) {
+              failed++;
+              try { mgpToast('本条定位偏差过大，已跳过（' + Math.round(landed.bestFrames) + ' 帧）', true); } catch (e) { }
+              await delay(150);
+              continue;
+            }
+            if (!landed.ok) {
+              try { mgpToast('本条入点偏差约 ' + Math.round(landed.bestFrames || 0) + ' 帧，继续录制', true); } catch (e) { }
+            }
             const okRec = await recordSegment(s, e2, it.note, it.tc);
             if (batchCancel) break;   // 取消：本段作废，不计入成功 / 失败
             okRec ? done++ : failed++;
