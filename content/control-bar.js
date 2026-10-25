@@ -1085,11 +1085,17 @@
       if (tc) tc.classList.add('tc-hidden');
     }, 5000);
   }
+  // 百度网盘：站点自身没有会挡住时间码的悬浮 UI，回避（悬停时下移）只会让时间码乱动，
+  // 因此这里**强制关闭**，与设置里的「时间码显示回避」无关（其他站点仍按设置）
+  function isBaiduHost() {
+    return /^(pan|yun)\.baidu\.com$/.test(location.hostname);
+  }
   // 时间码下移：常规下移量为视频宽度的 2.5%（平滑动画）；全屏固定下移 0.5%、不做移动动画
   // 「时间码显示回避」关闭时不再向下移动；未手动设置过时按站点默认（芒果TV开、其他站点关）
   // **直播模式下一律关闭回避**：时间码恒为系统时间，位置不应再随鼠标上下移动
   function avoidTimecodeOn() {
     if (rtOn()) return false;
+    if (isBaiduHost()) return false;   // 百度网盘强制不回避
     const s = window.__mgpSettings || {};
     if (s.avoidTimecode === true) return true;
     if (s.avoidTimecode === false) return false;
@@ -1098,6 +1104,8 @@
   function moveTCDown() {
     const tc = qs('#mgp-tc');
     if (!tc || !videoContainer) return;
+    // 百度网盘：清掉可能残留的下移位移（换集 / 改设置后仍保持原位）
+    if (isBaiduHost() && !webFsActive) { tc.style.transition = ''; tc.style.transform = ''; return; }
     // 网页全屏：时间码位置参考浏览器全屏（从默认 8px 下移窗口宽 0.5%），不受回避开关影响
     if (webFsActive) {
       const r = rectForUI();

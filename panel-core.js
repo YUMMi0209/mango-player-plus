@@ -698,7 +698,15 @@ const MPP = (() => {
     if (els.togAll) els.togAll.checked = !onDefault && active;
     if (els.setRowAll) els.setRowAll.hidden = onDefault;
     // 时间码显示回避：未手动设置过时按站点默认（芒果TV开、其他站点关）
-    if (els.togAvoid) els.togAvoid.checked = settings.avoidTimecode === undefined ? isMgtv(res && res.host) : settings.avoidTimecode !== false;
+    // 百度网盘：页面端强制不回避，这里的开关置灰并说明（其他站点仍按设置）
+    const onBaidu = /^(pan|yun)\.baidu\.com$/.test((res && res.host) || '');
+    if (els.togAvoid) {
+      els.togAvoid.checked = onBaidu ? false
+        : (settings.avoidTimecode === undefined ? isMgtv(res && res.host) : settings.avoidTimecode !== false);
+      els.togAvoid.disabled = onBaidu;
+      const row = els.togAvoid.closest('.set-row');
+      if (row) row.title = onBaidu ? '百度网盘上固定不回避（站点自身没有会挡住时间码的悬浮 UI）' : '';
+    }
     // 打点自动截图功能已移除（打点不再自动截图）
     if (els.err) {
       els.err.innerHTML = settings.logEnabled === false
