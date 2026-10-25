@@ -1904,7 +1904,7 @@ const MPP = (() => {
   //   · 第 ③ 步先给「将导入 N 条 / 跳过 M 条」汇总，再列清单，导入按钮上带条数
   //   · Esc：能返回就返回，不能返回就关闭；Enter：下一步 / 导入
   //   · 文件可直接拖到弹窗任意位置；再拖一次即替换
-  // ctx: { meta, files: [{name, sheets}], cands, sheets, sheetHint, notice }
+  // ctx: { meta, files: [{name, sheets}], cands, sheets, sheetHint }
   function qcDialog(ctx) {
     const meta = ctx.meta || { duration: 0, fps: 25 };
     return new Promise(resolve => {
@@ -2119,8 +2119,7 @@ const MPP = (() => {
         setFiles(files);
       });
 
-      if (ctx.notice) { noticeEl.textContent = ctx.notice; noticeEl.hidden = false; }
-      showFile();
+        showFile();
       // 拖文件进来的（已带文件与候选）：直接落到该到的步骤，少点一次
       if (fileNames.length && cands.length === 1) stage = 3;
       else if (fileNames.length && cands.length > 1) stage = 2;
@@ -2341,7 +2340,7 @@ const MPP = (() => {
   }
 
   // 打开导入弹窗（历史栏「导入」按钮 / 拖入表格文件 / 非本插件导出文件都走这里）
-  // opts: { files:[{name,sheets,plugin}], notice }
+  // opts: { files:[{name,sheets,plugin}] }
   async function openQcImport(opts) {
     if (!window.QcImport) return false;
     opts = opts || {};
@@ -2355,7 +2354,6 @@ const MPP = (() => {
       cands: built.cands,
       sheets: built.sheetNames,
       sheetHint: built.hint,
-      notice: opts.notice || ''
     });
     if (!pick) return false;
     return applyQcPick(pick, meta);
@@ -2392,7 +2390,7 @@ const MPP = (() => {
       if (qcFiles.length) {
         // 非本插件导出的表格：直接进导入弹窗选工作表
         try {
-          await openQcImport({ files: qcFiles, notice: '这是外部表格：确认工作表后导入到当前视频' });
+          await openQcImport({ files: qcFiles });
         } catch (e) { }
         loadHistory();
         load(true);
@@ -2499,7 +2497,7 @@ const MPP = (() => {
     panelToast('已导入 ' + Object.keys(groups).length + ' 个视频 · ' + (pageAdded + impAdded) + ' 条记录');
     if (qcFiles.length) {
       try {
-        await openQcImport({ files: qcFiles, notice: '这是外部表格：确认工作表后导入到当前视频' });
+        await openQcImport({ files: qcFiles });
       } catch (e) { }
     }
     loadHistory();
