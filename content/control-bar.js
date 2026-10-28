@@ -1032,7 +1032,10 @@
       };
       const fpToTime = e => {
         if (!video || !webFsActive) return;
-        const rect = (fpWrap || fp).getBoundingClientRect();
+        // 用「轨道」而不是整个 wrap 做坐标换算：wrap 里现在有左右两个时长标签，
+        // 按 wrap 宽度映射会让拖动位置整体偏移（点 25% 实际落在 31%）
+        const rectEl = (qs('#mgp-fs-track') || fp);
+        const rect = rectEl.getBoundingClientRect();
         if (rect.width <= 0) return;
         const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
         const v = parseFloat(fp.min) + ratio * (parseFloat(fp.max) - parseFloat(fp.min));
