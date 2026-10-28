@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v4.2 使用教程</title>
+<title>芒着拉片 | MG Player+ v4.3 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v4.2</span>
+<span class="sub">使用教程 · v4.3</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -62,7 +62,8 @@ li{margin:4px 0}
 <tr><td><kbd>K</kbd></td><td>播放 / 暂停（并恢复常速）</td></tr>
 <tr><td><kbd>空格</kbd></td><td>恢复常速，不暂停</td></tr>
 <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>后退 / 前进一帧</td></tr>
-<tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>后退 / 前进 1 秒</td></tr>
+<tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd>、<kbd>↑</kbd> / <kbd>↓</kbd></td><td>后退 / 前进 1 秒</td></tr>
+<tr><td><kbd>,</kbd> / <kbd>.</kbd>（含中文输入法的 <kbd>，</kbd> <kbd>。</kbd>）</td><td>逐帧后退 / 前进</td></tr>
 <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>直播回退 / 前进 30 秒（仅芒果TV直播页）</td></tr>
 <tr><td><kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd></td><td>打入点 / 出点 / 标记点</td></tr>
 <tr><td><kbd>Shift</kbd>+<kbd>I</kbd> / <kbd>O</kbd> / <kbd>M</kbd></td><td>跳到最近的入点 / 出点 / 标记点</td></tr>
@@ -133,6 +134,8 @@ li{margin:4px 0}
 <li><kbd>S</kbd> 下载 PNG 并复制到剪贴板；<kbd>C</kbd> 只复制、不下载。<b>两者都不会暂停播放</b>；要「图里那一帧 = 嵌入时间码 = 文件名」严格同帧，用 <kbd>Shift + S</kbd> 的标注截图（它会停帧）。</li>
 <li><kbd>Shift</kbd>+<kbd>S</kbd> 标注截图：<b>拖拽标注</b>（矩形 / 椭圆 / 画笔，<kbd>B</kbd> 循环切换）、<b>点击加字</b>。下方工具条：<b>颜色</b>、<b>工具</b>、<b>粗细</b>（细 / 中 / 粗，三种工具都生效）、<b>字号</b>（小 / 中 / 大）、<b>嵌入时间码</b>开关、<b>撤销</b>、<b>取消</b>；右上角是「取消 / 复制 / 保存」。</li>
 <li>文字：输入时画面实时预览、超长自动折行；<b>贴边点击加字不会超出画面</b>（输入框自动翻到另一侧）；<b>编辑中点一下画面 = 完成当前输入</b>，不会再多开一个文本框。</li>
+<li><b>点选已有标注</b>（虚线外框 + 四角方块）后按 <kbd>Backspace</kbd> / <kbd>Delete</kbd> 删除它；<b>没选中时</b> <kbd>Backspace</kbd> 等同 <kbd>Z</kbd>（撤销最后一条）。</li>
+<li>标注窗口打开期间视频<b>强制暂停</b>（站点控件 / 快捷键 / 自动播放都按回去），关闭后恢复原来的播放状态。</li>
 <li>快捷键：<kbd>Z</kbd> 撤销、<kbd>C</kbd> 复制、<kbd>Enter</kbd> 保存、<kbd>Esc</kbd> 取消（编辑输入时为取消本次输入）。</li>
 <li>时间码按「此刻真正上屏的那一帧」计算（片源首帧 PTS 偏移会自动修正），所以状态栏的时间码、图片里嵌入的时间码、文件名里的时间码始终是同一帧。</li>
 </ul>
@@ -184,7 +187,7 @@ li{margin:4px 0}
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v4.2</span>
+<span>芒着拉片 | MG Player+ v4.3</span>
 <span>YUMMi</span>
 </footer>
 </div>

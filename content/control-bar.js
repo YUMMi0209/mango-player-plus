@@ -32,8 +32,38 @@
     recordingStart: null
   };
 
+  // 百度网盘：播放器不换页就换视频，URL 永远是同一个路径 —— 用「媒体地址（去掉签名参数）
+  // + 页面标题」区分具体视频，否则不同视频的日志会混在同一个 key 下
+  function baiduMediaKey() {
+    const v = window.__mgp_video || video;
+    let src = '';
+    try {
+      src = (v && (v.currentSrc || v.src)) || '';
+      if (!src && v) { const sc = v.querySelector('source'); if (sc) src = sc.src || ''; }
+    } catch (e) { }
+    let base = '';
+    if (src) {
+      try {
+        const u = new URL(src, location.href);
+        base = u.pathname.split('/').filter(Boolean).pop() || u.pathname;
+      } catch (e) { base = String(src).slice(0, 120); }
+    }
+    let title = '';
+    try { title = String(document.title || '').replace(/\s*[-|_]\s*百度网盘.*$/, '').trim(); } catch (e) { }
+    if (!base && !title) return '';
+    const seed = base + '|' + title;
+    let h = 5381;
+    for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0;
+    return 'bd:' + (h >>> 0).toString(36) + (base ? ':' + base.slice(0, 40) : ':' + title.slice(0, 24));
+  }
+
   // ─── Persistence（状态与记录均按视频独立）──────
   function videoKey() {
+    // 百度网盘：优先按媒体地址 + 标题区分（播放器不换页，路径无法区分）
+    if (/^(pan|yun)\.baidu\.com$/.test(location.hostname)) {
+      const bk = baiduMediaKey();
+      if (bk) return bk;
+    }
     // 芒果TV 播放页 /项目ID/分期ID.html → id:项目ID_分期ID（两个 ID 都取）
     const m = location.pathname.match(/(\d+)\/(\d+)\.html$/);
     if (m) return 'id:' + m[1] + '_' + m[2];
@@ -95,8 +125,10 @@
     return map;
   }
 
+  let logsKey = '';   // 当前 logs 属于哪个视频 key（切换视频/换集时更新）
   function loadLogs() {
-    const e = readLogsMap()[videoKey()];
+    logsKey = videoKey();
+    const e = readLogsMap()[logsKey];
     logs = (e && Array.isArray(e.inOut) && Array.isArray(e.marks))
       ? { inOut: e.inOut, marks: e.marks } : { inOut: [], marks: [] };
     // 标记 / 片段按时间码先后排列（兼容历史乱序数据）
@@ -115,7 +147,8 @@
     window.__mgp_logs = logs;
     try {
       const map = readLogsMap();
-      map[videoKey()] = { inOut: logs.inOut, marks: logs.marks };
+      // 存回「加载这份 logs 时的 key」：切换视频的瞬间也不会把 A 的记录写到 B 名下
+      map[logsKey || videoKey()] = { inOut: logs.inOut, marks: logs.marks };
       localStorage.setItem(LOGS_KEY, JSON.stringify(map));
     } catch (e) { }
     // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
@@ -218,8 +251,15 @@
   height:46px;padding:8px 8px 0;
   color:#ccc;font-size:12px;user-select:none;
 }
-.mgp-side-btn{
+/* 侧边按钮列：左列 = 截图 / 网页全屏，右列 = 录制 / 侧边栏；整列垂直居中 */
+.mgp-side-col{
   position:absolute;top:50%;transform:translateY(-50%);z-index:2147483647;
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;
+}
+.mgp-side-col.left{left:1%}
+.mgp-side-col.right{right:1%}
+.mgp-side-btn{
+  position:relative;   /* 供 hover 气泡定位 */
   background:rgba(0,0,0,.55);
   border:1px solid rgba(255,255,255,.1);color:#ccc;cursor:pointer;
   border-radius:6px;font-size:12px;font-family:inherit;
@@ -228,11 +268,8 @@
   flex-shrink:0;padding:8px;opacity:0;pointer-events:none;
 }
 /* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
-#mgp-bar.show-btns ~ .mgp-side-btn,
-#mgp-bar.recording ~ .mgp-side-btn{opacity:1;pointer-events:auto}
-/* 距视频边框边距统一为视频宽度的 1% */
-#mgp-btn-ss{left:1%}
-#mgp-btn-rec{right:1%}
+#mgp-bar.show-btns ~ .mgp-side-col .mgp-side-btn,
+#mgp-bar.recording ~ .mgp-side-col .mgp-side-btn{opacity:1;pointer-events:auto}
 .mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
 .mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
 /* hover 提示：视觉样式与时间码气泡一致；截图在左向右弹、录制在右向左弹 */
@@ -244,8 +281,8 @@
   border:1px solid rgba(255,255,255,.12);letter-spacing:0;
 }
 .mgp-side-btn:hover::after{opacity:1}
-#mgp-btn-ss::after{left:calc(100% + 8px)}
-#mgp-btn-rec::after{right:calc(100% + 8px)}
+.mgp-side-col.left .mgp-side-btn::after{left:calc(100% + 8px)}
+.mgp-side-col.right .mgp-side-btn::after{right:calc(100% + 8px)}
 .mgp-icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 #mgp-tc{
   display:flex;align-items:center;gap:5px;
@@ -266,11 +303,20 @@
    长度左右各缩短 8px（背景槽与进度条等宽，间距通过缩短进度条实现） */
 #mgp-fs-wrap{
   position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
-  width:calc(min(72vw,680px) - 16px);height:16px;z-index:2147483647;
-  display:none;pointer-events:none;
+  width:calc(min(78vw,780px) - 16px);height:16px;z-index:2147483647;
+  display:none;pointer-events:none;align-items:center;gap:12px;
   transition:width .25s ease;
 }
-:host(.fs-on) #mgp-fs-wrap{display:block}
+:host(.fs-on) #mgp-fs-wrap{display:flex}
+/* 左右时长：HH:MM:SS，等宽数字，与进度条同一行 */
+#mgp-fs-cur,#mgp-fs-dur{
+  position:relative;z-index:1;flex-shrink:0;
+  font-size:12px;line-height:1;color:#e9e9ee;letter-spacing:.5px;
+  font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+  font-variant-numeric:tabular-nums;text-shadow:0 1px 2px rgba(0,0,0,.6);
+  padding:0 6px;
+}
+#mgp-fs-bar{position:relative;flex:1;min-width:0;height:16px}
 /* 深色背景槽：让进度条在明亮画面中也清晰可见（置于最底层，轨道显示在槽上方） */
 #mgp-fs-wrap::before{
   content:'';position:absolute;top:50%;left:0;right:0;height:32px;transform:translateY(-50%);
@@ -279,12 +325,12 @@
 }
 /* 自绘轨道：绝对定位垂直居中（不受浏览器 input track 布局差异影响），左右与 input 对齐（各 16px 空隙） */
 #mgp-fs-track{
-  position:absolute;top:50%;left:16px;right:16px;height:4px;transform:translateY(-50%);
+  position:absolute;top:50%;left:8px;right:8px;height:4px;transform:translateY(-50%);
   border-radius:2px;z-index:0;pointer-events:none;
   background:linear-gradient(to right, #ff5f00 0%, #ff5f00 var(--fill), rgba(255,255,255,.22) var(--fill));
 }
 #mgp-fs-progress{
-  position:relative;z-index:1;display:block;width:calc(100% - 32px);height:16px;pointer-events:auto;
+  position:relative;z-index:1;display:block;width:calc(100% - 16px);height:16px;pointer-events:auto;
   -webkit-appearance:none;appearance:none;cursor:pointer;
   background:transparent;outline:none;margin:0 auto;padding:0;--fill:0%;
 }
@@ -383,8 +429,22 @@
 @keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
 `;
 
-  // 弹幕容器类名统一含 danmu / danmaku，属性选择器兜底匹配（屏蔽弹幕开关与设置一并隐藏）
-  const DANMU_CSS = '[class*="danmu"],[class*="danmaku"],[id*="danmu"],[id*="danmaku"]{display:none!important}';
+  // 屏蔽弹幕：只隐藏「弹幕层」本身。
+  // 之前是裸的 [class*="danmu"] / [id*="danmu"]，会把控制栏里带 danmu 字样的容器
+  // （弹幕发送框、弹幕开关、甚至整条控制栏：如 player-control-danmu-wrap）一起 display:none，
+  // 表现为「芒果TV 自带的进度条和控制栏消失」（默认开启，所以首次安装就会遇到）。
+  // 现在：只匹配 canvas 弹幕层，以及类名里明确是 layer / wrap / container / box / list 的容器，
+  // 并且显式排除控制栏、按钮、菜单、开关等交互元素。
+  const DANMU_NOT_CTRL = ':not([class*="control"]):not([class*="ctrl"]):not([class*="btn"]):not([class*="button"])' +
+    ':not([class*="bar"]):not([class*="menu"]):not([class*="switch"]):not([class*="toggle"])' +
+    ':not([class*="progress"]):not([class*="seek"])';
+  const DANMU_CSS = [
+    'canvas[class*="danmu"],canvas[class*="danmaku"],[id*="danmu-canvas"],[id*="danmaku-canvas"]{display:none!important}',
+    '[class*="danmu-layer"]' + DANMU_NOT_CTRL + ',[class*="danmaku-layer"]' + DANMU_NOT_CTRL + '{display:none!important}',
+    '[class*="danmu-wrap"]' + DANMU_NOT_CTRL + ',[class*="danmaku-wrap"]' + DANMU_NOT_CTRL + '{display:none!important}',
+    '[class*="danmu-container"]' + DANMU_NOT_CTRL + ',[class*="danmu-box"]' + DANMU_NOT_CTRL + ',[class*="danmu-list"]' + DANMU_NOT_CTRL + '{display:none!important}',
+    '[id*="danmu-layer"]' + DANMU_NOT_CTRL + ',[id*="danmaku-layer"]' + DANMU_NOT_CTRL + '{display:none!important}'
+  ].join('');
 
   const HTML = `
 <div id="mgp-bar">
@@ -394,17 +454,31 @@
   </span>
 </div>
 <div id="mgp-fs-wrap">
-  <div id="mgp-fs-track"></div>
-  <input id="mgp-fs-progress" type="range" min="0" max="0" value="0" step="0.01">
-  <span id="mgp-fs-tip"></span>
+  <span id="mgp-fs-cur">00:00:00</span>
+  <div id="mgp-fs-bar">
+    <div id="mgp-fs-track"></div>
+    <input id="mgp-fs-progress" type="range" min="0" max="0" value="0" step="0.01">
+    <span id="mgp-fs-tip"></span>
+  </div>
+  <span id="mgp-fs-dur">00:00:00</span>
 </div>
-<button id="mgp-btn-ss" class="mgp-side-btn" data-tip="截图 (S)">
-  <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
-</button>
-<button id="mgp-btn-rec" class="mgp-side-btn" data-tip="录制 (R)">
-  <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
-  <span id="mgp-rec-dot"></span>
-</button>
+<div class="mgp-side-col left">
+  <button id="mgp-btn-ss" class="mgp-side-btn" data-tip="截图 (S)">
+    <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
+  </button>
+  <button id="mgp-btn-fs" class="mgp-side-btn" data-tip="网页全屏 (P)">
+    <svg class="mgp-icon" viewBox="0 0 16 16"><path d="M6 2.5H2.5V6"/><path d="M10 2.5h3.5V6"/><path d="M6 13.5H2.5V10"/><path d="M10 13.5h3.5V10"/></svg>
+  </button>
+</div>
+<div class="mgp-side-col right">
+  <button id="mgp-btn-rec" class="mgp-side-btn" data-tip="录制 (R)">
+    <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
+    <span id="mgp-rec-dot"></span>
+  </button>
+  <button id="mgp-btn-side" class="mgp-side-btn" data-tip="打开侧边栏">
+    <svg class="mgp-icon" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="2"/><path d="M10 3v10"/></svg>
+  </button>
+</div>
 `;
 
   let shadow, wrapper, video, videoContainer,
@@ -876,6 +950,28 @@
     // 所以「回调滞后」归零、按精确值读数 —— 否则会把高倍速时测到的滞后带到 1x 的新位置上，
     // 时间码凭空多出几帧（视频开头显示第 3 帧的另一种成因）
     video.addEventListener('seeked', () => { frameLag = 0; frameBasisExact = true; });
+    // 同一个页面里换了视频（百度网盘切换文件、站点换集）：key 变了立刻重载记录，
+    // 否则新视频会沿用上一个视频的记录（表现为「日志混在一起」）
+    let lastVkey = '';
+    const syncVideoKey = () => {
+      const k = videoKey();
+      if (!k || k === lastVkey) return false;
+      lastVkey = k;
+      try { loadLogs(); } catch (e) { }
+      try { updateTC(); } catch (e) { }
+      return true;
+    };
+    lastVkey = videoKey();
+    ['loadstart', 'emptied', 'loadedmetadata'].forEach(ev => {
+      video.addEventListener(ev, () => { try { syncVideoKey(); } catch (e) { } });
+    });
+    window.__mgpSyncVideoKey = syncVideoKey;
+    // 标注窗口打开期间：任何来源的 play()（站点控件 / 键盘 / 自动播放）都立刻暂停
+    ['play', 'playing'].forEach(ev => {
+      video.addEventListener(ev, () => {
+        if (annHost && video && !video.paused) { try { video.pause(); } catch (e) { } }
+      });
+    });
     video.addEventListener('ended', onVideoEnded);
     bindEvents();
     startLoop();
@@ -912,6 +1008,11 @@
     // 变成「点按钮只复制、不下载」（与 S 键行为不一致）
     qs('#mgp-btn-ss').addEventListener('click', () => captureScreenshot(false));
     qs('#mgp-btn-rec').addEventListener('click', toggleRecording);
+    // 侧边按钮：网页全屏（等同 P）/ 打开侧边栏
+    const fsBtn = qs('#mgp-btn-fs');
+    if (fsBtn) fsBtn.addEventListener('click', () => toggleWebFsKey());
+    const sideBtn = qs('#mgp-btn-side');
+    if (sideBtn) sideBtn.addEventListener('click', () => requestSidePanel());
     // 网页全屏进度条：拖动实时同步跳转；按住不动 1 秒拉长进度条（撑满左右 1% 边距，±30s 精细调整），松开恢复
     // 鼠标拖动为手动实现（Chromium 自定义 appearance 的 range 鼠标原生拖动失效，触屏正常）
     const fp = qs('#mgp-fs-progress');
@@ -2157,6 +2258,7 @@
   let lutMode = 'rec709';   // 当前档位（运行时不落盘：刷新页面回到 REC.709）
   let activeEndDrag = null; // 当前进度条退出处理（换集/重建时先注销旧监听，防泄漏）
   function enterWebFs() {
+    setTimeout(() => { try { syncFsProgress(); } catch (e) { } }, 60);
     // 使用独立视频引用：视频控制关闭后控制栏被移除（video 变量置空），
     // 此时回退到页面当前视频元素，网页全屏仍可用
     const v = video || window.__mgp_video || document.querySelector('video');
@@ -2230,6 +2332,18 @@
   }
   // 网页全屏悬浮进度条：按可回退/播放范围同步位置与已播放填充
   // 拖动中不回写 value（thumb 跟随鼠标，画面实时 seek）；长按拉长后保持 ±30s 范围
+  // HH:MM:SS（不足一小时也补零）：网页全屏进度条两端的时长用它
+  function fmtHMS(sec) {
+    const t = Math.max(0, Math.floor(isFinite(sec) ? sec : 0));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), ss = t % 60;
+    const pad = v => (v < 10 ? '0' : '') + v;
+    return pad(h) + ':' + pad(m) + ':' + pad(ss);
+  }
+  function setFsTimes(curSec, totalSec) {
+    const cur = qs('#mgp-fs-cur'), dur = qs('#mgp-fs-dur');
+    if (cur) { const t = fmtHMS(curSec); if (cur.textContent !== t) cur.textContent = t; }
+    if (dur) { const t = fmtHMS(totalSec); if (dur.textContent !== t) dur.textContent = t; }
+  }
   function syncFsProgress() {
     const p = qs('#mgp-fs-progress');
     const trackEl = qs('#mgp-fs-track');
@@ -2239,6 +2353,8 @@
       const v = parseFloat(p.value);
       const pct = p.max > p.min ? ((v - p.min) / (p.max - p.min)) * 100 : 0;
       setFill(pct);
+      // 拖动中：左边显示拖到的时间，右边始终是总时长
+      setFsTimes(v, (video && isFinite(video.duration)) ? video.duration : p.max);
       return;
     }
     const r = seekableRange();
@@ -2251,6 +2367,9 @@
       if (Math.abs(p.value - ct) > 0.001) p.value = ct;
     }
     setFill(((ct - r.start) / (r.end - r.start)) * 100);
+    // 左：当前播放时间；右：总时长（优先 video.duration，拿不到时用可回退范围末端）
+    const total = (video && isFinite(video.duration) && video.duration > 0) ? video.duration : r.end;
+    setFsTimes(ct, total);
   }
   document.addEventListener('keydown', e => {
     if (annHost) return;   // 标注窗口打开期间：Esc 由标注窗口接管
@@ -2380,9 +2499,38 @@
     if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); openAnnotate(); return; }
     if (e.shiftKey) return;
 
+    // 逐帧：中文输入法（macOS 默认拼音）会把 , . 变成全角「，」「。」，e.key 跟着变，
+    // 只认半角就会「按了没反应」。这里同时认全角字符与物理键位（e.code），键盘布局/输入法都不影响
+    const kPrevFrame = e.key === ',' || e.key === '，' || e.key === '､' || e.code === 'Comma';
+    const kNextFrame = e.key === '.' || e.key === '。' || e.code === 'Period';
+    if (kPrevFrame) {
+      e.preventDefault();
+      video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1 / FPS);
+      mgpToast('前一帧 ( ' + fmtTC(dispTime()) + ' )', true);
+      return;
+    }
+    if (kNextFrame) {
+      e.preventDefault();
+      video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1 / FPS);
+      mgpToast('后一帧 ( ' + fmtTC(dispTime()) + ' )', true);
+      return;
+    }
+
+    // ↑ / ↓：后退 / 前进 1 秒（与 PageUp / PageDown 同义，单手更顺手）
+    if (e.key === 'ArrowUp' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1);
+      mgpToast('后退 1s ( ' + fmtTC(dispTime()) + ' )', true);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.code === 'ArrowDown') {
+      e.preventDefault();
+      video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1);
+      mgpToast('前进 1s ( ' + fmtTC(dispTime()) + ' )', true);
+      return;
+    }
+
     switch (e.key) {
-      case ',': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1/FPS); mgpToast('前一帧 ( ' + fmtTC(dispTime()) + ' )'); break;
-      case '.': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/FPS); mgpToast('后一帧 ( ' + fmtTC(dispTime()) + ' )'); break;
       // PageUp / PageDown：后退 / 前进 1 秒；preventDefault 阻止浏览器默认翻页滚动
       case 'PageDown': e.preventDefault(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1); mgpToast('前进 1s ( ' + fmtTC(dispTime()) + ' )'); break;
       case 'PageUp': e.preventDefault(); video.currentTime = Math.max(getSeekableStart(), video.currentTime - 1); mgpToast('后退 1s ( ' + fmtTC(dispTime()) + ' )'); break;
@@ -2469,8 +2617,16 @@
     if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用LUT：' + (window.MPGLut.name(d.name) || d.name), true);
   });
 
+  // 打开侧边栏：MAIN world 拿不到 chrome API，经桥转给后台（后台先试 sidePanel.open，
+  // 失败则退回独立窗口版侧边栏，两者同一套 UI）
+  function requestSidePanel() {
+    try { window.postMessage({ __mgp: 'sidePanel' }, '*'); } catch (e) { }
+    try { mgpToast('正在打开侧边栏…', true); } catch (e) { }
+  }
+
   // ─── Shift+S 标注截图：截图 → 弹窗标注（主题色矩形 / 白边主题色文本）→ Enter 保存 / Esc 取消 ──
   const ANN_THEME = '#ff5f00';   // 标注主题色：与插件强调色一致（红框红字，白边不变）
+  const ANN_SEL = '#ffd400';     // 选中标注的外框色（与主题色区分，避免和标注混在一起）
   let annHost = null;      // 标注窗口宿主（light DOM 遮罩，shadow 内承载 UI）
   let annOpening = false;  // 正在取图/校准（异步）：用来挡住这段时间里的重复触发
   let annSource = null;    // 截图原图 canvas（标注重绘底图，不被修改）
@@ -2493,6 +2649,8 @@
   let annFontIdx = 1;            // 字号档位：0 小 / 1 中 / 2 大（默认中）
   let annStroke = null;          // 正在画的笔画 {color, w, pts:[{x,y}]}
   let annFitHandler = null;      // 窗口 resize 时重新适配标注窗口
+  let annSel = -1;               // 当前选中的标注下标（-1 = 未选中）
+  let annWasPlaying = false;     // 打开标注窗口前视频是否在播（关闭时恢复）
   let annFileName = '';
   let annShowTC = false;   // 是否在截图右上角嵌入当前画面时间码（设置记忆，默认关）
   let annTC = '';          // 嵌入的时间码文本（进入标注时捕获，HH:MM:SS:FF）
@@ -2513,9 +2671,33 @@
       e.stopPropagation();
       if (annAnnots.length) {
         annAnnots.pop();
+        if (annSel >= annAnnots.length) annSel = -1;
         annRedraw();
         try { mgpToast('已撤销标注', true); } catch (err) { }
       }
+      return;
+    }
+    // Backspace / Delete：有选中就删选中，没选中就等同 Z（撤销最后一条）
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (annSel >= 0 && annAnnots[annSel]) {
+        annAnnots.splice(annSel, 1);
+        annSel = -1;
+        annRedraw();
+        try { mgpToast('已删除选中的标注', true); } catch (err) { }
+      } else if (annAnnots.length) {
+        annAnnots.pop();
+        annSel = -1;
+        annRedraw();
+        try { mgpToast('已撤销标注', true); } catch (err) { }
+      }
+      return;
+    }
+    // 空格：标注窗口里不放行（否则会触发站点播放器的播放/暂停）
+    if (e.key === ' ' || e.code === 'Space' || e.key === 'Spacebar') {
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     // B：在「矩形 → 椭圆 → 画笔」之间循环
@@ -2539,8 +2721,10 @@
     if (e.key !== 'Enter' && e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
-    if (e.key === 'Enter') annClose(true);
-    else annClose(false);
+    if (e.key === 'Enter') { annClose(true); return; }
+    // Esc：先取消选中，再退一步（取消输入），最后才关窗口
+    if (annSel >= 0) { annSel = -1; annRedraw(); return; }
+    annClose(false);
   };
   document.addEventListener('keydown', annWinKey, true);
 
@@ -2610,6 +2794,8 @@
         annStrokePath(a.pts, a.color, a.w, 1);
       }
     }
+    // 选中的标注：虚线外框 + 四角方块（点击选中后才显示）
+    if (annSel >= 0 && annAnnots[annSel]) annDrawSel(annAnnots[annSel]);
     // 正在画的笔画：实时显示（白边 + 标注色，与最终一致）
     if (annStroke && annStroke.pts.length > 1) {
       annStrokePath(annStroke.pts, annStroke.color, annStroke.w, 1);
@@ -2727,6 +2913,87 @@
     ctx.restore();
   }
 
+  // 标注的包围盒（图像坐标）：用于命中测试与选中框
+  function annBounds(a) {
+    if (!a) return null;
+    if (a.type === 'rect' || a.type === 'ellipse') return { x: a.x, y: a.y, w: a.w, h: a.h };
+    if (a.type === 'text') {
+      const L = annLayoutText(a.text, a.x, a.y, a.fs);
+      const lines = (L && L.lines) ? L.lines : [];
+      const widest = (L && L.widest) || Math.max(1, a.fs);
+      return { x: L ? L.x : a.x, y: (L ? L.y : a.y) - a.fs, w: widest, h: Math.max(1, lines.length || 1) * (L ? L.lh : a.fs * 1.25) };
+    }
+    if (a.type === 'stroke' && a.pts && a.pts.length) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      a.pts.forEach(pt => {
+        if (pt.x < x0) x0 = pt.x; if (pt.x > x1) x1 = pt.x;
+        if (pt.y < y0) y0 = pt.y; if (pt.y > y1) y1 = pt.y;
+      });
+      const pad = Math.max(3, (a.w || 4) / 2);
+      return { x: x0 - pad, y: y0 - pad, w: (x1 - x0) + pad * 2, h: (y1 - y0) + pad * 2 };
+    }
+    return null;
+  }
+  // 点到线段的距离（笔画命中测试用）
+  function distToSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+  // 命中测试：后画的优先；矩形/椭圆按「边框附近」判定（点到边线距离），
+  // 文字按包围盒，笔画按折线距离 —— 这样在已有框内部仍能继续画新框
+  function annHitTest(pt) {
+    const slop = Math.max(8, Math.round(((annSource && annSource.width) || 1280) / 200));
+    for (let i = annAnnots.length - 1; i >= 0; i--) {
+      const a = annAnnots[i], b = annBounds(a);
+      if (!b) continue;
+      if (a.type === 'rect') {
+        const near = (x, y) => (x > b.x - slop && x < b.x + b.w + slop && y > b.y - slop && y < b.y + b.h + slop)
+          && !(x > b.x + slop && x < b.x + b.w - slop && y > b.y + slop && y < b.y + b.h - slop);
+        if (near(pt.x, pt.y)) return i;
+      } else if (a.type === 'ellipse') {
+        const rx = Math.max(1, b.w / 2), ry = Math.max(1, b.h / 2);
+        const nx = (pt.x - (b.x + rx)) / rx, ny = (pt.y - (b.y + ry)) / ry;
+        const d = Math.hypot(nx, ny);
+        const band = slop / Math.max(rx, ry);
+        if (Math.abs(d - 1) <= Math.max(band, 0.06)) return i;
+      } else if (a.type === 'text') {
+        if (pt.x >= b.x - slop && pt.x <= b.x + b.w + slop && pt.y >= b.y - slop && pt.y <= b.y + b.h + slop) return i;
+      } else if (a.type === 'stroke') {
+        const tol = Math.max(6, (a.w || 4) * 0.8);
+        for (let k = 1; k < a.pts.length; k++) {
+          if (distToSeg(pt.x, pt.y, a.pts[k - 1].x, a.pts[k - 1].y, a.pts[k].x, a.pts[k].y) <= tol) return i;
+        }
+      }
+    }
+    return -1;
+  }
+  // 选中标注的外框（虚线 + 四角小方块）
+  function annDrawSel(a) {
+    const b = annBounds(a);
+    if (!b || !annCtx) return;
+    const ctx = annCtx;
+    const pad = Math.max(4, Math.round(((annSource && annSource.width) || 1280) / 220));
+    const x = b.x - pad, y = b.y - pad, w = b.w + pad * 2, h = b.h + pad * 2;
+    const lw = Math.max(2, Math.round(((annSource && annSource.width) || 1280) / 640));
+    ctx.save();
+    ctx.setLineDash([Math.max(6, lw * 4), Math.max(4, lw * 3)]);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = ANN_SEL;
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    // 四角实心小方块，强调「已选中」
+    const s2 = Math.max(5, lw * 3);
+    ctx.fillStyle = ANN_SEL;
+    [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([cx, cy]) => {
+      ctx.fillRect(cx - s2 / 2, cy - s2 / 2, s2, s2);
+    });
+    ctx.restore();
+  }
   // 画一条笔画：圆头圆角 + 白色描边打底（亮/暗画面上都看得清）
   function annStrokePath(pts, color, w, alpha) {
     if (!annCtx || !pts || pts.length < 2) return;
@@ -2862,6 +3129,12 @@
     if (annHost && annHost.parentElement) annHost.parentElement.removeChild(annHost);
     annHost = null; annSource = null; annCanvas = null; annCtx = null;
     annAnnots = []; annDrag = null; annPendingText = null; annTextInput = null; annFileName = '';
+    annSel = -1;
+    // 关闭标注窗口：恢复打开前的播放状态（此时 annHost 已置空，不会被暂停守卫拦下）
+    if (annWasPlaying && video) {
+      try { video.play().catch(() => { }); } catch (e) { }
+    }
+    annWasPlaying = false;
     if (annFitHandler) { window.removeEventListener('resize', annFitHandler); annFitHandler = null; }
     try { delete window.__mgpAnnDebug; } catch (e) { window.__mgpAnnDebug = null; }
   }
@@ -2873,6 +3146,8 @@
     // 否则连按两次 Shift+S 会开出两个标注窗口、后开的那个把先开的顶掉，窗口就关不掉了
     if (annOpening) return;
     if (recordingInternal) { mgpToast('录制中无法标注截图'); return; }
+    // 先记下「打开前是否在播」：后面冻结帧 / 构建窗口都会暂停视频，晚了就记不到真实状态
+    annWasPlaying = !!(video && !video.paused);
     annOpening = true;
     // 直播模式下：嵌入的系统时间取「按下的那一刻」（校准要几百毫秒，晚了就不准）
     const rtSnap = rtOn() ? fmtTC(rtSeconds(), true, RT_FPS) : '';
@@ -2975,7 +3250,7 @@
     win.innerHTML =
       '<div class="ann-head">' +
         '<span class="ann-title">标注截图</span>' +
-        '<span class="ann-tip">拖拽标注 · 点击加字</span>' +
+        '<span class="ann-tip">拖拽标注 · 点击加字 · 点选可删除（Backspace）</span>' +
         '<span class="ann-grow"></span>' +
         '<button type="button" class="ann-btn ghost" id="ann-cancel" title="取消（Esc）">取消 (Esc)</button>' +
         '<button type="button" class="ann-btn ghost" id="ann-copy" title="复制到剪贴板（C）">复制 (C)</button>' +
@@ -3052,6 +3327,9 @@
     canvas.height = annSource.height;
     annCtx = canvas.getContext('2d');
     annAnnots = [];
+    annSel = -1;
+    // 标注期间视频必须保持暂停（openAnnotate 已记下打开前是否在播，关闭时恢复）
+    try { if (video) video.pause(); } catch (e) { }
     // 按实测可用空间等比缩放（原始像素不缩放，坐标按 scale 换算）：整窗不出滚动条
     annFitToViewport();
     annRedraw();
@@ -3073,12 +3351,14 @@
       const p = annPos(e);
       // 画笔模式：按下开始一条自由笔画；若整段位移很小则视为「单击」→ 加字
       if (annTool === 'pen') {
+        annSel = -1;
         annStroke = { color: annColor, w: annBrushWidth(), pts: [p], moved: 0 };
         try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
         annRedraw();
         return;
       }
       // 矩形模式：拖拽画框，单击加字
+      annSel = -1;
       annDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
       annDragged = false;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
@@ -3113,6 +3393,14 @@
         if (!last || Math.hypot(p2.x - last.x, p2.y - last.y) > 0.5) sp.pts.push(p2);
         // 几乎没移动 → 当作单击：加字（画笔模式也支持单击输入文本）
         if (sp.moved < 4) {
+          const hit = annHitTest(p2);
+          if (hit >= 0) {
+            annSel = hit;
+            annRedraw();
+            try { mgpToast('已选中标注 · Backspace 删除', true); } catch (e) { }
+            return;
+          }
+          annSel = -1;
           annRedraw();
           annStartText(p2);
           return;
@@ -3138,8 +3426,17 @@
           annRedraw();
         }
       } else {
-        // 点击 → 在该位置打开文本标注输入框（位置会收进画面内）
-        annStartText(p);
+        // 点击：先看是否点到已有标注 → 选中它（Backspace 可删）；否则在该位置加字
+        const hit = annHitTest(p);
+        if (hit >= 0) {
+          annSel = hit;
+          annRedraw();
+          try { mgpToast('已选中标注 · Backspace 删除', true); } catch (e) { }
+        } else {
+          annSel = -1;
+          annRedraw();
+          annStartText(p);
+        }
       }
     });
     // 文本输入：Enter 确认标注 / Esc 取消输入；失焦确认（点保存按钮时文本先落定）
@@ -3169,6 +3466,8 @@
         canvas: { left: cRect.left, top: cRect.top, right: cRect.right, bottom: cRect.bottom,
           w: canvas.clientWidth, h: canvas.clientHeight, pxW: canvas.width, pxH: canvas.height, scale: annScale },
         layout: L,
+        sel: annSel,
+        playing: video ? !video.paused : null,
         stroke: annStroke ? { moved: Math.round(annStroke.moved), n: annStroke.pts.length } : null,
         dragging: !!annDrag,
         color: annColor,

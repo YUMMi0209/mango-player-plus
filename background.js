@@ -61,6 +61,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg && msg.type === 'openSidePanel') {
+    // 页面按钮触发：先试浏览器原生侧边栏（需用户手势，失败就退回独立窗口版，UI 相同）
+    const tabId = sender && sender.tab && sender.tab.id;
+    const fallback = () => chrome.windows.create({
+      url: 'sidebar.html?win=1', type: 'popup', width: 430, height: 680, focused: true
+    }).catch(() => { });
+    Promise.resolve()
+      .then(() => (tabId != null && chrome.sidePanel && chrome.sidePanel.open)
+        ? chrome.sidePanel.open({ tabId }).catch(() => { throw new Error('no-gesture'); })
+        : Promise.reject(new Error('no-sidepanel')))
+      .then(() => sendResponse({ ok: true, mode: 'sidebar' }))
+      .catch(() => { fallback(); sendResponse({ ok: true, mode: 'window' }); });
+    return true;
+  }
   if (msg && msg.type === 'saveSettings' && msg.patch && typeof msg.patch === 'object') {
     getSettings().then(s => {
       Object.assign(s, msg.patch);

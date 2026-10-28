@@ -50,6 +50,9 @@
         }).catch(() => {
           window.postMessage({ __mgp: 'lutData', name: id, error: 'fetch-failed' }, '*');
         });
+      } else if (d.__mgp === 'sidePanel') {
+        // 页面端「打开侧边栏」按钮：转给后台处理（sidePanel.open 需要用户手势，后台统一兜底）
+        chrome.runtime.sendMessage({ type: 'openSidePanel' }).catch(() => { });
       } else if (d.__mgp === 'settings' && d.patch && typeof d.patch === 'object') {
         // 页面端（标注截图嵌入时间码开关等）经桥保存设置：
         // 仅接受白名单字段并强制布尔化，防页面脚本伪造设置污染扩展存储
