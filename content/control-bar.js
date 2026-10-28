@@ -1013,7 +1013,8 @@
     if (fsBtn) fsBtn.addEventListener('click', () => toggleWebFsKey());
     const sideBtn = qs('#mgp-btn-side');
     if (sideBtn) sideBtn.addEventListener('click', () => requestSidePanel());
-    // 网页全屏进度条：拖动实时同步跳转；按住不动 1 秒拉长进度条（撑满左右 1% 边距，±30s 精细调整），松开恢复
+    // 网页全屏进度条：普通进度条 —— 按下定位、拖动跟随、松开回落到实际播放位置。
+    // （已取消原来「按住不动 1 秒拉长进度条、进入 ±30s 精细调整」的功能）
     // 鼠标拖动为手动实现（Chromium 自定义 appearance 的 range 鼠标原生拖动失效，触屏正常）
     const fp = qs('#mgp-fs-progress');
     if (fp) {
@@ -1040,96 +1041,34 @@
         video.currentTime = v;
         showTip();
       };
-      // 微调手势：分段线性映射（锚定进入微调时的鼠标位置与播放头位置）——
-      // 鼠标不动则播放头不动（从中间位置开始移动，不跳变）；
-      // 鼠标移到画面最左侧 → 播放头到进度条最左侧，最右侧同理；
-      // 屏幕有限时也能到达两端（进入微调时鼠标位置即为两段映射的锚点）
-      const fpGesture = e => {
-        if (!video || !webFsActive || !fsDragState || !fsDragState.extended) return;
-        const lo = parseFloat(fp.min), hi = parseFloat(fp.max);
-        if (!(hi > lo)) return;
-        const x = e.clientX, W = window.innerWidth, ent = fsDragState.startX;
-        const a = fsDragState.anchor;
-        let v;
-        if (x <= ent) {
-          v = ent > 0 ? lo + (x / ent) * (a - lo) : a;
-        } else {
-          v = W > ent ? a + ((x - ent) / (W - ent)) * (hi - a) : a;
-        }
-        v = Math.max(lo, Math.min(hi, v));
-        if (Math.abs(parseFloat(fp.value) - v) > 0.001) fp.value = v;
-        video.currentTime = v;
-        showTip();
-      };
       fp.addEventListener('input', () => {
         if (!video || !webFsActive) return;
         const v = parseFloat(fp.value);
         if (!isNaN(v) && isFinite(v)) video.currentTime = v;
       });
-      // 拉长（进入微调）：任意操作后静止 1 秒触发（含先拖动调整再停住）；
-      // 微调基准取触发时刻的播放位置（anchor）
-      const extendFn = () => {
-        if (!fsDragState || fsDragState.extended) return;
-        fsDragState.extended = true;
-        const a = video ? video.currentTime : fsDragState.anchor;
-        fsDragState.anchor = a;
-        const rr = fsDragState.range;
-        const lo = Math.max(rr.start, a - 30), hi = Math.min(rr.end, a + 30);
-        if (hi > lo) { fp.min = lo; fp.max = hi; }
-        // 进度条拉长到与两侧截图/录制按钮对齐（容器宽度变化，带 transition 动画）
-        if (fpWrap) fpWrap.style.width = 'calc(100% - 2%)';
-        // 播放头从当前位置动画移动到进度条中间（anchor），再开始微调
-        const from = parseFloat(fp.value);
-        const t0 = performance.now();
-        (function anim(now) {
-          const p = Math.min(1, (now - t0) / 250);
-          const eased = 1 - Math.pow(1 - p, 3);
-          const v = from + (a - from) * eased;
-          if (!isNaN(v) && isFinite(v)) { fp.value = v; if (video) video.currentTime = v; }
-          if (p < 1) requestAnimationFrame(anim);
-        })(performance.now());
-      };
       fp.addEventListener('pointerdown', e => {
         if (!video || !webFsActive) return;
         const r = seekableRange();
         if (!r || r.end <= r.start) return;
-        if (fsDragState) clearTimeout(fsDragState.timer);
-        fsDragState = { anchor: video.currentTime, timer: null, extended: false, range: r, startX: e.clientX, lastAct: performance.now() };
+        fsDragState = { dragging: true };
         // 按住即定位到指针处并进入拖动
         fpToTime(e);
         try { if (fp.setPointerCapture) fp.setPointerCapture(e.pointerId); } catch (err) { }
-        // 静止 1 秒触发拉长（任何指针移动都会重置计时——先拖动再停住同样触发）
-        fsDragState.timer = setTimeout(extendFn, 1000);
-      });
-      fp.addEventListener('pointermove', e => {
-        if (!fsDragState) return;
-        fsDragState.lastAct = performance.now();
-        // 松手兜底：鼠标已松开（残余 move 的 buttons=0，窗口外松手等场景无 pointerup）立即退出
-        if (e.buttons === 0) { endDrag(); return; }
-        if (fsDragState.extended) { fpGesture(e); return; }
-        // 重置拉长计时：拖动中持续移动不触发；停住 1 秒后触发微调
-        clearTimeout(fsDragState.timer);
-        fsDragState.timer = setTimeout(extendFn, 1000);
-        fpToTime(e);   // 普通拖动：播放点跟随指针，画面同步跳转
       });
       // 松开退出：window 级多重监听（pointerup / pointercancel / mouseup），
       // 覆盖指针捕获、拖出窗口、系统中断等 document 级监听可能漏收的场景；handler 幂等
       const endDrag = () => {
         if (!fsDragState) return;
-        clearTimeout(fsDragState.timer);
-        const wasExtended = fsDragState.extended;
-        // 立即清空拖动状态：残留的 pointermove 不再触发定位 / 显示气泡（气泡松开即消失）
+        // 立即清空拖动状态：残留的 pointermove 不再触发定位（气泡松开即消失）
         fsDragState = null;
         if (tip) tip.style.display = 'none';
-        if (fpWrap) fpWrap.style.width = '';   // 宽度收回（transition 动画）
         // 退出动画期间阻止 syncFsProgress 回写 value，播放头总是动画回到实际播放位置
         fsExitAnim = true;
         const r = seekableRange();
         if (r && r.end > r.start) { fp.min = r.start; fp.max = r.end; }
         const from = parseFloat(fp.value);
         const to = video ? video.currentTime : from;
-        // 播放头始终动画移动（进入与退出微调、普通拖动松开均生效）
-        if (Math.abs(from - to) > 0.005 || wasExtended) {
+        if (Math.abs(from - to) > 0.005) {
           const t0 = performance.now();
           (function anim(now) {
             const p = Math.min(1, (now - t0) / 250);
@@ -1143,6 +1082,12 @@
           syncFsProgress();
         }
       };
+      fp.addEventListener('pointermove', e => {
+        if (!fsDragState) return;
+        // 松手兜底：鼠标已松开（残余 move 的 buttons=0，窗口外松手等场景无 pointerup）立即退出
+        if (e.buttons === 0) { endDrag(); return; }
+        fpToTime(e);   // 普通拖动：播放点跟随指针，画面同步跳转
+      });
       // 先注销旧监听再注册：换集 / 开关控制栏多次注入不累积（窗口级监听器泄漏防护）
       if (activeEndDrag) {
         window.removeEventListener('pointerup', activeEndDrag);
@@ -1154,16 +1099,7 @@
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
       window.addEventListener('mouseup', endDrag);
-      // 窗口失焦退出（微调中）
       window.addEventListener('blur', endDrag);
-      // 全局兜底（仅注册一次）：微调中 3 秒无指针活动强制退出
-      // （覆盖窗口外松手且指针静止、pointerup 完全丢失的场景）
-      if (!window.__mppFsWatch) {
-        window.__mppFsWatch = true;
-        setInterval(() => {
-          if (fsDragState && fsDragState.extended && performance.now() - (fsDragState.lastAct || 0) > 3000) activeEndDrag && activeEndDrag();
-        }, 500);
-      }
     }
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
     videoContainer.addEventListener('mousemove', onBarHover);
@@ -2249,7 +2185,7 @@
   // ─── 网页全屏：视频铺满当前窗口（非浏览器全屏），ESC 退出 ──
   let webFsActive = false;
   let webFsSaved = null;
-  let fsDragState = null;   // 进度条拖动状态：{ anchor, timer, extended, range, moved, startX }
+  let fsDragState = null;   // 进度条拖动状态：{ dragging: true }（普通拖动，不再有精细调整）
   let fsExitAnim = false;   // 退出微调动画中：暂停进度条 value 回写
   // 颜色查找表档位（Q 循环）：REC.709 → SLog3 → CLog3 → REC.709…
   // 声明放在这里是因为 exitWebFs() 会把它复位成 REC.709（函数体在初始化完成后才执行）
@@ -2349,14 +2285,6 @@
     const trackEl = qs('#mgp-fs-track');
     if (!p || !trackEl || !video || !webFsActive) return;
     const setFill = pct => trackEl.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
-    if (fsDragState && fsDragState.extended) {
-      const v = parseFloat(p.value);
-      const pct = p.max > p.min ? ((v - p.min) / (p.max - p.min)) * 100 : 0;
-      setFill(pct);
-      // 拖动中：左边显示拖到的时间，右边始终是总时长
-      setFsTimes(v, (video && isFinite(video.duration)) ? video.duration : p.max);
-      return;
-    }
     const r = seekableRange();
     if (!r || r.end <= r.start) return;
     const ct = Math.max(r.start, Math.min(r.end, video.currentTime));
