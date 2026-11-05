@@ -356,6 +356,14 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .row{display:flex;align-items:center;gap:2px 8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid var(--row-brd);cursor:pointer;width:100%;min-width:0}
 .row:hover{background:var(--row-h);border-radius:8px}
 .row.sel{background:var(--orange-dk);border-radius:8px}
+/* 批量截图 / 录制进行中：当前正在处理的那条记录（面板自动滚动保持可见） */
+.row.run{background:rgba(255,95,0,.22);border-radius:8px;box-shadow:inset 3px 0 0 var(--orange);
+  animation:rowRunPulse 1.4s ease-in-out infinite}
+.row.run.sel{background:rgba(255,95,0,.3)}
+@keyframes rowRunPulse{0%,100%{background:rgba(255,95,0,.22)}50%{background:rgba(255,95,0,.34)}}
+:root[data-theme="light"] .row.run{background:rgba(255,95,0,.16);box-shadow:inset 3px 0 0 var(--orange)}
+@keyframes rowRunPulseLight{0%,100%{background:rgba(255,95,0,.16)}50%{background:rgba(255,95,0,.26)}}
+:root[data-theme="light"] .row.run{animation-name:rowRunPulseLight}
 /* 多选连续行合并为圆角矩形：首行只留顶部两角、尾行只留底部两角、中间行无圆角；
    组内分割线保留原色不淡化，与历史列表一致；单条选中保持原样 */
 .row.sel:has(+ .row.sel){border-radius:8px 8px 0 0}

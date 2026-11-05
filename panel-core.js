@@ -184,6 +184,13 @@ const MPP = (() => {
     return false;
   }
   // 页面端是否仍有批量任务在跑（面板据此判断任务是否结束）
+  // 批量进度：页面端返回 { busy, i, total, mode }
+  function fnBatchState() {
+    if (window.__mgpAPI && typeof window.__mgpAPI.batchState === 'function') {
+      try { return window.__mgpAPI.batchState(); } catch (e) { return null; }
+    }
+    return null;
+  }
   function fnBatchBusy() {
     try {
       if (window.__mgpAPI && typeof window.__mgpAPI.batchBusy === 'function') {
@@ -839,6 +846,7 @@ const MPP = (() => {
     }
     updateSel();
     restoreScroll();
+    if (batchHi) paintBatchHi();   // 列表重建后保持批量高亮
   }
 
   function setTab(t) {
@@ -1231,18 +1239,58 @@ const MPP = (() => {
   // ─── 批量截图 / 录制：焦点在面板时按 S / R，对勾选的记录依次执行 ───
   let batchActive = false;   // 批量任务进行中（进行时面板内按 Esc 取消）
   let batchPoll = null;
+  let batchPollState = null; // 批量进度轮询（高亮 / 自动滚动）
+  let batchItems = [];       // 本次批量的条目（与页面端 items 同序，带 rowIdx / type）
+  let batchHi = null;        // 当前高亮的记录：{ type:'mk'|'io', idx }
+
+  // 批量进行中：把「正在处理的那条」在列表里高亮，并滚动到可见区域
+  function clearBatchHi() {
+    batchHi = null;
+    document.querySelectorAll('.row.run').forEach(r => r.classList.remove('run'));
+  }
+  function paintBatchHi() {
+    document.querySelectorAll('.row.run').forEach(r => r.classList.remove('run'));
+    if (!batchHi) return;
+    const sel = batchHi.type === 'mk'
+      ? '#mk-list .row[data-mk="' + batchHi.idx + '"]'
+      : '#io-list .row[data-io="' + batchHi.idx + '"]';
+    const row = document.querySelector(sel);
+    if (!row) return;
+    row.classList.add('run');
+    // 自动滚动：block:'nearest' 只滚最近的滚动容器，且已在视野内时不动
+    try { row.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { }
+  }
+  function setBatchHi(type, idx) {
+    batchHi = (type && idx >= 0) ? { type: type, idx: idx } : null;
+    paintBatchHi();
+  }
   // 任务是否结束：优先用 batchRun 的返回结果，兜底轮询页面端 batchBusy
   // （executeScript 对 Promise 返回值是否等待由浏览器决定，轮询保证状态一定收敛）
   function batchEnded(isShot, r) {
     if (!batchActive) return;
     batchActive = false;
     if (batchPoll) { clearInterval(batchPoll); batchPoll = null; }
+    if (batchPollState) { clearInterval(batchPollState); batchPollState = null; }
+    clearBatchHi();
+    batchItems = [];
     if (r && r.reason === 'cancelled') {
       panelToast('已取消批量' + (isShot ? '截图' : '录制') + '（已完成 ' + (r.done || 0) + ' 条）');
     }
   }
   function startBatchWatch(isShot) {
     if (batchPoll) { clearInterval(batchPoll); batchPoll = null; }
+    if (batchPollState) { clearInterval(batchPollState); batchPollState = null; }
+    // 250ms 轮询一次批量进度：当前第几条 → 高亮并滚动到可见
+    batchPollState = setInterval(() => {
+      if (!batchActive) return;
+      execInPage(fnBatchState, []).then(st => {
+        if (!st || !st.busy) return;
+        const it = batchItems[st.i];
+        if (!it || it.rowIdx == null) return;
+        if (batchHi && batchHi.type === it.type && batchHi.idx === it.rowIdx) return;   // 没变就不重绘
+        setBatchHi(it.type, it.rowIdx);
+      }).catch(() => { });
+    }, 250);
     const startedAt = Date.now();
     batchPoll = setInterval(() => {
       // 起始 1.2s 内不判空：注入尚未落地时页面端 batchRunning 仍是 false
@@ -1288,12 +1336,13 @@ const MPP = (() => {
           rec = arr[j];
         }
         if (!rec) { lost++; return; }
+        const rowIdx = arr.indexOf(rec);   // 记录在当前列表里的下标（高亮用）
         if (isShot) {
           if (rec.time == null) { lost++; return; }
-          items.push({ type: 'mk', time: rec.time, note: rec.note || '', tc: rec.tc || '' });
+          items.push({ type: 'mk', time: rec.time, note: rec.note || '', tc: rec.tc || '', rowIdx: rowIdx });
         } else {
           if (rec.inTime == null || rec.outTime == null) { lost++; return; }
-          items.push({ type: 'io', start: rec.inTime, end: rec.outTime, note: rec.note || '', tc: rec.inTC || '' });
+          items.push({ type: 'io', start: rec.inTime, end: rec.outTime, note: rec.note || '', tc: rec.inTC || '', rowIdx: rowIdx });
         }
       });
       items.sort((a, b) => ((a.type === 'mk' ? a.time : a.start) || 0) - ((b.type === 'mk' ? b.time : b.start) || 0));
@@ -1350,6 +1399,7 @@ const MPP = (() => {
           if (!items.length) { panelToast('选中的' + kindName + '没有可用时间码'); return; }
           if (built.lost) panelToast(built.lost + ' 条已失效，跳过');
           panelToast('已开始批量' + (isShot ? '截图' : '录制') + '（' + items.length + ' 条）· 按 Esc 取消');
+          batchItems = items;
           batchActive = true;
           startBatchWatch(isShot);
           execInPage(fnBatchRun, [items, isShot ? 'shot' : 'rec']).then(r => {

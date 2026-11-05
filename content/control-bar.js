@@ -3621,6 +3621,8 @@
   //   批量截图：只适用于标记点，取该标记点时刻
   //   批量录制：只适用于片段，录制入点到出点
   let batchRunning = false;
+  // 批量进度快照：面板据此高亮当前记录并自动滚动（i 是 items 下标，-1 表示还没开始）
+  let batchState = { busy: false, i: -1, total: 0, mode: '' };
   let batchCancel = false;   // Esc 取消批量任务：中断后续条目
   let recAbort = false;      // 批量取消导致当前这段录制作废（不下载、不写剪贴板）
   function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -3768,6 +3770,7 @@
     if (batchRunning) { mgpToast('批量任务进行中，请稍候', true); return { ok: false, reason: 'busy' }; }
     if (!Array.isArray(items) || !items.length) return { ok: false, reason: 'empty' };
     batchRunning = true; batchCancel = false; recAbort = false;
+    batchState = { busy: true, i: -1, total: items.length, mode: mode === 'shot' ? 'shot' : 'rec' };
     // 快照当前打点状态：批量录制会临时改写入点 / 出点，结束后恢复，避免污染用户状态
     const savedIn = state.inPoint, savedOut = state.outPoint, savedMark = state.markTime;
     let done = 0, failed = 0, cancelled = false;
@@ -3776,6 +3779,7 @@
       for (let i = 0; i < items.length; i++) {
         if (batchCancel) break;
         const it = items[i] || {};
+        batchState.i = i;   // 面板轮询到这个值就高亮第 i 条
         const label = (i + 1) + '/' + items.length;
         // 单条失败不得中断整批：任何异常只记为失败，继续处理后续条目
         try {
@@ -3827,6 +3831,7 @@
       cancelled = batchCancel;
       batchCancel = false; recAbort = false;
       batchRunning = false;
+      batchState = { busy: false, i: -1, total: 0, mode: '' };
       recStopTarget = null;
       state.inPoint = savedIn; state.outPoint = savedOut; state.markTime = savedMark;
       state.tcMode = 'live';
@@ -4065,7 +4070,9 @@
     },
     // 面板按 Esc 取消批量任务（焦点在面板窗口时页面收不到 Esc）
     batchCancel() { return cancelBatch(); },
-    batchBusy() { return batchRunning; }
+    batchBusy() { return batchRunning; },
+   // 批量进度（面板用于高亮 / 自动滚动）
+   batchState() { return { busy: batchState.busy, i: batchState.i, total: batchState.total, mode: batchState.mode }; }
   };
 
 })();

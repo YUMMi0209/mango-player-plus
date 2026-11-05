@@ -12,7 +12,7 @@
 Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 
 1. 获取代码（任选其一）：
-   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v4.3.zip` 并解压；
+   - **下载压缩包（推荐）**：前往 <https://github.com/YUMMi0209/mango-player-plus/releases>，下载最新版的 `Mango_Player_Plus_v4.4.zip` 并解压；
    - 或 `git clone https://github.com/YUMMi0209/mango-player-plus.git` 克隆仓库。
 2. 打开扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
@@ -246,6 +246,8 @@ Chrome 与 Edge 均为 Chromium 内核，安装方式相同：
 - 任务进行中按 `Esc`：**取消批量任务**（焦点在面板或页面内均可）
 
 执行期间画面会逐条跳转，页面右下角提示当前进度（如 `批量录制 2/5 · Esc 取消`），全部完成后提示成功 / 失败条数；文件名与手动截图 / 录制规则一致。
+
+执行时面板里**正在处理的那条记录会高亮**（主题色底色 + 左侧竖条，带缓慢呼吸效果），列表还会**自动滚动**让高亮行始终可见；批量结束后高亮自动清除（列表被轮询刷新重建后也会保持高亮）。
 
 取消时正在录制的那一段**作废不保存**（避免留下半截文件），已完成的条目保留，提示为「批量录制已取消 — 已完成 N 条」。
 
@@ -601,5 +603,5 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,heigh
 
 ---
 
-芒着拉片 | MG Player+ v4.3  
+芒着拉片 | MG Player+ v4.4  
 YUMMi
