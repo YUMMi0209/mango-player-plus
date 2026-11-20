@@ -712,11 +712,29 @@
   function ptsVerified() { return ptsOffsetVerified; }
   // 用「已核对过的 seek 落点」实测 PTS 偏移：落点那一帧的视频时间 = 目标帧，
   // 它的 mediaTime 与目标帧时间的差就是偏移（最可信的测法）
+  // 用「暂停时的 seek 落点」精确实测首帧 PTS 偏移：
+  // 该帧的媒体时间 lastFrameMediaTime 与它的视频时间（= floor(currentTime*F)/F，也就是这一帧的起点）
+  // 之差就是偏移。currentTime 是播放器自己决定的位置（含它自己的吸附），所以这个测法与「跳转目标」
+  // 无关，不会把跳转偏差算进偏移里。
+  function measurePtsOffsetAtSeek() {
+    if (!video || !video.paused || video.seeking) return false;
+    if (lastFrameMediaTime == null || !isFinite(video.currentTime)) return false;
+    const F = FPS > 0 ? FPS : 25;
+    const frameStartV = Math.floor(video.currentTime * F + 1e-6) / F;
+    const off = lastFrameMediaTime - frameStartV;
+    if (!isFinite(off) || Math.abs(off) > 25 / F) return false;   // 超过 25 帧（1s）当作异常值不采用
+    if (!ptsOffsetVerified || Math.abs(off - ptsOffset) > 1e-6) {
+      ptsOffset = off;
+      ptsOffsetVerified = true;
+    }
+    return true;
+  }
+
   function setPtsOffsetFrom(mediaTime, targetSec) {
     const F = FPS > 0 ? FPS : 25;
     const want = Math.floor(targetSec * F + 1e-6) / F;
     const fr = Math.round((mediaTime - want) * F);
-    if (fr < -2 || fr > 6) return;
+      if (fr < -25 || fr > 25) return;   // 片源首帧 PTS 偏移可能到 1s 级别
     if (ptsOffsetVerified && Math.abs(fr / F - ptsOffset) < 1e-6) return;
     ptsOffset = fr / F;
     ptsOffsetVerified = true;
@@ -896,6 +914,7 @@
       if (ended) return;
       setTimeout(() => {
         if (ended) return;
+        measurePtsOffsetAtSeek();
         const tf = Math.floor(frameStart * F + 1e-6);
         const mt2 = (lastFrameMediaTime == null) ? null : (lastFrameMediaTime - ptsOffset);
         const lf = (mt2 == null) ? null : Math.floor(mt2 * F + 1e-6);
@@ -925,6 +944,9 @@
         try { v.removeEventListener('seeked', onSeeked); } catch (e) { }
         clearTimeout(fallback);
         if (isCancelled()) { ended = true; return; }
+        // 先就地实测首帧 PTS 偏移：偏移没测出来（或过期）时直接用 mediaTime 当视频时间，
+        // 会把「源片首帧偏移」误当成「播放器吸附」，反解出偏了好几帧的目标（表现为跳转提前好几帧）
+        measurePtsOffsetAtSeek();
         // 与实际渲染帧比对：mediaTime 是**媒体时间**，减去首帧 PTS 偏移才是与时间码同一口径的
         // 「视频时间」（片源首帧 PTS 不为 0 时两者差 2~3 帧）
         const mt = (lastFrameMediaTime == null) ? null : (lastFrameMediaTime - ptsOffset);
