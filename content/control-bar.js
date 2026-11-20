@@ -35,26 +35,42 @@
   // 百度网盘：播放器不换页就换视频，URL 永远是同一个路径 —— 用「媒体地址（去掉签名参数）
   // + 页面标题」区分具体视频，否则不同视频的日志会混在同一个 key 下
   function baiduMediaKey() {
+    // 百度网盘的播放地址形如 …?s/<媒体标识>&fpath=<文件路径>&…：
+    // 取「s/ 之后、&fpath 之前」这一段作为视频标识。
+    // 不再用页面标题参与：标题可以被用户随便改名，同一个视频改个名就会变成另一份记录。
+    const urls = [String(location.href || ''), String(location.hash || '')];
+    const decode = x => { try { return decodeURIComponent(x); } catch (e) { return x; } };
+    for (const u of urls) {
+      // 首选：明确夹在 s/ 与 &fpath 之间的那一段
+      const m1 = /s\/([^&#]*?)&(?:amp;)?fpath/i.exec(u);
+      if (m1 && decode(m1[1]).trim()) return 'bd:' + decode(m1[1]).trim().slice(0, 200);
+      // 次选：s/ 之后到下一个参数分隔符
+      const m2 = /[?&#/]s\/([^&#]+)/.exec(u);
+      if (m2 && decode(m2[1]).trim()) return 'bd:' + decode(m2[1]).trim().slice(0, 200);
+    }
+    // 兜底 1：fpath（文件路径）本身就是稳定的媒体标识
+    try {
+      const f = /[?&](?:amp;)?fpath=([^&#]+)/i.exec(String(location.href || ''));
+      if (f) {
+        const v2 = decode(f[1]).trim();
+        if (v2) return 'bd:' + v2.slice(0, 200);
+      }
+    } catch (e) { }
+    // 兜底 2：媒体地址（去掉签名参数）
     const v = window.__mgp_video || video;
     let src = '';
     try {
       src = (v && (v.currentSrc || v.src)) || '';
       if (!src && v) { const sc = v.querySelector('source'); if (sc) src = sc.src || ''; }
     } catch (e) { }
-    let base = '';
     if (src) {
       try {
-        const u = new URL(src, location.href);
-        base = u.pathname.split('/').filter(Boolean).pop() || u.pathname;
-      } catch (e) { base = String(src).slice(0, 120); }
+        const u2 = new URL(src, location.href);
+        const base = u2.pathname.split('/').filter(Boolean).pop() || u2.pathname;
+        if (base) return 'bd:' + base.slice(0, 200);
+      } catch (e) { }
     }
-    let title = '';
-    try { title = String(document.title || '').replace(/\s*[-|_]\s*百度网盘.*$/, '').trim(); } catch (e) { }
-    if (!base && !title) return '';
-    const seed = base + '|' + title;
-    let h = 5381;
-    for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0;
-    return 'bd:' + (h >>> 0).toString(36) + (base ? ':' + base.slice(0, 40) : ':' + title.slice(0, 24));
+    return '';
   }
 
   // ─── Persistence（状态与记录均按视频独立）──────
@@ -705,6 +721,17 @@
     ptsOffset = fr / F;
     ptsOffsetVerified = true;
   }
+  // 暂停并落到指定帧（非直播模式）：截图 / 录制结束时用，
+  // 保证「暂停帧 = 你看到的那一帧」。不改倍速、不做帧校正 seek（避免动到用户的播放状态）。
+  function pauseAtFrame(tSec) {
+    if (!video || rtOn()) return;
+    try { video.pause(); } catch (e) { }
+    if (tSec == null || !isFinite(tSec)) return;
+    const F = FPS > 0 ? FPS : 25;
+    const fr = Math.floor(Math.max(0, tSec) * F + 1e-6) / F;
+    try { video.currentTime = fr + 1e-4; } catch (e) { }
+  }
+
   // 冻结画面：截图 / 标注取图前暂停，保证取到的是「你按下时看到的那一帧」。
   // pause 事件是异步的，所以这里直接同步调用 pause()，随后立刻 drawImage
   function freezeFrame() {
@@ -861,12 +888,14 @@
     const isCancelled = () => { try { return !!(cancelled && cancelled()); } catch (e) { return false; } };
     let tries = 0, ended = false;
     const finish = () => { ended = true; if (done) { try { done(); } catch (e) { } } };
+    let seekTarget = null;   // 本次 seek 实际写入的目标（与落点相减 = 播放器吸附量）
     const seek = extra => {
       if (ended || isCancelled()) { ended = true; return; }
       tries++;
       let target = frameStart + (extra || 0);
       if (tries === 1) target = frameStart + 1e-4;
       if (dur > 0) target = Math.min(target, Math.max(0, dur - 1 / F / 2));
+      seekTarget = target;
       if (pauseAfter) { try { v.pause(); resetSpeed(); } catch (e) { } }
       let settled = false;
       let fallback = 0;
@@ -880,10 +909,23 @@
         // 「视频时间」（片源首帧 PTS 不为 0 时两者差 2~3 帧）
         const mt = (lastFrameMediaTime == null) ? null : (lastFrameMediaTime - ptsOffset);
         const err = (mt == null) ? 0 : (frameStart - mt);       // >0：落早了
-        // 偏早就按实测误差补偿再 seek 一次（最多两轮）；误差在 1 帧内即认为落点正确
-        if (err > 0.6 / F && tries < 3) { seek(err + 0.5 / F); return; }
-        // 落点已核对过：此刻屏幕上就是这一帧，时间码不必再叠加「回调滞后」
-        if (mt != null && Math.abs(err) <= 1 / F) {
+        // 判定「落点是不是目标帧」按帧号比，而不是误差 <1 帧就放行：
+        // 早 1 帧 / 晚 1 帧都会让时间码整体偏一帧 —— 之前接受 |err| <= 1 帧，
+        // 于是「落晚一帧」也被当成正确落点，还拿它去校准 PTS 偏移，把整条时间码
+        // 基准永久挪前一帧（表现为之后所有跳转都比目标时间码早一帧）
+        const targetFrame = Math.floor(frameStart * F + 1e-6);
+        const landedFrame = (mt == null) ? null : Math.floor(mt * F + 1e-6);
+        const onTarget = (landedFrame == null) || (landedFrame === targetFrame);
+        if (!onTarget && tries < 4) {
+          // 用「实测吸附量」反解下一次目标：播放器把 seek 固定平移 snap 秒时，
+          // 只要把目标挪到「目标帧 + 0.2 帧 − snap」，落点就必然回到目标帧内。
+          // 这样早吸附 / 晚吸附都能收敛（早先只处理「落早」，落晚的会被误当正确落点）
+          const snap = (mt == null || seekTarget == null) ? 0 : (mt - seekTarget);
+          seek(0.2 / F - snap);
+          return;
+        }
+        // 只有真的落在目标帧上，才用这次落点校准「首帧 PTS 偏移」
+        if (onTarget && mt != null) {
           frameBasisExact = true;
           setPtsOffsetFrom(lastFrameMediaTime, frameStart);
         }
@@ -1520,10 +1562,12 @@
       ctx.drawImage(video, 0, 0);
       ctx.getImageData(0, 0, 1, 1);   // 受保护内容会在此抛错
     } catch (e) { mgpToast('截图失败: 内容保护'); return; }
-    // 画面已经取到手，时间码取「按下这一刻」的读数（不 seek、不校准、不改播放状态）
+    // 画面已经取到手，时间码取「按下这一刻」的读数（不 seek、不校准）
     const t = rtMarkTC(dispTime());
     const tcPlain = rtSnap || fileTC(t);
     lastCaptureTC = rtSnap || fmtTC(t);
+    // 非直播模式：截图后暂停并把画面落到「截图那一帧」（暂停帧 = 截图当前帧）；直播模式保持播放
+    pauseAtFrame(t);
     try {
       c.toBlob(blob => {
         if (!blob) { mgpToast('截图失败'); return; }
@@ -2022,7 +2066,9 @@
     recStopTime = video ? dispTime() : (state.recordingStart || 0);
     state.tcMode = 'ot';
     saveState();
-    // 不暂停播放：录制结束只是收尾（文件名 / 保存），用户继续看片
+    // 非直播模式：录制结束暂停在「这一段录制的最后一帧」；直播模式保持播放
+    // 暂停帧 = 这一段录制的最后一帧
+    pauseAtFrame(recStopTime);
     // Remove recording UI state
     const bar = qs('#mgp-bar'); if (bar) bar.classList.remove('recording');
     if (video) video.classList.remove('mgp-rec-border');
@@ -3674,6 +3720,32 @@
     }
     return { ok: false, err: lastErr, bestFrames: best * F };
   }
+  // 等画面真正就绪：大跨度跳转后解码器 / 网络还在补数据，这时立刻开录会录出开头卡顿
+  // （画面冻结、掉帧）。条件：不在 seek、readyState ≥ HAVE_CURRENT_DATA、且当前位置已在缓冲区内
+  function waitPlayable(maxMs) {
+    return new Promise(resolve => {
+      const v = video;
+      if (!v) { resolve(false); return; }
+      const t0 = Date.now();
+      const bufferedAt = () => {
+        try {
+          const ct = v.currentTime, b = v.buffered;
+          for (let i = 0; i < b.length; i++) {
+            if (ct >= b.start(i) - 0.05 && ct <= b.end(i) + 0.05) return true;
+          }
+          return b.length === 0 ? v.readyState >= 3 : false;
+        } catch (e) { return v.readyState >= 3; }
+      };
+      const okNow = () => !!v && !v.seeking && v.readyState >= 2 && bufferedAt();
+      const tick = () => {
+        if (okNow()) { resolve(true); return; }
+        if (batchCancel || Date.now() - t0 >= maxMs) { resolve(false); return; }
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
+  }
+
   // 等上一段录制真正收尾（编码器 / remux 可能还在跑）：最多等 6s，别直接判失败跳过
   function waitRecorderIdle(maxMs) {
     return new Promise(resolve => {
@@ -3723,6 +3795,12 @@
     if (recordingInternal && !(await waitRecorderIdle(6000))) {
       try { stopRecording(); } catch (e) { }
       if (!(await waitRecorderIdle(2000))) return false;
+    }
+    if (batchCancel) return false;
+    // 跳转后先等缓冲到位再开录：大跨度跳转时立刻开录，开头几百毫秒会卡顿 / 掉帧
+    if (!(await waitPlayable(6000))) {
+      if (batchCancel) return false;
+      try { mgpToast('画面加载较慢，仍继续录制', true); } catch (e) { }
     }
     if (batchCancel) return false;
     return new Promise(resolve => {
