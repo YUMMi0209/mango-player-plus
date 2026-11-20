@@ -729,7 +729,8 @@
     if (tSec == null || !isFinite(tSec)) return;
     const F = FPS > 0 ? FPS : 25;
     const fr = Math.floor(Math.max(0, tSec) * F + 1e-6) / F;
-    try { video.currentTime = fr + 1e-4; } catch (e) { }
+    // 落在帧中点：站点播放器即使吃掉几毫秒也仍在目标帧内
+    try { video.currentTime = fr + 0.45 / F; } catch (e) { }
   }
 
   // 冻结画面：截图 / 标注取图前暂停，保证取到的是「你按下时看到的那一帧」。
@@ -888,12 +889,31 @@
     const isCancelled = () => { try { return !!(cancelled && cancelled()); } catch (e) { return false; } };
     let tries = 0, ended = false;
     const finish = () => { ended = true; if (done) { try { done(); } catch (e) { } } };
+    // 站点播放器常常在我们核对完之后**再异步校正一次 seek**（平滑跳转），于是「核对时是目标帧、
+    // 收尾后画面被挪早一帧」。这里在真正收尾前多等一拍复核，不对就用「帧中点」补一次
+    // （帧中点最稳：即使播放器吃掉一点 epsilon，也仍落在目标帧内），再复核一次才收尾。
+    const lateCheck = (left, then) => {
+      if (ended) return;
+      setTimeout(() => {
+        if (ended) return;
+        const tf = Math.floor(frameStart * F + 1e-6);
+        const mt2 = (lastFrameMediaTime == null) ? null : (lastFrameMediaTime - ptsOffset);
+        const lf = (mt2 == null) ? null : Math.floor(mt2 * F + 1e-6);
+        if (lf == null || lf === tf || left <= 0) { then(); return; }
+        try {
+          if (pauseAfter) { v.pause(); resetSpeed(); }
+          v.currentTime = frameStart + 0.45 / F;
+        } catch (e) { then(); return; }
+        lateCheck(left - 1, then);
+      }, 240);
+    };
     let seekTarget = null;   // 本次 seek 实际写入的目标（与落点相减 = 播放器吸附量）
     const seek = extra => {
       if (ended || isCancelled()) { ended = true; return; }
       tries++;
       let target = frameStart + (extra || 0);
-      if (tries === 1) target = frameStart + 1e-4;
+      // 首跳取「帧中点」：比帧起点 + 1e-4 更抗播放器的小幅吸附（差 1~10ms 也仍在目标帧内）
+      if (tries === 1) target = frameStart + 0.45 / F;
       if (dur > 0) target = Math.min(target, Math.max(0, dur - 1 / F / 2));
       seekTarget = target;
       if (pauseAfter) { try { v.pause(); resetSpeed(); } catch (e) { } }
@@ -921,7 +941,7 @@
           // 只要把目标挪到「目标帧 + 0.2 帧 − snap」，落点就必然回到目标帧内。
           // 这样早吸附 / 晚吸附都能收敛（早先只处理「落早」，落晚的会被误当正确落点）
           const snap = (mt == null || seekTarget == null) ? 0 : (mt - seekTarget);
-          seek(0.2 / F - snap);
+          seek(0.45 / F - snap);
           return;
         }
         // 只有真的落在目标帧上，才用这次落点校准「首帧 PTS 偏移」
@@ -929,7 +949,8 @@
           frameBasisExact = true;
           setPtsOffsetFrom(lastFrameMediaTime, frameStart);
         }
-        finish();
+        // 收尾前再等一拍复核（防止播放器随后异步校正把画面挪早一帧）
+        lateCheck(1, finish);
       };
       const onSeeked = () => {
         // seeked 之后还要等新的一帧真正渲染出来，rVFC 是最可靠的信号
