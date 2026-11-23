@@ -668,6 +668,8 @@ const MPP = (() => {
     els.histExport = $(cfg.histExport);
     els.histClear = $(cfg.histClear);
     els.histSort = $('#hist-sort');
+    els.histSortDir = $('#hist-sort-dir');
+    els.histSelInfo = $('#hist-sel');
     els.togRecHigh = $('#tog-rec-high');
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
     bindList(els.mkList);
@@ -687,9 +689,20 @@ const MPP = (() => {
     bindHistory();
     if (els.histSort) {
       els.histSort.value = histSortMode();
+      histSortDirSet(histSortDir());
       els.histSort.addEventListener('change', e => {
         const v = e.target.value === 'modified' || e.target.value === 'name' ? e.target.value : 'added';
         try { localStorage.setItem(HIST_SORT_KEY, v); } catch (e2) { }
+        // 换排序字段时给一个合乎直觉的默认方向：名称 A→Z，时间类新在前
+        try { localStorage.removeItem(HIST_SORT_DIR_KEY); } catch (e2) { }
+        histSortDirSet(histSortDir());
+        sortHistItems();
+        renderHistory();
+      });
+    }
+    if (els.histSortDir) {
+      els.histSortDir.addEventListener('click', () => {
+        histSortDirSet(histSortDir() === 'asc' ? 'desc' : 'asc');
         sortHistItems();
         renderHistory();
       });
@@ -1786,8 +1799,7 @@ const MPP = (() => {
           item.classList.toggle('sel', histSel.has(key));
           const chk = item.querySelector('.chk');
           if (chk) chk.checked = histSel.has(key);
-          if (els.histClear) els.histClear.disabled = histSel.size === 0;
-          if (els.histExport) els.histExport.disabled = histSel.size === 0;
+      updateHistFoot();
           saveHistSel();
           return;
         }
@@ -2773,20 +2785,51 @@ const MPP = (() => {
 
   // 历史排序：添加时间 / 修改时间 / 名称（选择记在本机）
   const HIST_SORT_KEY = 'mpp_hist_sort';
+  const HIST_SORT_DIR_KEY = 'mpp_hist_sort_dir';
   function histSortMode() {
     try {
       const v = localStorage.getItem(HIST_SORT_KEY);
       return (v === 'modified' || v === 'name') ? v : 'added';
     } catch (e) { return 'added'; }
   }
+  // 升序 / 降序：默认「时间类 → 新在前（desc）」「名称 → A→Z（asc）」
+  function histSortDir() {
+    try {
+      const v = localStorage.getItem(HIST_SORT_DIR_KEY);
+      if (v === 'asc' || v === 'desc') return v;
+    } catch (e) { }
+    return histSortMode() === 'name' ? 'asc' : 'desc';
+  }
+  function histSortDirSet(dir) {
+    try { localStorage.setItem(HIST_SORT_DIR_KEY, dir); } catch (e) { }
+    if (els.histSortDir) {
+      els.histSortDir.textContent = dir === 'asc' ? '↑' : '↓';
+      els.histSortDir.title = dir === 'asc' ? '当前升序（点击改降序）' : '当前降序（点击改升序）';
+    }
+  }
   function sortHistItems() {
     const mode = histSortMode();
+    const desc = histSortDir() === 'desc';
     if (mode === 'name') {
-      histItems.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN'));
+      histItems.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN') * (desc ? -1 : 1));
     } else if (mode === 'modified') {
-      histItems.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0) || (b.addedAt || 0) - (a.addedAt || 0));
+      histItems.sort((a, b) => ((b.savedAt || 0) - (a.savedAt || 0) || (b.addedAt || 0) - (a.addedAt || 0)) * (desc ? 1 : -1));
     } else {
-      histItems.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0));
+      histItems.sort((a, b) => ((b.addedAt || 0) - (a.addedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0)) * (desc ? 1 : -1));
+    }
+  }
+
+  // 历史底部条：已选数量 + 删除 / 批量导出的可用性 + 全选文字
+  function updateHistFoot() {
+    const n2 = histSel.size;
+    if (els.histSelInfo) els.histSelInfo.textContent = '已选 ' + n2 + ' 条记录';
+    if (els.histClear) els.histClear.disabled = n2 === 0;
+    if (els.histExport) els.histExport.disabled = n2 === 0;
+    if (els.histAll) {
+      const all = histItems.length > 0 && n2 === histItems.length;
+      els.histAll.classList.toggle('on', all);
+      els.histAll.setAttribute('aria-pressed', all ? 'true' : 'false');
+      els.histAll.title = all ? '取消全选' : '全选';
     }
   }
 
@@ -2794,8 +2837,7 @@ const MPP = (() => {
     const list = els.histList;
     if (!list) return;
     list.innerHTML = '';
-    if (els.histClear) els.histClear.disabled = histSel.size === 0;
-    if (els.histExport) els.histExport.disabled = histSel.size === 0;
+    updateHistFoot();
     if (!histItems.length) {
       list.innerHTML = '<div class="hist-empty">暂无历史记录</div>';
       return;

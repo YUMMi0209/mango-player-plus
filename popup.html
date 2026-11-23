@@ -57,12 +57,12 @@
         <label class="switch"><input type="checkbox" id="tog-rt"><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <span class="set-label" title="悬浮画面时时间码自动下移，避开站点顶部遮挡。默认：芒果TV 开启、其他站点关闭；直播模式与百度网盘上固定关闭">时间码显示回避</span>
-        <label class="switch"><input type="checkbox" id="tog-avoid"><span class="track"></span></label>
-      </div>
-      <div class="set-row">
         <span class="set-label">画中画保持录制</span>
         <label class="switch"><input type="checkbox" id="tog-pip"><span class="track"></span></label>
+      </div>
+      <div class="set-row">
+        <span class="set-label" title="悬浮画面时时间码自动下移，避开站点顶部遮挡。默认：芒果TV 开启、其他站点关闭；直播模式与百度网盘上固定关闭">时间码显示回避</span>
+        <label class="switch"><input type="checkbox" id="tog-avoid"><span class="track"></span></label>
       </div>
       <div class="set-row" id="set-row-all">
         <span class="set-label">应用于当前网页</span>
@@ -98,20 +98,23 @@
           <option value="modified">按修改时间</option>
           <option value="name">按名称</option>
         </select>
+        <button type="button" id="hist-sort-dir" class="hist-act" title="切换升序 / 降序">↓</button>
+      </div>
+      <div class="hist-list" id="hist-list"></div>
+      <div class="hist-foot">
         <button type="button" id="hist-import" class="hist-act" title="导入记录（从表格文件导入）">
           <svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7"/><path d="M2.5 11.5v2h11v-2"/></svg>
         </button>
-        <button type="button" id="hist-all" class="hist-act" title="全选/取消全选">
+        <button type="button" id="hist-all" class="hist-act" title="全选" aria-pressed="false">
           <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
         </button>
-        <button type="button" id="hist-export" class="hist-act" title="导出选中（批量导出日志记录）" disabled>
-          <svg viewBox="0 0 16 16"><path d="M2.8 2.8h7.4l3 3v7.4H2.8z"/><path d="M5.2 2.8v3.6h5V2.8"/><path d="M4.8 9.2h6.4v4H4.8z"/></svg>
-        </button>
-        <button type="button" id="hist-clear" class="hist-act danger" title="清除选中" disabled>
+        <span class="hist-sel" id="hist-sel">已选 0 条记录</span>
+        <span class="grow"></span>
+        <button type="button" id="hist-clear" class="hist-act danger" title="删除选中" disabled>
           <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>
         </button>
+        <button type="button" id="hist-export" class="hist-foot-btn primary" title="批量导出（导出选中视频的日志记录）" disabled>批量导出</button>
       </div>
-      <div class="hist-list" id="hist-list"></div>
     </div>
   </header>
 

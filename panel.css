@@ -503,3 +503,21 @@ button:focus-visible{outline:2px solid var(--orange);outline-offset:1px}
   background-image:linear-gradient(45deg,transparent 50%,var(--faint) 50%),linear-gradient(135deg,var(--faint) 50%,transparent 50%);
   background-position:calc(100% - 10px) 52%,calc(100% - 6px) 52%;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
 .hist-sort:hover{border-color:var(--orange)}
+
+/* 历史记录：排序在右上角、操作按钮在列表下方一行 */
+#history-menu{display:flex;flex-direction:column}
+.hist-foot{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--card-brd);flex-shrink:0}
+.hist-sel{font-size:11px;color:var(--faint);white-space:nowrap}
+.hist-foot-btn{padding:5px 12px;font-size:12px;font-family:inherit;color:var(--text);background:var(--row);
+  border:1px solid var(--card-brd);border-radius:7px;cursor:pointer;white-space:nowrap}
+.hist-foot-btn:hover:not(:disabled){border-color:var(--orange);color:var(--orange)}
+.hist-foot-btn:disabled{opacity:.4;cursor:not-allowed}
+.hist-foot-btn.danger:hover:not(:disabled){border-color:#e74c3c;color:#e74c3c}
+.hist-foot-btn.primary{background:var(--orange);border-color:var(--orange);color:#fff}
+.hist-foot-btn.primary:hover:not(:disabled){filter:brightness(1.08);color:#fff}
+
+/* 历史底部条：图标按钮与顶部排序控件同高（26px） */
+.hist-head .hist-sort{height:26px;box-sizing:border-box;padding-top:0;padding-bottom:0}
+.hist-foot .hist-act{width:26px;height:26px;flex:0 0 26px}
+.hist-foot-btn{height:26px;display:inline-flex;align-items:center;box-sizing:border-box}
+.hist-act.on{border-color:var(--orange);color:var(--orange)}
