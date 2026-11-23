@@ -6,7 +6,7 @@
 const SETTINGS_KEY = 'mpp_settings';
 // v2.0：总开关拆分为「日志记录 / 视频控制栏」两个独立开关；lastMode 记忆上次的面板显示模式；annotateTimecode 标注截图嵌入时间码开关；noteFileName 备注写入文件名开关。
 // 颜色查找表没有设置项：由页面端按 Q 在 REC.709 / SLog3 / CLog3 之间循环（纯运行时状态，不落盘）
-const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, recProfile: 'baseline', noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: 'h264' };
+const DEFAULT_SETTINGS = { enabled: true, activeHosts: [], theme: 'dark', logEnabled: true, barEnabled: true, danmuBlock: true, recHigh: false, noteFileName: true, pipRecord: false, lastMode: 'sidebar', annotateTimecode: false, recCodec: 'h264' };
 
 async function getSettings() {
   const s = await chrome.storage.local.get(SETTINGS_KEY);

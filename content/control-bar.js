@@ -186,7 +186,11 @@
       // 存回「加载这份 logs 时的 key」：切换视频的瞬间也不会把 A 的记录写到 B 名下
       // savedAt：这份记录最后被写过的时间。面板删除历史时会记「墓碑时间」，
       // 只有比墓碑更新的记录才会被重新接受 —— 否则被关掉的旧标签页会在重新上报时把记录写回来
-      map[logsKey || videoKey()] = { inOut: logs.inOut, marks: logs.marks, savedAt: stamp };
+      const prevEntry = map[logsKey || videoKey()] || {};
+      map[logsKey || videoKey()] = {
+        inOut: logs.inOut, marks: logs.marks, savedAt: stamp,
+        createdAt: Number(prevEntry.createdAt) || stamp   // 添加时间：第一次出现时记下，之后不动
+      };
       localStorage.setItem(LOGS_KEY, JSON.stringify(map));
     } catch (e) { }
     // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
@@ -213,7 +217,8 @@
         url: location.href,
         marks: logs.marks.length,
         inOut: logs.inOut.length,
-        savedAt: stamp
+        savedAt: stamp,
+        createdAt: Number((readLogsMap()[logsKey || videoKey()] || {}).createdAt) || stamp
       }, '*');
     } catch (e) { }
   }
@@ -1992,11 +1997,12 @@
     return 'avc1.640034';                                            // level 5.2
   }
 
-  // 用户选择的编码档位（面板「设置 → 录制编码档位」）：baseline（默认）/ main / high
+  // 编码档位：默认 Baseline（兼容性最广：Windows MF 实时路径、部分 AMD 驱动、无硬编环境都只保证它）；
+  // 面板设置里的「H.264 High」（实验）打开后改用 High Profile。任一档位在本机编不出数据时，
+  // 自动改用 WebM（见 onSilentEncoderFailure）。
   function recProfileSetting() {
     const st = window.__mgpSettings || {};
-    const v = String(st.recProfile || '').toLowerCase();
-    return (v === 'main' || v === 'high') ? v : 'baseline';
+    return st.recHigh === true ? 'high' : 'baseline';
   }
   function recProfileOf(mime) {
     const m = /codecs=avc1\.([0-9A-Fa-f]{2})/.exec(String(mime || ''));

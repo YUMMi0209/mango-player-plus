@@ -70,12 +70,9 @@
         <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <span class="set-label" title="录制编码档位：Baseline 兼容性最好（默认）；Main / High 画质更高但部分显卡驱动不支持（不支持时会自动改用 WebM）">录制编码档位</span>
-        <select id="sel-rec-profile" class="set-select" title="Baseline / Main / High">
-          <option value="baseline">Baseline</option>
-          <option value="main">Main</option>
-          <option value="high">High</option>
-        </select>
+        <span class="set-label" title="高级录制编码（HiP）：开启后用 H.264 High Profile 录制（画质 / 压缩效率更好，但部分显卡驱动不支持）。关闭时用 Baseline；开启后若本机编不出数据，会自动改用 WebM。">高级录制编码/HiP</span>
+        <span class="set-tag">实验</span>
+        <label class="switch"><input type="checkbox" id="tog-rec-high"><span class="track"></span></label>
       </div>
       <div class="set-actions">
         <button id="btn-webfs" type="button" class="set-action-btn">
@@ -96,6 +93,11 @@
       <div class="hist-head">
         <span class="hist-title">历史记录</span>
         <span class="grow"></span>
+        <select id="hist-sort" class="hist-sort" title="排序方式">
+          <option value="added">按添加时间</option>
+          <option value="modified">按修改时间</option>
+          <option value="name">按名称</option>
+        </select>
         <button type="button" id="hist-import" class="hist-act" title="导入记录（从表格文件导入）">
           <svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7"/><path d="M2.5 11.5v2h11v-2"/></svg>
         </button>
@@ -103,7 +105,7 @@
           <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
         </button>
         <button type="button" id="hist-export" class="hist-act" title="导出选中（批量导出日志记录）" disabled>
-          <svg viewBox="0 0 16 16"><path d="M8 10.5v-8M4.5 6L8 2.5 11.5 6"/><path d="M2.5 11.5v2h11v-2"/></svg>
+          <svg viewBox="0 0 16 16"><path d="M2.8 2.8h7.4l3 3v7.4H2.8z"/><path d="M5.2 2.8v3.6h5V2.8"/><path d="M4.8 9.2h6.4v4H4.8z"/></svg>
         </button>
         <button type="button" id="hist-clear" class="hist-act danger" title="清除选中" disabled>
           <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4"/></svg>

@@ -297,7 +297,8 @@ const MPP = (() => {
       const inOut = Array.isArray(e.inOut) ? e.inOut.length : 0;
       if (marks + inOut === 0) { zeroKeys.push(k); continue; }
       const t = titles[k] || {};
-      out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut, savedAt: Number(e.savedAt) || 0 });
+      out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut,
+        savedAt: Number(e.savedAt) || 0, createdAt: Number(e.createdAt) || Number(e.savedAt) || 0 });
     }
     for (const k of Object.keys(titles)) {
       if (!(k in map) && zeroKeys.indexOf(k) === -1) zeroKeys.push(k);
@@ -645,7 +646,6 @@ const MPP = (() => {
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
-    els.selRecProfile = $('#sel-rec-profile');
     els.setRowAll = $(cfg.setRowAll);
     els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
@@ -667,6 +667,8 @@ const MPP = (() => {
     els.histAll = $(cfg.histAll);
     els.histExport = $(cfg.histExport);
     els.histClear = $(cfg.histClear);
+    els.histSort = $('#hist-sort');
+    els.togRecHigh = $('#tog-rec-high');
     if (isWindowMode()) document.title = '芒着拉片 | MG Player+';
     bindList(els.mkList);
     if (els.ioList !== els.mkList) bindList(els.ioList);
@@ -683,6 +685,15 @@ const MPP = (() => {
     bindCollapse();
     bindSelectAll();
     bindHistory();
+    if (els.histSort) {
+      els.histSort.value = histSortMode();
+      els.histSort.addEventListener('change', e => {
+        const v = e.target.value === 'modified' || e.target.value === 'name' ? e.target.value : 'added';
+        try { localStorage.setItem(HIST_SORT_KEY, v); } catch (e2) { }
+        sortHistItems();
+        renderHistory();
+      });
+    }
     bindTitleEdit();
     bindBatchKeys();   // 面板内按 S / R 批量截图、录制
   }
@@ -2133,26 +2144,82 @@ const MPP = (() => {
           '</label>').join('');
       }
 
-      // ③ 汇总 + 清单（所见即所导）
+      // 第 ③ 步的清单可编辑：改时间码 / 改备注 / 删掉一行 / 新增一行。
+      // 直接改候选里的 marks（导入时用的就是它），做到「所见即所导」。
+      function bindPreviewEditing() {
+        const marks = previewList.__marks || [];
+        previewList.querySelectorAll(".qc-ptc-in").forEach(inp => {
+          inp.addEventListener("change", () => {
+            const i = +inp.dataset.i;
+            const sec = parseTcInput(inp.value, meta.fps);
+            if (sec == null) { inp.classList.add("bad"); return; }
+            inp.classList.remove("bad");
+            marks[i].time = sec;
+            inp.value = fmtMark(sec);
+            const valid = marks.filter(x => x.time != null && isFinite(x.time)).length;
+            summaryEl.textContent = "将导入 " + valid + " 条" + (valid !== marks.length ? " · " + (marks.length - valid) + " 条无效将被跳过" : "");
+            if (okBtn) { okBtn.textContent = valid ? "导入 " + valid + " 条" : "导入"; okBtn.disabled = valid === 0; }
+          });
+        });
+        previewList.querySelectorAll(".qc-pnote-in").forEach(inp => {
+          inp.addEventListener("input", () => { marks[+inp.dataset.i].note = inp.value; });
+        });
+        previewList.querySelectorAll(".qc-pdel").forEach(btn => {
+          btn.addEventListener("click", () => {
+            marks.splice(+btn.dataset.i, 1);
+            previewList.__editingKey = "";
+            refreshPreview();
+          });
+        });
+        const addBtn = previewList.querySelector(".qc-add-row");
+        if (addBtn) addBtn.addEventListener("click", () => {
+          marks.push({ time: null, note: "" });
+          previewList.__editingKey = "";
+          refreshPreview();
+          const inputs = previewList.querySelectorAll(".qc-ptc-in");
+          const last = inputs[inputs.length - 1];
+          if (last) { last.focus(); last.select(); }
+        });
+      }
+
       const refreshPreview = () => {
         const c = selectedCand();
-        const marks = c ? (c.marks || []) : [];
-        const shown = marks.slice(0, 300);
-        previewList.innerHTML = shown.length
-          ? shown.map(x => '<div class="qc-pline"><span class="qc-ptc">' + esc(fmtMark(x.time)) + '</span>' + esc(x.note || '') + '</div>').join('')
-            + (marks.length > shown.length ? '<div class="qc-pempty">还有 ' + (marks.length - shown.length) + ' 条未显示</div>' : '')
-          : '<div class="qc-pempty">这张表里没有可导入的时间码</div>';
-        const bits = [];
-        bits.push(marks.length ? '将导入 ' + marks.length + ' 条' : '没有可导入的时间码');
-        if (c) {
-          if (c.skippedOut) bits.push('超出视频时长 ' + c.skippedOut + ' 条已跳过');
-          if (c.unparsed) bits.push(c.unparsed + ' 行没识别到时间码');
+        const key = c ? (c.label || "") : "";
+        if (previewList.__editingKey !== key) {
+          previewList.__editingKey = key;
+          previewList.__marks = c ? (c.marks || []).slice() : [];
         }
-        summaryEl.textContent = bits.join(' · ');
-        summaryEl.classList.toggle('warn', !marks.length);
-        return marks.length;
+        const marks = previewList.__marks;
+        if (c) c.marks = marks;
+        const shown = marks.slice(0, 300);
+        previewList.innerHTML = shows(shown, marks);
+        bindPreviewEditing();
+        const valid = marks.filter(x => x.time != null && isFinite(x.time)).length;
+        const bits = [];
+        bits.push(valid ? "将导入 " + valid + " 条" : "没有可导入的时间码");
+        if (valid !== marks.length) bits.push((marks.length - valid) + " 条时间码无效，将被跳过");
+        if (c) {
+          if (c.skippedOut) bits.push("超出视频时长 " + c.skippedOut + " 条已跳过");
+          if (c.unparsed) bits.push(c.unparsed + " 行没识别到时间码");
+        }
+        summaryEl.textContent = bits.join(" · ");
+        summaryEl.classList.toggle("warn", valid === 0);
+        return valid;
       };
 
+      // 清单 HTML：每行是「时间码输入 + 备注输入 + 删除」，底部「新增一行」
+      function shows(shown, marks) {
+        if (!marks.length) return "<div class=\"qc-pempty\">这张表里没有可导入的时间码</div>";
+        const rows = shown.map((x, i) =>
+          "<div class=\"qc-pline\" data-i=\"" + i + "\">" +
+            "<input class=\"qc-ptc-in\" data-i=\"" + i + "\" value=\"" + esc(fmtMark(x.time)) + "\" spellcheck=\"false\" title=\"时间码（可改）\">" +
+            "<input class=\"qc-pnote-in\" data-i=\"" + i + "\" value=\"" + esc(x.note || "") + "\" placeholder=\"备注\" title=\"备注（可改）\">" +
+            "<button type=\"button\" class=\"qc-pdel\" data-i=\"" + i + "\" title=\"删除这一行\">×</button>" +
+          "</div>").join("");
+        const more = marks.length > shown.length
+          ? "<div class=\"qc-pempty\">还有 " + (marks.length - shown.length) + " 条未显示（可先导入再编辑）</div>" : "";
+        return rows + "<div class=\"qc-padd\"><button type=\"button\" class=\"qc-add-row\">＋ 新增一行</button></div>" + more;
+      }
       const refresh = () => {
         [...m.querySelectorAll('.qc-stp')].forEach(el => {
           el.classList.toggle('on', +el.dataset.s === stage);
@@ -2186,6 +2253,7 @@ const MPP = (() => {
         try { files = await readSheetFiles(fileList); } catch (e) { files = []; }
         const built = buildQcCands(files, meta);
         cands = built.cands;
+        previewList.__editingKey = '';   // 重新读文件：清掉上一份表的编辑缓存
         sheets = built.sheetNames;
         sheetHint = built.hint;
         fileNames = files.map(f => f.name);
@@ -2663,7 +2731,8 @@ const MPP = (() => {
           if (Number(it.savedAt || 0) > tGone) { delete gone[it.key]; goneChanged = true; }
           else return;   // 旧记录：当作已删除
         }
-        map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut, savedAt: Number(it.savedAt) || 0 };
+        map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut,
+          savedAt: Number(it.savedAt) || 0, createdAt: Number(it.createdAt) || Number(it.savedAt) || 0 };
       });
       // 写回仅限本地索引（不包含导入计数，避免重复累积）；墓碑有变化时一起写回
       const patch = { mpp_history: map };
@@ -2692,12 +2761,33 @@ const MPP = (() => {
         title: map[k].title || '',
         url: map[k].url || '',
         marks: map[k].marks || 0,
-        inOut: map[k].inOut || 0
+        inOut: map[k].inOut || 0,
+        addedAt: Number(map[k].createdAt) || Number(map[k].savedAt) || 0,
+        savedAt: Number(map[k].savedAt) || 0
       }));
-      histItems.sort((a, b) => (b.marks + b.inOut) - (a.marks + a.inOut));
+      sortHistItems();
       renderHistory();
       restoreHistSel();
     }).catch(() => { histItems = []; renderHistory(); });
+  }
+
+  // 历史排序：添加时间 / 修改时间 / 名称（选择记在本机）
+  const HIST_SORT_KEY = 'mpp_hist_sort';
+  function histSortMode() {
+    try {
+      const v = localStorage.getItem(HIST_SORT_KEY);
+      return (v === 'modified' || v === 'name') ? v : 'added';
+    } catch (e) { return 'added'; }
+  }
+  function sortHistItems() {
+    const mode = histSortMode();
+    if (mode === 'name') {
+      histItems.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN'));
+    } else if (mode === 'modified') {
+      histItems.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0) || (b.addedAt || 0) - (a.addedAt || 0));
+    } else {
+      histItems.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0));
+    }
   }
 
   function renderHistory() {
@@ -2800,10 +2890,7 @@ const MPP = (() => {
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
-    if (els.selRecProfile) {
-      const rp = String(s.recProfile || 'baseline').toLowerCase();
-      els.selRecProfile.value = (rp === 'main' || rp === 'high') ? rp : 'baseline';
-    }
+    if (els.togRecHigh) els.togRecHigh.checked = s.recHigh === true;
       applyTheme(s.theme);
     });
     // 直播模式：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
@@ -2881,10 +2968,9 @@ const MPP = (() => {
       await chrome.storage.local.set({ mpp_settings: s });
       load(true);
     });
-    if (els.selRecProfile) els.selRecProfile.addEventListener('change', e => {
-      const v = e.target.value === 'main' || e.target.value === 'high' ? e.target.value : 'baseline';
-      savePatch({ recProfile: v });
-      panelToast('录制编码档位：' + (v === 'baseline' ? 'Baseline' : v === 'main' ? 'Main' : 'High'));
+    if (els.togRecHigh) els.togRecHigh.addEventListener('change', e => {
+      savePatch({ recHigh: e.target.checked });
+      panelToast(e.target.checked ? '录制改用 H.264 High（失败会自动改用 WebM）' : '录制使用 H.264 Baseline');
     });
     if (els.togTheme) els.togTheme.addEventListener('change', e => {
       const theme = e.target.checked ? 'light' : 'dark';

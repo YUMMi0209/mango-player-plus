@@ -43,7 +43,8 @@
               return;
             }
             if (tGone && savedAt > tGone) delete gone[key];   // 删除之后又有新记录 → 解除墓碑
-            map[key] = { title, url, marks, inOut, savedAt };
+            const createdAt = Number.isFinite(d.createdAt) ? Math.min(Date.now() + 1000, Math.max(0, d.createdAt)) : savedAt;
+            map[key] = { title, url, marks, inOut, savedAt, createdAt };
           } else {
             delete map[key];
           }
