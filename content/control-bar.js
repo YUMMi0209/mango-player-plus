@@ -550,6 +550,10 @@
     if (!raw) { recSafeMode = recSafeRead(); return; }
     recClearMark();
     recSafeSet(true);
+    // 上次就是崩在「开始录制」这一步：把 H.264 判为不可用并持久化，之后直接用 WebM，
+    // 不再拿用户的页面去撞一次崩溃（想恢复 MP4：把 Edge 图形首选项设成高性能，或清掉这个标记）
+    try { localStorage.setItem(REC_H264_KEY, '0@1080'); } catch (e) { }
+    recH264Ok = false;
     let info = null;
     try { info = JSON.parse(raw); } catch (e) { }
     try {
@@ -1857,10 +1861,13 @@
       const bucket = recSizeBucket(w);
       const cached = recH264Cached(bucket);
       if (cached !== null) { recH264Ok = cached; return cached; }
-      // WebCodecs 说 supported 只代表「有编码器」，不代表「起录不会崩」，所以仍然要 iframe 实测；
-      // 但 supported=false 时可以确定不能用，直接判否，省一次探测
+      // WebCodecs 的 isConfigSupported 就是「按真实尺寸 + 合法电平」问的，可信：
+      //   · true  → 有可用编码器，直接用 MP4（快、不受后台 iframe 节流影响）
+      //   · false → 明确没有，改用 WebM
+      //   · null  → 没有 WebCodecs，退到隔离 iframe 实测
       const wc = await webCodecsHasH264(w, h, fps);
-      if (wc === false) { console.log('[MGP-REC] WebCodecs 报 H.264 不可用，改用 WebM'); return recH264Remember(false, bucket); }
+      if (wc === true) return recH264Remember(true, bucket);
+      if (wc === false) { console.info('[MGP-REC] WebCodecs 报 H.264 不可用，改用 WebM'); return recH264Remember(false, bucket); }
       const res = await probeH264InFrame(w, h);
       if (res === 'ok') return recH264Remember(true, bucket);
       if (res === 'fail' || res === 'dead') {
