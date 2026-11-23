@@ -1653,6 +1653,7 @@
   // 表现为录制画面冻结（首帧后定格）而声音正常。AudioContext 只路由音频，不影响渲染；
   // 播放器已占用 MediaElementSource 等失败场景回退 video.captureStream() 取音频轨。
   let recAudioCtx = null;
+  let recAudioDest = null;                // 上一次的 MediaStreamDestination（复用前先断开）
   const recAudioSrcMap = new WeakMap();   // video 元素 → MediaElementSource（createMediaElementSource 每元素仅一次）
   function getRecAudioTrack(v) {
     try {
@@ -1662,11 +1663,12 @@
         recAudioCtx = new AC();
       }
       // Autoplay Policy：页面音频未被激活时 AudioContext 处于 suspended，
-      // MediaStreamDestination 不会产生音频数据 → 直接回退 captureStream，
-      // 避免"录制有概率没声音"（resume 是异步的，无法在取轨前保证完成）
+      // MediaStreamDestination 不会产生音频数据 → 本次录制不取音频（录无声），
+      // 不再回退 video.captureStream()：那条路会把 video 切进捕获模式（画面冻结），
+      // 在已捕获过的元素上还容易触发 Chromium 断言（页面直接 STATUS_BREAKPOINT）
       if (recAudioCtx.state !== 'running') {
         recAudioCtx.resume().catch(() => { });
-        throw new Error('ac-not-running');
+        return null;
       }
       let src = recAudioSrcMap.get(v);
       if (!src) {
@@ -1675,17 +1677,16 @@
         src.connect(recAudioCtx.destination);
         recAudioSrcMap.set(v, src);
       }
-      // 每次录制新建 MediaStreamDestination：录制停止会 stop recStream 全部轨道
-      // （含本 dest 的音频轨），若复用旧 dest 会拿到已停止的轨道 → 录制无声
-      const dest = recAudioCtx.createMediaStreamDestination();
-      src.connect(dest);
-      const t = dest.stream.getAudioTracks()[0];
+      // 每次录制新建 MediaStreamDestination（停止会 stop 其轨道，复用旧 dest 会录到静音），
+      // 但**先把上一次的 dest 断开**：否则每录一次就多挂一个节点，长时间使用会累积成崩溃隐患
+      if (recAudioDest) {
+        try { src.disconnect(recAudioDest); } catch (e) { }
+        recAudioDest = null;
+      }
+      recAudioDest = recAudioCtx.createMediaStreamDestination();
+      src.connect(recAudioDest);
+      const t = recAudioDest.stream.getAudioTracks()[0];
       if (t) return { track: t, via: 'audiocontext' };
-    } catch (e) { /* 回退下方方案 */ }
-    try {
-      const vs = v.captureStream();
-      const t = vs.getAudioTracks()[0];
-      if (t) return { track: t, via: 'capturestream' };
     } catch (e) { }
     return null;
   }
@@ -1798,20 +1799,38 @@
     // （此前用 captureStream(定帧率) + MediaStreamTrackProcessor/Generator 重打时间戳做 CFR：
     //   多了一层读取与重写，网格与源节奏一有抖动就插重复帧或丢帧，反而发顿）
     const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
-    recStream = recCanvas.captureStream();
-    // 音频：AudioContext 捕获优先（避免 video.captureStream() 影响渲染），失败回退
-    const audioRes = getRecAudioTrack(video);
-    const audioVia = audioRes ? audioRes.via : 'none';
-    if (audioRes && audioRes.track) recStream.addTrack(audioRes.track);
-    if (!recStream.getVideoTracks().length) {
+    const mt = pickRecMime();
+    // mimeType 是否真的能装音频（本机没有 AAC 编码器时会退回纯视频候选）。
+    // ⚠️ 关键：不能在「mimeType 没有音频编码器」时把音频轨塞进 MediaRecorder ——
+    // Chromium 的 MP4 muxer 会 CHECK 失败，整个渲染进程崩溃（页面报 STATUS_BREAKPOINT）
+    const mtHasAudio = /(mp4a|opus)/i.test(mt);
+    let recStreamLocal = null;
+    try {
+      recStream = recCanvas.captureStream();
+      recStreamLocal = recStream;
+    } catch (e) {
+      recStream = null;
+    }
+    if (!recStream || !recStream.getVideoTracks().length) {
       recordingInternal = false;
       recAutoStop = false;
+      if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
+      recCanvas = null; recCtx = null;
       mgpToast('无法采集视频流', true);
       return;
     }
-
-    const mt = pickRecMime();
-    if (!/mp4a/.test(mt)) console.info('[MGP-REC] 本机不支持 MP4+AAC，本次录制可能没有声音：' + mt);
+    // 音频：只用 AudioContext（不动 video 的捕获模式）；拿不到就录无声，不再回退 captureStream
+    const audioRes = mtHasAudio ? getRecAudioTrack(video) : null;
+    let audioVia = audioRes ? audioRes.via : (mtHasAudio ? 'none' : 'no-aac');
+    if (audioRes && audioRes.track) {
+      try { recStream.addTrack(audioRes.track); } catch (e) { }
+    }
+    if (!mtHasAudio) {
+      console.info('[MGP-REC] 本机不支持 MP4+AAC，本次录制没有声音：' + mt);
+      try { mgpToast('本机不支持 MP4+AAC，本次录制没有声音', true); } catch (e) { }
+    } else if (!audioRes) {
+      console.info('[MGP-REC] 未取到音频轨（AudioContext 不可用），本次录制没有声音');
+    }
 
     // 目标码率：按画布分辨率档位取值。
     // ⚠️ MediaRecorder 的 videoBitsPerSecond 只是「目标值」，Chromium 的 H.264 编码器
@@ -1825,50 +1844,72 @@
       : recPx >= 1920 * 1080 ? 40000000
       : recPx >= 1280 * 720 ? 24000000
       : 16000000;
-    try {
-      recMediaRecorder = new MediaRecorder(recStream, {
-        mimeType: mt,
-        videoBitsPerSecond: videoBits,
-        audioBitsPerSecond: 128000
-      });
-    } catch (e) {
-      // 构造失败（编码器不支持等）：清理本次录制资源并恢复 UI，避免泄漏与状态卡死
+    // 起录失败时干净复位（UI / 轨道 / 画布 / 画中画），避免状态卡死
+    const resetFailedStart = msg => {
       recordingInternal = false; recAutoStop = false;
       if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
-      if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+      if (recStream) { try { recStream.getTracks().forEach(t => t.stop()); } catch (e) { } recStream = null; }
       if (recCanvas && recCanvas.parentElement) recCanvas.parentElement.removeChild(recCanvas);
       recCanvas = null; recCtx = null;
+      recMediaRecorder = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
       if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
       if (bar) bar.classList.remove('recording');
-      mgpToast('无法开始录制：编码器不支持', true);
-      return;
-    }
+      try { mgpToast(msg, true); } catch (e) { }
+    };
+    // 构造 + 启动一次（失败返回 null）。MediaRecorder 的构造与 start() 都可能抛错 ——
+    // 之前在 try 外面直接 start()，一旦抛错整段录制状态会卡住
+    const tryStartRecorder = (stream, mimeType) => {
+      try {
+        const rec = new MediaRecorder(stream, {
+          mimeType: mimeType || undefined,
+          videoBitsPerSecond: videoBits,
+          audioBitsPerSecond: 128000
+        });
+        rec.ondataavailable = e => {
+          if (e.data.size > 0) {
+            recChunks.push(e.data);
+            recChunkBytes += e.data.size;
+            recLastChunkAt = performance.now();
+          }
+        };
+        rec.onstop = () => finishRecording();
+        rec.onerror = () => {
+          if (recordingInternal) {
+            try { mgpToast('录制出错（编码器异常），已停止', true); } catch (e) { }
+            stopRecording();
+          }
+        };
+        rec.start(250);
+        return rec;
+      } catch (e) {
+        console.info('[MGP-REC] 起录失败：' + (e && e.message));
+        return null;
+      }
+    };
     recChunks = [];
     recChunkBytes = 0;
     recLastChunkAt = performance.now();
     recStartAt = performance.now();
-    // 编码产出统计：ondataavailable 的字节数与时刻是判断「编码器是否跟得上」的
-    // 唯一可靠信号（pacerDrops 只反映 pacer 队列背压，MediaRecorder 内部积压不反馈）
-    recMediaRecorder.ondataavailable = e => {
-      if (e.data.size > 0) {
-        recChunks.push(e.data);
-        recChunkBytes += e.data.size;
-        recLastChunkAt = performance.now();
+    recMediaRecorder = tryStartRecorder(recStream, mt);
+    if (!recMediaRecorder) {
+      // 回退：去掉音频轨 + 默认 mimeType 再试一次。
+      // 部分机器上「H.264+AAC 组合配置」会让 muxer / 编码器初始化失败（甚至渲染进程崩溃），
+      // 退成无声录制至少能拿到画面
+      try { recStream.getAudioTracks().forEach(t => { try { recStream.removeTrack(t); } catch (e) { } }); } catch (e) { }
+      const mime2 = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')) ? 'video/mp4' : '';
+      recMediaRecorder = tryStartRecorder(recStream, mime2);
+      if (recMediaRecorder) {
+        audioVia = 'fallback-video-only';
+        try { mgpToast('音频配置不可用，已改用无声录制', true); } catch (e) { }
       }
-    };
-    recMediaRecorder.onstop = () => finishRecording();
-    // 编码器错误（H.264 硬件编码失败 / 资源耗尽等）监听：MediaRecorder 会静默停止
-    // 消费视频轨导致画面定格，这里主动停止录制并提示，避免产出残缺文件
-    recMediaRecorder.onerror = () => {
-      if (recordingInternal) {
-        try { mgpToast('录制出错（编码器异常），已停止', true); } catch (e) { }
-        stopRecording();
-      }
-    };
-    // Use shorter timeslice (250ms) for finer chunking — reduces data loss on crash
-    recMediaRecorder.start(250);
+    }
+    if (!recMediaRecorder) {
+      resetFailedStart('无法开始录制：浏览器编码器不可用');
+      return;
+    }
+
     // 绘制驱动：源视频每来一个新帧画一次（requestVideoFrameCallback + mediaTime 去重），
     // 画布因此「一源帧产一帧」，captureStream() 跟着给出与实际节奏一致的时间戳。
     // 不做重复绘制也不做定时重绘：全尺寸 drawImage（1080p 每帧约 8MB 像素搬运）是主线程
