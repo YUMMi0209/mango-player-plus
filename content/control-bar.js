@@ -1056,8 +1056,8 @@
     loadState();
     // 上次起录若有崩溃面包屑：切保守模式并提示（见 checkRecCrashMark）
     try { checkRecCrashMark(); } catch (e) { }
-    // 后台预探测编码器（有缓存就不再探），避免第一次按录制时还要等探测
-    try { probeH264().catch(() => { }); } catch (e) { }
+    // 不在注入时预探测：1080p 试编开销不小（要在隐藏 iframe 里真编 1 秒），
+    // 改为第一次按录制时懒探测（结果按尺寸档缓存，之后不再探）
     if (state.markTime !== null || state.inPoint !== null) {
       updateTC();
     }
@@ -1759,15 +1759,24 @@
   let recH264Ok = null;      // null = 还没探测；true/false = MediaRecorder 的 H.264 实测结果
   let recEncoderProbe = null;
   const REC_H264_KEY = 'mpp_rec_h264';
-  function recH264Cached() {
+  // 尺寸档：H.264 能不能编跟分辨率强相关（核显可能小尺寸能编、1080p 直接崩），
+  // 所以缓存要带尺寸档，换档就重新探测
+  function recSizeBucket(w) {
+    const x = w || 0;
+    return x >= 1600 ? '1080' : (x >= 1000 ? '720' : '480');
+  }
+  function recH264Cached(bucket) {
     try {
-      const v = localStorage.getItem(REC_H264_KEY);
-      return v === '1' ? true : (v === '0' ? false : null);
+      const v = String(localStorage.getItem(REC_H264_KEY) || '');
+      const m = /^(1|0)@(\w+)$/.exec(v);
+      if (!m) return null;
+      if (bucket && m[2] !== bucket) return null;   // 尺寸档变了 → 重新探测
+      return m[1] === '1';
     } catch (e) { return null; }
   }
-  function recH264Remember(ok) {
+  function recH264Remember(ok, bucket) {
     recH264Ok = ok === true;
-    try { localStorage.setItem(REC_H264_KEY, recH264Ok ? '1' : '0'); } catch (e) { }
+    try { localStorage.setItem(REC_H264_KEY, (recH264Ok ? '1' : '0') + '@' + (bucket || '1080')); } catch (e) { }
     return recH264Ok;
   }
   // WebCodecs 速判：能编就说明有 H.264 编码器，直接用 MP4（省掉 iframe 探测）
@@ -1806,9 +1815,13 @@
     });
   }
   // 隔离 iframe 里实测 MediaRecorder 的 H.264：'ok' | 'fail' | 'dead' | 'blocked'
-  async function probeH264InFrame() {
+  async function probeH264InFrame(w, h) {
     const url = await requestProbeUrl();
     if (!url) return 'blocked';
+    // 关键：必须按「真实录制尺寸 + 合法电平」去试编 —— 小尺寸往往能过，
+    // 但 1080p 才会暴露「编码器初始化就崩」的问题
+    const codec = h264LevelCodec(w || 1280, h || 720, 25);
+    const full = url + '#w=' + Math.round(w || 1280) + '&h=' + Math.round(h || 720) + '&c=' + encodeURIComponent(codec);
     return new Promise(resolve => {
       let done = false;
       const frame = document.createElement('iframe');
@@ -1830,10 +1843,10 @@
       window.addEventListener('message', onMsg);
       frame.addEventListener('load', () => { loaded = true; });
       frame.addEventListener('error', () => finish('blocked'));
-      frame.src = url;
+      frame.src = full;
       document.documentElement.appendChild(frame);
       // 2.4s 没回音：iframe 加载过 = 探测进程很可能崩了（dead）；没加载过 = 被拦（blocked）
-      setTimeout(() => finish(loaded ? 'dead' : 'blocked'), 2400);
+      setTimeout(() => finish(loaded ? 'dead' : 'blocked'), 3500);
     });
   }
   // 能不能用 MediaRecorder 的 H.264：缓存 → WebCodecs 速判 → 隔离 iframe 实测
@@ -1841,15 +1854,18 @@
     if (recH264Ok !== null) return Promise.resolve(recH264Ok);
     if (recEncoderProbe) return recEncoderProbe;
     recEncoderProbe = (async () => {
-      const cached = recH264Cached();
+      const bucket = recSizeBucket(w);
+      const cached = recH264Cached(bucket);
       if (cached !== null) { recH264Ok = cached; return cached; }
+      // WebCodecs 说 supported 只代表「有编码器」，不代表「起录不会崩」，所以仍然要 iframe 实测；
+      // 但 supported=false 时可以确定不能用，直接判否，省一次探测
       const wc = await webCodecsHasH264(w, h, fps);
-      if (wc === true) return recH264Remember(true);
-      const res = await probeH264InFrame();
-      if (res === 'ok') return recH264Remember(true);
+      if (wc === false) { console.log('[MGP-REC] WebCodecs 报 H.264 不可用，改用 WebM'); return recH264Remember(false, bucket); }
+      const res = await probeH264InFrame(w, h);
+      if (res === 'ok') return recH264Remember(true, bucket);
       if (res === 'fail' || res === 'dead') {
         console.info('[MGP-REC] H.264 编码器实测不可用（' + res + '），改用 WebM/VP9 录制');
-        return recH264Remember(false);
+        return recH264Remember(false, bucket);
       }
       // blocked：没法探测（扩展页被拦），沿用旧行为（MP4），并靠崩溃面包屑兜底
       recH264Ok = null;

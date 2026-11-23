@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>芒着拉片 | MG Player+ v4.6 使用教程</title>
+<title>芒着拉片 | MG Player+ v4.7 使用教程</title>
 <style>
 :root{--bg:#131518;--card:#1a1c1e;--card-brd:#35353c;--row:#26262b;--text:#ececef;--muted:#a0a0a8;--faint:#6e6e76;--orange:#ff5f00;--orange-dk:#ff5f0029;--mono:"JetBrains Mono",Consolas,monospace;--scan:#ffffff07}
 :root[data-theme=light]{--bg:#f5f5f8;--card:#fff;--card-brd:#dcdce4;--row:#f0f0f4;--text:#18181e;--muted:#3c3c48;--faint:#6f6f7a;--orange:#e65400;--orange-dk:#ff5f001f;--scan:#00000006}
@@ -44,7 +44,7 @@ li{margin:4px 0}
 <div class="wrap">
 <header>
 <span class="brand"><span class="brand-tape"></span>芒着拉片<span class="accent">｜</span>MG Player+</span>
-<span class="sub">使用教程 · v4.6</span>
+<span class="sub">使用教程 · v4.7</span>
 </header>
 
 <h2><span class="num">1</span>快速上手</h2>
@@ -185,7 +185,7 @@ li{margin:4px 0}
 </details>
 <details>
 <summary>录制的视频没有声音？</summary>
-<div class="body">多为浏览器权限问题：视频从没播放过、标签页被静音，或内容受保护不允许采集声音。先播放视频、取消静音，再录一次通常就正常了。<br>另外本机没有 MP4+AAC 编码器时（少见），插件会<b>自动改用无声录制</b>并提示，不会因为音频配置失败而录不出来。<br>如果本机<b>压根没有可用的 H.264 编码器</b>（少数显卡驱动 / 浏览器版本），按录制会直接让浏览器报 STATUS_BREAKPOINT 崩掉页面。插件会先<b>在隔离的扩展页面里实测一次</b>，确认不可用就<b>自动改录 WebM / VP9</b>（文件名后缀 <span class="mono">.webm</span>），录制照常可用。</div>
+<div class="body">多为浏览器权限问题：视频从没播放过、标签页被静音，或内容受保护不允许采集声音。先播放视频、取消静音，再录一次通常就正常了。<br>另外本机没有 MP4+AAC 编码器时（少见），插件会<b>自动改用无声录制</b>并提示，不会因为音频配置失败而录不出来。<br>如果本机<b>H.264 编码器不可用</b>（少数显卡驱动 / Windows 预览版），按录制可能让浏览器报 STATUS_BREAKPOINT 崩掉页面。插件会先<b>在隔离的扩展页面里、按真实录制尺寸实测一次</b>，不可用就<b>自动改录 WebM / VP9</b>（后缀 <span class="mono">.webm</span>），录制照常可用。<br><b>想录 MP4 的话</b>：Windows「设置 → 系统 → 显示 → 显卡」里把 <span class="mono">msedge.exe</span> 设为<b>高性能（独显）</b>，然后完全退出浏览器重开 —— Chromium 的 H.264 编码用的是「浏览器当前那块显卡」，核显的硬件编码在部分系统上会崩，独显（NVENC）通常正常。改完插件会自动回到 MP4。</div>
 </details>
 <details>
 <summary>录制画面发灰 / 和原片不一样？</summary>
@@ -201,7 +201,7 @@ li{margin:4px 0}
 </details>
 
 <footer>
-<span>芒着拉片 | MG Player+ v4.6</span>
+<span>芒着拉片 | MG Player+ v4.7</span>
 <span>YUMMi</span>
 </footer>
 </div>
