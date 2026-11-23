@@ -62,8 +62,12 @@
       </div>
       <div class="set-row">
         <span class="set-label">画中画保持录制</span>
-        <span class="set-tag">实验</span>
         <label class="switch"><input type="checkbox" id="tog-pip"><span class="track"></span></label>
+      </div>
+      <div class="set-row" id="set-row-all">
+        <span class="set-label">应用于当前网页</span>
+        <span class="set-tag">实验</span>
+        <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
       </div>
       <div class="set-row">
         <span class="set-label" title="录制编码档位：Baseline 兼容性最好（默认）；Main / High 画质更高但部分显卡驱动不支持（不支持时会自动改用 WebM）">录制编码档位</span>
@@ -72,11 +76,6 @@
           <option value="main">Main</option>
           <option value="high">High</option>
         </select>
-      </div>
-      <div class="set-row" id="set-row-all">
-        <span class="set-label">应用于当前网页</span>
-        <span class="set-tag">实验</span>
-        <label class="switch"><input type="checkbox" id="tog-all"><span class="track"></span></label>
       </div>
       <div class="set-actions">
         <button id="btn-webfs" type="button" class="set-action-btn">
