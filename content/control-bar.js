@@ -523,6 +523,42 @@
   let pipActive = false;     // 画中画保持录制：录制期间 PiP 窗口激活（页面后台时视频仍渲染）
   let hashSeekDone = false;
 
+  // ── 录制崩溃自愈 ─────────────────────────────
+  // 起录前写一条「面包屑」，start() 成功后立刻清掉。若下次注入页面时面包屑还在，
+  // 说明上一次录制在「开始录制」这一步把渲染进程搞崩了（例如 STATUS_BREAKPOINT），
+  // 于是自动切到「保守模式」再录一次：只录画面、默认容器、码率与画布尺寸都收紧、不进画中画。
+  const REC_MARK_KEY = 'mpp_rec_start';
+  const REC_SAFE_KEY = 'mpp_rec_safe';
+  let recSafeMode = false;
+  function recSafeRead() {
+    try { return localStorage.getItem(REC_SAFE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function recSafeSet(on) {
+    recSafeMode = !!on;
+    try { if (on) localStorage.setItem(REC_SAFE_KEY, '1'); else localStorage.removeItem(REC_SAFE_KEY); } catch (e) { }
+  }
+  function recMarkCrash(info) {
+    try { localStorage.setItem(REC_MARK_KEY, JSON.stringify(Object.assign({ at: Date.now() }, info || {}))); } catch (e) { }
+  }
+  function recClearMark() {
+    try { localStorage.removeItem(REC_MARK_KEY); } catch (e) { }
+  }
+  // 注入时检查：有面包屑 = 上次起录崩溃过
+  function checkRecCrashMark() {
+    let raw = '';
+    try { raw = localStorage.getItem(REC_MARK_KEY) || ''; } catch (e) { return; }
+    if (!raw) { recSafeMode = recSafeRead(); return; }
+    recClearMark();
+    recSafeSet(true);
+    let info = null;
+    try { info = JSON.parse(raw); } catch (e) { }
+    try {
+      console.info('[MGP-REC] 上次开始录制时浏览器崩溃（面包屑：' + raw + '），已切到保守录制模式');
+      mgpToast('上次在开始录制时崩溃了：已改用更保守的录制参数（只录画面）', true);
+    } catch (e) { }
+    void info;
+  }
+
   function qs(s) { return shadow ? shadow.querySelector(s) : null; }
 
   // v2.0：总开关拆分为「日志记录」与「视频控制栏」两个独立开关，互不影响
@@ -1018,6 +1054,10 @@
     ptsOffset = 0; ptsOffsetVerified = false; ptsHist.length = 0;   // 换集后重测新片源
     dqSamples.length = 0;
     loadState();
+    // 上次起录若有崩溃面包屑：切保守模式并提示（见 checkRecCrashMark）
+    try { checkRecCrashMark(); } catch (e) { }
+    // 后台预探测编码器（有缓存就不再探），避免第一次按录制时还要等探测
+    try { probeH264().catch(() => { }); } catch (e) { }
     if (state.markTime !== null || state.inPoint !== null) {
       updateTC();
     }
@@ -1052,6 +1092,12 @@
     });
     window.__mgpSyncVideoKey = syncVideoKey;
     // 标注窗口打开期间：任何来源的 play()（站点控件 / 键盘 / 自动播放）都立刻暂停
+    // 暂停（任何来源：站点控件 / 快捷键 / 自动暂停 / 恢复播放前的准备）→ 立刻回到 1 倍速，
+    // 避免「暂停在 2X 上、再播放发现还是 2X」这种意外
+    video.addEventListener('pause', () => {
+      try { resetSpeed(); } catch (e) { }   // 任何方式暂停都回到 1 倍速
+      try { updateTC(); } catch (e) { }      // 顺手刷新顶部倍速标签（暂停时没有新帧回调）
+    });
     ['play', 'playing'].forEach(ev => {
       video.addEventListener(ev, () => {
         if (annHost && video && !video.paused) { try { video.pause(); } catch (e) { } }
@@ -1704,10 +1750,126 @@
     return best;
   }
 
+  // ── 编码器可用性探测（实测必需）────────────────
+  // 有的机器上 MediaRecorder.isTypeSupported('video/mp4;codecs=avc1…') 会返回 true，
+  // 但实际没有可用的 H.264 编码器：一旦 start() 编码就触发 Chromium 的 CHECK 失败，
+  // 整个渲染进程崩溃（页面报 STATUS_BREAKPOINT），JS 层完全 catch 不到。
+  // 所以起录前先用 WebCodecs 探一下 H.264 到底能不能编（这个探测本身不会崩），
+  // 不能编就改用 WebM / VP9 —— 宁可给 webm，也不要把页面搞崩。
+  let recH264Ok = null;      // null = 还没探测；true/false = MediaRecorder 的 H.264 实测结果
+  let recEncoderProbe = null;
+  const REC_H264_KEY = 'mpp_rec_h264';
+  function recH264Cached() {
+    try {
+      const v = localStorage.getItem(REC_H264_KEY);
+      return v === '1' ? true : (v === '0' ? false : null);
+    } catch (e) { return null; }
+  }
+  function recH264Remember(ok) {
+    recH264Ok = ok === true;
+    try { localStorage.setItem(REC_H264_KEY, recH264Ok ? '1' : '0'); } catch (e) { }
+    return recH264Ok;
+  }
+  // WebCodecs 速判：能编就说明有 H.264 编码器，直接用 MP4（省掉 iframe 探测）
+  async function webCodecsHasH264() {
+    try {
+      if (typeof VideoEncoder === 'undefined' || typeof VideoEncoder.isConfigSupported !== 'function') return null;
+      const cfgs = [
+        { codec: 'avc1.42E01E', width: 1280, height: 720, bitrate: 8000000, framerate: 25 },
+        { codec: 'avc1.42001E', width: 1280, height: 720, bitrate: 8000000, framerate: 25 },
+        { codec: 'avc1.42E01E', width: 1920, height: 1080, bitrate: 16000000, framerate: 25 }
+      ];
+      for (const c of cfgs) {
+        try { const r = await VideoEncoder.isConfigSupported(c); if (r && r.supported) return true; } catch (e) { }
+      }
+      return false;
+    } catch (e) { return null; }
+  }
+  // 拿探测页地址（经桥；拿不到就是 null）
+  function requestProbeUrl() {
+    return new Promise(resolve => {
+      let done = false;
+      const onMsg = e => {
+        const d = e.data;
+        if (!d || d.__mgp !== 'probeUrl' || typeof d.url !== 'string' || !d.url) return;
+        if (done) return;
+        done = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d.url);
+      };
+      window.addEventListener('message', onMsg);
+      try { window.postMessage({ __mgp: 'probeUrl' }, '*'); } catch (e) { }
+      setTimeout(() => { if (done) return; done = true; window.removeEventListener('message', onMsg); resolve(null); }, 400);
+    });
+  }
+  // 隔离 iframe 里实测 MediaRecorder 的 H.264：'ok' | 'fail' | 'dead' | 'blocked'
+  async function probeH264InFrame() {
+    const url = await requestProbeUrl();
+    if (!url) return 'blocked';
+    return new Promise(resolve => {
+      let done = false;
+      const frame = document.createElement('iframe');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;border:0';
+      let loaded = false;
+      const finish = res => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('message', onMsg);
+        try { frame.remove(); } catch (e) { }
+        resolve(res);
+      };
+      const onMsg = e => {
+        const d = e.data;
+        if (!d || d.__mgpProbe !== 1) return;
+        finish(d.ok === true ? 'ok' : 'fail');
+      };
+      window.addEventListener('message', onMsg);
+      frame.addEventListener('load', () => { loaded = true; });
+      frame.addEventListener('error', () => finish('blocked'));
+      frame.src = url;
+      document.documentElement.appendChild(frame);
+      // 2.4s 没回音：iframe 加载过 = 探测进程很可能崩了（dead）；没加载过 = 被拦（blocked）
+      setTimeout(() => finish(loaded ? 'dead' : 'blocked'), 2400);
+    });
+  }
+  // 能不能用 MediaRecorder 的 H.264：缓存 → WebCodecs 速判 → 隔离 iframe 实测
+  function probeH264() {
+    if (recH264Ok !== null) return Promise.resolve(recH264Ok);
+    if (recEncoderProbe) return recEncoderProbe;
+    recEncoderProbe = (async () => {
+      const cached = recH264Cached();
+      if (cached !== null) { recH264Ok = cached; return cached; }
+      const wc = await webCodecsHasH264();
+      if (wc === true) return recH264Remember(true);
+      const res = await probeH264InFrame();
+      if (res === 'ok') return recH264Remember(true);
+      if (res === 'fail' || res === 'dead') {
+        console.info('[MGP-REC] H.264 编码器实测不可用（' + res + '），改用 WebM/VP9 录制');
+        return recH264Remember(false);
+      }
+      // blocked：没法探测（扩展页被拦），沿用旧行为（MP4），并靠崩溃面包屑兜底
+      recH264Ok = null;
+      recEncoderProbe = null;
+      return true;
+    })();
+    return recEncoderProbe;
+  }
+
   // 录制编码固定为 MP4 / H.264 + AAC：容器与编码最通用（所有播放器 / 剪辑软件都能直接用）。
   // 不提供 WebM 档：WebM 只能装 Opus 音频，部分播放器与剪辑软件打不开，且 AAC 是 MP4 唯一被
   // 广泛支持的音频编码 —— 这就是「有的播放器能放、有的不行」的主因之一。
   function pickRecMime() {
+    const WEBM = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9',
+      'video/webm'
+    ];
+    // 探测到本机没有 H.264 编码器（或上次起录崩过进入保守模式）：直接走 WebM
+    if (recH264Ok === false || recSafeMode) {
+      for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
+    }
     const candidates = [
       'video/mp4;codecs=avc1.42E01E,mp4a.40.2',   // H.264 基线 + AAC（最通用）
       'video/mp4;codecs=avc1,mp4a.40.2',
@@ -1715,12 +1877,15 @@
       'video/mp4'
     ];
     for (const t of candidates) if (MediaRecorder.isTypeSupported(t)) return t;
+    for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
     return 'video/mp4';
   }
 
-  function toggleRecording() {
+  async function toggleRecording() {
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
+    // 起录前先确认 H.264 能不能编（毫秒级；不能编就改用 WebM，避免编码器崩溃）
+    try { await probeH264(); } catch (e) { }
     // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
     // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
     const recStartT = nowT();
@@ -1759,7 +1924,7 @@
     // 画中画保持录制（需用户手势）：页面切后台后视频在 PiP 窗口继续渲染，录制画面不冻结
     // 批量任务期间不进入画中画：每段录制都切一次 PiP 会打断页面观看与画面采集，
     // 且批量录制本就在页面上逐条执行
-    if (!batchRunning && pipRecordEnabled() && typeof video.requestPictureInPicture === 'function') {
+    if (!recSafeMode && !batchRunning && pipRecordEnabled() && typeof video.requestPictureInPicture === 'function') {
       video.requestPictureInPicture().then(() => { pipActive = true; }).catch(() => { pipActive = false; });
     }
 
@@ -1779,8 +1944,14 @@
 
     // canvas 转绘方案（实测最稳）：video.captureStream 直捕源流在部分播放器（芒果TV）会卡住画面
     recCanvas = document.createElement('canvas');
-    recCanvas.width = video.videoWidth;
-    recCanvas.height = video.videoHeight;
+    let recW = video.videoWidth, recH = video.videoHeight;
+    // 保守模式：画布最长边封到 1920，显著降低编码器初始化压力（个别驱动/4K 源会崩）
+    if (recSafeMode && recW > 1920) {
+      recH = Math.max(2, Math.round(recH * 1920 / recW));
+      recW = 1920;
+    }
+    recCanvas.width = recW;
+    recCanvas.height = recH;
     // alpha:false（不透明）+ 显式 sRGB：
     //   ① 不透明画布不会有 alpha 预乘 / 合成带来的颜色变化，编码器拿到的是纯 RGB；
     //   ② 不透明画布在 Chromium 里走更快的合成路径，主线程开销更低（给编码器让 CPU）
@@ -1799,11 +1970,11 @@
     // （此前用 captureStream(定帧率) + MediaStreamTrackProcessor/Generator 重打时间戳做 CFR：
     //   多了一层读取与重写，网格与源节奏一有抖动就插重复帧或丢帧，反而发顿）
     const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
-    const mt = pickRecMime();
+    const mt = recSafeMode ? 'video/mp4' : pickRecMime();
     // mimeType 是否真的能装音频（本机没有 AAC 编码器时会退回纯视频候选）。
     // ⚠️ 关键：不能在「mimeType 没有音频编码器」时把音频轨塞进 MediaRecorder ——
     // Chromium 的 MP4 muxer 会 CHECK 失败，整个渲染进程崩溃（页面报 STATUS_BREAKPOINT）
-    const mtHasAudio = /(mp4a|opus)/i.test(mt);
+    const mtHasAudio = !recSafeMode && /(mp4a|opus)/i.test(mt);
     let recStreamLocal = null;
     try {
       recStream = recCanvas.captureStream();
@@ -1840,10 +2011,12 @@
     //   720p → 24Mbps（约 10Mbps）· 更小 → 16Mbps（约 6.7Mbps）
     // 实测见 Material/qc-dev/probe-rec-bitrate.js。H.264 走硬件编码，提高码率几乎不增加 CPU
     const recPx = recCanvas.width * recCanvas.height;
-    const videoBits = recPx >= 3840 * 2160 ? 80000000
+    let videoBits = recPx >= 3840 * 2160 ? 80000000
       : recPx >= 1920 * 1080 ? 40000000
       : recPx >= 1280 * 720 ? 24000000
       : 16000000;
+    // 保守模式：请求码率封顶 20Mbps（高码率请求在部分硬件编码器上会初始化失败）
+    if (recSafeMode) videoBits = Math.min(videoBits, 20000000);
     // 起录失败时干净复位（UI / 轨道 / 画布 / 画中画），避免状态卡死
     const resetFailedStart = msg => {
       recordingInternal = false; recAutoStop = false;
@@ -1892,7 +2065,10 @@
     recChunkBytes = 0;
     recLastChunkAt = performance.now();
     recStartAt = performance.now();
+    // 面包屑：起录这一步若把渲染进程搞崩，下次注入就能发现并切保守模式
+    recMarkCrash({ mime: mt, bits: videoBits, w: recCanvas.width, h: recCanvas.height, safe: recSafeMode, via: audioVia });
     recMediaRecorder = tryStartRecorder(recStream, mt);
+    if (recMediaRecorder) recClearMark();   // start 成功 = 没崩，立刻清掉
     if (!recMediaRecorder) {
       // 回退：去掉音频轨 + 默认 mimeType 再试一次。
       // 部分机器上「H.264+AAC 组合配置」会让 muxer / 编码器初始化失败（甚至渲染进程崩溃），
@@ -1962,27 +2138,11 @@
       rangeFix: 'off(native)',
       hwEnc: 'probing', hwEncCfg: ''
     };
-    // 硬件编码器能力探测（WebCodecs）：MediaRecorder 无法指定编码器，
-    // isConfigSupported 可判断本机是否存在可用的硬件 H.264 编码器
-    // （返回 config.hardwareAcceleration 为 prefer-hardware 即硬件编码可用）
-    try {
-      if (typeof VideoEncoder !== 'undefined' && typeof VideoEncoder.isConfigSupported === 'function') {
-        VideoEncoder.isConfigSupported({
-          codec: 'avc1.42E01E',
-          width: recCanvas.width,
-          height: recCanvas.height,
-          bitrate: videoBits,
-          framerate: capFps,
-          hardwareAcceleration: 'prefer-hardware'
-        }).then(r => {
-          if (!recDiag) return;
-          recDiag.hwEnc = (r && r.supported) ? 'yes' : 'no';
-          recDiag.hwEncCfg = (r && r.config && r.config.hardwareAcceleration) ? r.config.hardwareAcceleration : '';
-        }).catch(() => { if (recDiag) recDiag.hwEnc = 'error'; });
-      } else {
-        recDiag.hwEnc = 'unsupported';
-      }
-    } catch (e) { recDiag.hwEnc = 'error'; }
+    // 硬件编码器能力探测已移除：VideoEncoder.isConfigSupported 只是诊断用途，
+    // 但个别显卡驱动上调用它会让 GPU 进程崩溃（整页 STATUS_BREAKPOINT），
+    // 而它对我们没有任何功能价值 —— 直接跳过，诊断字段固定标注 skipped
+    recDiag.hwEnc = 'skipped';
+    recDiag.safeMode = recSafeMode;
     recDiagTimer = setInterval(() => {
       if (!recordingInternal) return;
       recDiag.draws = recDrawOk;
@@ -2198,7 +2358,9 @@
       notifyRecFinished(false);
       return;
     }
-    const ext = 'mp4';
+    // 容器跟着实际 mime 走：本机没有 H.264 编码器时录的是 webm，不能硬写成 .mp4
+    const isWebm = /webm/i.test(mimeType || '');
+    const ext = isWebm ? 'webm' : 'mp4';
     // 录制文件名：时间码固定用「入点时间码」（recordingStart），备注取自同一时刻，
     // 保证文件名内时间码与备注严格对应（此前时间码用停止时刻、备注用入点，二者不一致）
     const name = fileNameWith(fileTC(state.recordingStart || 0), state.recordingStart || 0, ext);
@@ -2210,9 +2372,14 @@
     const rawBlob = new Blob(recChunks, { type: mimeType || 'video/mp4' });
     const saveAndToast = blob => {
       downloadBlob(blob, name);
-      mgpToast('录制结束 — ' + sec + 's', true);
+      mgpToast('录制结束 — ' + sec + 's' + (isWebm ? '（WebM）' : ''), true);
       notifyRecFinished(true);   // 通知批量流程：本段录制已完成（有产出）
     };
+    // WebM 不需要（也不能）走 MP4 remux：直接保存原始文件
+    if (isWebm) {
+      saveAndToast(rawBlob);
+      return;
+    }
     // 统一走 remux 生成「经典 MP4」（ftyp | moov | mdat，无 moof）：
     // MediaRecorder 直接产出的是 fragmented MP4，且 mvhd/tkhd/mdhd 的时长字段不可靠，
     // 严格播放器（Windows 播放器 / QuickTime / 手机 / 剪辑软件）会打不开。
@@ -2601,7 +2768,7 @@
       case 'i': case 'I': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); markIn(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'o': case 'O': if (!recordingInternal && state.inPoint !== null) { if (loggingActive()) { e.preventDefault(); markOut(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
       case 'm': case 'M': if (!recordingInternal) { if (loggingActive()) { e.preventDefault(); mark(); } else { e.preventDefault(); mgpToast('日志记录已关闭'); } } break;
-      case 'r': case 'R': e.preventDefault(); toggleRecording(); break;
+      case 'r': case 'R': e.preventDefault(); toggleRecording().catch(() => { }); break;
       case 's': case 'S': e.preventDefault(); captureScreenshot(false); break;
       // C：截图并复制到剪贴板（不下载，与标注窗口内 C 行为一致）
       case 'c': case 'C': e.preventDefault(); captureScreenshot(true); break;
@@ -3909,23 +4076,31 @@
       guardStop = setTimeout(() => { if (recordingInternal && !settled) { try { stopRecording(); } catch (e) { } } }, dur * 1000 + 30000);
       // 兜底 2：再过 15s 仍未收到录制结束通知 → 放弃本段，避免整批卡死
       guardGiveUp = setTimeout(() => done(false), dur * 1000 + 45000);
-      toggleRecording();                       // atIn 成立 → 播放到出点自动停止
-      if (!recordingInternal) {
-        // 起录失败（视频还在加载等）：稍等再试一次，仍失败才算这段失败
-        setTimeout(() => {
-          if (settled || batchCancel) return;
-          try { toggleRecording(); } catch (e) { }
-          if (!recordingInternal) { done(false); return; }
-          recStopTarget = end; state.outPoint = end; recAutoStop = true;
-        }, 500);
-        return;
-      }
-      // 强化自动停止目标：atIn 判定受帧对齐 / 播放器 seek 影响，未命中时会退回
-      // 日志片段匹配（可能匹配到别的出点）或完全不自动停止；批量录制必须严格停在
-      // 本段出点，因此启动后统一以本段 end 为准
-      recStopTarget = end;
-      state.outPoint = end;
-      recAutoStop = true;
+      // atIn 成立 → 播放到出点自动停止。
+      // toggleRecording 现在是 async（起录前要 await「H.264 能不能编」的探测），
+      // 所以起录成功的判定必须等它 resolve 之后再做
+      const afterStart = () => {
+        if (settled || batchCancel) return;
+        if (!recordingInternal) {
+          // 起录失败（视频还在加载等）：稍等再试一次，仍失败才算这段失败
+          setTimeout(() => {
+            if (settled || batchCancel) return;
+            Promise.resolve(toggleRecording()).then(() => {
+              if (settled || batchCancel) return;
+              if (!recordingInternal) { done(false); return; }
+              recStopTarget = end; state.outPoint = end; recAutoStop = true;
+            }).catch(() => { if (!settled) done(false); });
+          }, 500);
+          return;
+        }
+        // 强化自动停止目标：atIn 判定受帧对齐 / 播放器 seek 影响，未命中时会退回
+        // 日志片段匹配（可能匹配到别的出点）或完全不自动停止；批量录制必须严格停在
+        // 本段出点，因此启动后统一以本段 end 为准
+        recStopTarget = end;
+        state.outPoint = end;
+        recAutoStop = true;
+      };
+      Promise.resolve(toggleRecording()).then(afterStart).catch(() => { if (!settled) done(false); });
     });
   }
   async function batchRun(items, mode) {

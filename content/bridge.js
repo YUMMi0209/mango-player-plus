@@ -50,6 +50,9 @@
         }).catch(() => {
           window.postMessage({ __mgp: 'lutData', name: id, error: 'fetch-failed' }, '*');
         });
+      } else if (d.__mgp === 'probeUrl') {
+        // 页面端要一个「录制编码器安全探测页」的地址（隐藏 iframe 用，跨源 → 独立进程）
+        try { window.postMessage({ __mgp: 'probeUrl', url: chrome.runtime.getURL('rec-probe.html') }, '*'); } catch (e) { }
       } else if (d.__mgp === 'sidePanel') {
         // 页面端「打开侧边栏」按钮：转给后台处理（sidePanel.open 需要用户手势，后台统一兜底）
         chrome.runtime.sendMessage({ type: 'openSidePanel' }).catch(() => { });

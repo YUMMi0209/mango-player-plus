@@ -23,7 +23,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["luts/*.cube"],
+      "resources": ["luts/*.cube", "rec-probe.html", "rec-probe.js"],
       "matches": ["https://www.mgtv.com/*", "https://*.mgtv.com/*", "https://pan.baidu.com/*"]
     }
   ],
