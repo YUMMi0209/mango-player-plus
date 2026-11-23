@@ -645,6 +645,7 @@ const MPP = (() => {
     els.togDanmu = $(cfg.togDanmu);
     els.togAll = $(cfg.togAll);
     els.togTheme = $(cfg.togTheme);
+    els.selRecProfile = $('#sel-rec-profile');
     els.setRowAll = $(cfg.setRowAll);
     els.btnWebFs = $(cfg.btnWebFs);
     els.btnHelp = $(cfg.btnHelp);
@@ -2799,6 +2800,10 @@ const MPP = (() => {
       if (els.togDanmu) els.togDanmu.checked = s.danmuBlock !== false;
       if (els.togPip) els.togPip.checked = s.pipRecord === true;
       if (els.togTheme) els.togTheme.checked = s.theme === 'light';
+    if (els.selRecProfile) {
+      const rp = String(s.recProfile || 'baseline').toLowerCase();
+      els.selRecProfile.value = (rp === 'main' || rp === 'high') ? rp : 'baseline';
+    }
       applyTheme(s.theme);
     });
     // 直播模式：状态在页面端（不落盘、直播页默认开），所以从页面读当前值来回显开关；
@@ -2875,6 +2880,11 @@ const MPP = (() => {
       s.activeHosts = hosts;
       await chrome.storage.local.set({ mpp_settings: s });
       load(true);
+    });
+    if (els.selRecProfile) els.selRecProfile.addEventListener('change', e => {
+      const v = e.target.value === 'main' || e.target.value === 'high' ? e.target.value : 'baseline';
+      savePatch({ recProfile: v });
+      panelToast('录制编码档位：' + (v === 'baseline' ? 'Baseline' : v === 'main' ? 'Main' : 'High'));
     });
     if (els.togTheme) els.togTheme.addEventListener('change', e => {
       const theme = e.target.checked ? 'light' : 'dark';

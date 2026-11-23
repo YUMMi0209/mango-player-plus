@@ -553,6 +553,19 @@
   const REC_MARK_KEY = 'mpp_rec_start';
   const REC_SAFE_KEY = 'mpp_rec_safe';
   let recSafeMode = false;
+  // ── 编码档位（默认 Baseline）与「零字节静默失败」处理 ─────────
+  // 默认 Baseline：兼容性最广（Windows MF 实时路径、部分 AMD 驱动、无硬编环境都只保证它）。
+  // 面板设置可改 Baseline / Main / High；若起录成功但编码器一帧不出，本段改用 WebM 重录一次，
+  // 并在这台机器上记住「该档位不可用」，之后再录直接走 WebM（换档位会重新给 H.264 机会）。
+  const REC_WEBM_KEY = 'mpp_rec_webm';
+  const REC_SILENT_MS = 1500;        // 看门狗第一段：1.5s 无数据 → 先 requestData 逼一次 flush
+  const REC_SILENT_GRACE = 1200;     // 再等 1.2s 仍无数据 → 判静默失败
+  let recWatchdog = null;
+  let recSilentDiscard = false;      // 本段作废：不下载、不占文件名、不通知批量失败
+  let recWebmForced = false;         // 本机该档位已失败 → 直接 WebM
+  let recChosenMime = '';            // 本段实际 mime（诊断用）
+  let recTakeStartT = null;          // 本段起点（WebM 重录时回到这里）
+  let recWebmRetried = false;        // 本次录制是否已为静默失败重录过（只一次）
   function recSafeRead() {
     try { return localStorage.getItem(REC_SAFE_KEY) === '1'; } catch (e) { return false; }
   }
@@ -1979,6 +1992,40 @@
     return 'avc1.640034';                                            // level 5.2
   }
 
+  // 用户选择的编码档位（面板「设置 → 录制编码档位」）：baseline（默认）/ main / high
+  function recProfileSetting() {
+    const st = window.__mgpSettings || {};
+    const v = String(st.recProfile || '').toLowerCase();
+    return (v === 'main' || v === 'high') ? v : 'baseline';
+  }
+  function recProfileOf(mime) {
+    const m = /codecs=avc1\.([0-9A-Fa-f]{2})/.exec(String(mime || ''));
+    if (!m) return /webm/i.test(mime) ? 'webm' : 'default';
+    const hex = m[1].toUpperCase();
+    if (hex === '42') return 'baseline';
+    if (hex === '4D') return 'main';
+    if (hex === '64') return 'high';
+    const v = parseInt(hex, 16);
+    return v >= 0x64 ? 'high' : v >= 0x4d ? 'main' : 'baseline';
+  }
+  function recWebmRemember(profile) {
+    recWebmForced = true;
+    try { localStorage.setItem(REC_WEBM_KEY, JSON.stringify({ profile: profile, at: Date.now() })); } catch (e) { }
+  }
+  function recWebmCached(profile) {
+    try {
+      const v = JSON.parse(localStorage.getItem(REC_WEBM_KEY) || 'null');
+      return !!(v && v.profile === profile);   // 换档位后重新给 H.264 一次机会
+    } catch (e) { return false; }
+  }
+  // H.264 codec 串：只换 profile 位（42 / 4D / 64），constraint 与 level 由尺寸/帧率决定
+  function h264CodecFor(w, h, fps, profile) {
+    const base = h264LevelCodec(w || 1920, h || 1080, fps || 25);
+    const m = /avc1\.([0-9A-Fa-f]{6})/.exec(base);
+    const lvl = m ? m[1].slice(4, 6).toUpperCase() : '28';
+    const pr = profile === 'main' ? '4D00' : profile === 'high' ? '6400' : '4200';
+    return 'avc1.' + pr + lvl;
+  }
   function pickRecMime(w, h, fps) {
     const WEBM = [
       'video/webm;codecs=vp9,opus',
@@ -1986,21 +2033,70 @@
       'video/webm;codecs=vp9',
       'video/webm'
     ];
-    // 探测到本机没有 H.264 编码器（或上次起录崩过进入保守模式）：直接走 WebM
-    if (recH264Ok === false || recSafeMode) {
+    const profile = recProfileSetting();
+    // 保守模式 / 本机没有 H.264 编码器 / 该档位已失败过 → 直接 WebM
+    if (recSafeMode || recH264Ok === false || recWebmForced || recWebmCached(profile)) {
       for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
     }
-    const codec = h264LevelCodec(w || 1920, h || 1080, fps || 25);
+    const codec = h264CodecFor(w, h, fps, profile);
     const candidates = [
-      'video/mp4;codecs=' + codec + ',mp4a.40.2',   // 合法电平的 H.264 + AAC（最通用）
+      'video/mp4;codecs=' + codec + ',mp4a.40.2',   // 选中档位 + AAC
       'video/mp4;codecs=' + codec,                  // 本机没有 AAC 编码器时的兜底（无音频）
-      'video/mp4;codecs=avc1.4D4028,mp4a.40.2',     // main 4.0
-      'video/mp4;codecs=avc1.640028,mp4a.40.2',     // high 4.0
       'video/mp4'
     ];
     for (const t of candidates) if (MediaRecorder.isTypeSupported(t)) return t;
     for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
     return 'video/mp4';
+  }
+  // 编码器真的出数据了：解除看门狗、记下本段 mime
+  function onRecData() {
+    if (recWatchdog) { clearTimeout(recWatchdog); recWatchdog = null; }
+    if (recChunkBytes > 0 && !recChosenMime && recMediaRecorder) recChosenMime = recMediaRecorder.mimeType || '';
+  }
+  // 两段式看门狗：先 requestData 逼一次 flush（有的机器首片数据来得晚），仍无数据才判失败
+  function armSilentWatchdog() {
+    disarmSilentWatchdog();
+    recWatchdog = setTimeout(() => {
+      recWatchdog = null;
+      if (!recordingInternal || recPaused || recChunkBytes > 0) return;
+      try {
+        if (recMediaRecorder && recMediaRecorder.state === 'recording' && typeof recMediaRecorder.requestData === 'function') {
+          recMediaRecorder.requestData();
+        }
+      } catch (e) { }
+      recWatchdog = setTimeout(() => {
+        recWatchdog = null;
+        if (!recordingInternal || recPaused || recChunkBytes > 0) return;
+        onSilentEncoderFailure();
+      }, REC_SILENT_GRACE);
+    }, REC_SILENT_MS);
+  }
+  function disarmSilentWatchdog() {
+    if (recWatchdog) { clearTimeout(recWatchdog); recWatchdog = null; }
+  }
+  // 起录成功但编码器不出数据：本段作废，记住该档位不可用，然后用 WebM 重录这一段（只重录一次）
+  function onSilentEncoderFailure() {
+    const profile = recProfileSetting();
+    const bad = (recMediaRecorder && recMediaRecorder.mimeType) || '';
+    console.info('[MGP-REC] 编码器无输出（静默失败）：' + bad + '（档位 ' + profile + '）');
+    recWebmRemember(profile);
+    const canRetry = !recWebmRetried && !(recMediaRecorder && /webm/i.test(recMediaRecorder.mimeType || ''));
+    recSilentDiscard = true;   // 这一段作废：不下载、不占文件名
+    try { stopRecording(); } catch (e) { }
+    if (!canRetry) {
+      try { mgpToast('本机编码器没有输出，录制已停止（可尝试更新显卡驱动）', true); } catch (e) { }
+      return;
+    }
+    recWebmRetried = true;
+    try { mgpToast('该档位编码器没有输出，已改用 WebM 重录这一段', true); } catch (e) { }
+    const startT = (recTakeStartT != null) ? recTakeStartT : (state.recordingStart || 0);
+    setTimeout(async () => {
+      recSilentDiscard = false;
+      if (!video) return;
+      try { await jumpAligned(startT); } catch (e) { }
+      try { await toggleRecording(); } catch (e) { }
+      if (batchRunning && state.outPoint != null) { recStopTarget = state.outPoint; recAutoStop = true; }
+    }, 300);
   }
 
   async function toggleRecording() {
@@ -2011,6 +2107,8 @@
     // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
     // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
     const recStartT = nowT();
+    recWebmRetried = false;
+    recSilentDiscard = false;
     // 录制始终从当前位置开始，不改变已打好的入点/出点；
     // 仅当“正好从入点开始”且存在有效出点时，播放到出点自动停止
     const hasRange = state.inPoint !== null && state.outPoint !== null && state.outPoint > state.inPoint;
@@ -2092,7 +2190,9 @@
     // （此前用 captureStream(定帧率) + MediaStreamTrackProcessor/Generator 重打时间戳做 CFR：
     //   多了一层读取与重写，网格与源节奏一有抖动就插重复帧或丢帧，反而发顿）
     const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
-    const mt = recSafeMode ? 'video/mp4' : pickRecMime(recCanvas.width, recCanvas.height, FPS > 0 ? FPS : 25);
+    const mt = pickRecMime(recCanvas.width, recCanvas.height, FPS > 0 ? FPS : 25);
+    // WebM 重录时沿用最初的起点，文件名/时间码不随后退的 2 秒漂移
+    if (!recWebmRetried) recTakeStartT = recStartT;
     // mimeType 是否真的能装音频（本机没有 AAC 编码器时会退回纯视频候选）。
     // ⚠️ 关键：不能在「mimeType 没有音频编码器」时把音频轨塞进 MediaRecorder ——
     // Chromium 的 MP4 muxer 会 CHECK 失败，整个渲染进程崩溃（页面报 STATUS_BREAKPOINT）
@@ -2141,6 +2241,7 @@
     if (recSafeMode) videoBits = Math.min(videoBits, 20000000);
     // 起录失败时干净复位（UI / 轨道 / 画布 / 画中画），避免状态卡死
     const resetFailedStart = msg => {
+      disarmSilentWatchdog();
       recordingInternal = false; recAutoStop = false;
       if (video) { video.removeEventListener('seeking', onSeekBlock, true); video.classList.remove('mgp-rec-border'); }
       if (pipOn()) { pipActive = false; document.exitPictureInPicture().catch(() => { }); }
@@ -2167,6 +2268,7 @@
             recChunks.push(e.data);
             recChunkBytes += e.data.size;
             recLastChunkAt = performance.now();
+            onRecData();
           }
         };
         rec.onstop = () => finishRecording();
@@ -2190,7 +2292,7 @@
     // 面包屑：起录这一步若把渲染进程搞崩，下次注入就能发现并切保守模式
     recMarkCrash({ mime: mt, bits: videoBits, w: recCanvas.width, h: recCanvas.height, safe: recSafeMode, via: audioVia });
     recMediaRecorder = tryStartRecorder(recStream, mt);
-    if (recMediaRecorder) recClearMark();   // start 成功 = 没崩，立刻清掉
+    if (recMediaRecorder) { recClearMark(); armSilentWatchdog(); }   // start 成功 ≠ 出数据，还要看门狗
     if (!recMediaRecorder) {
       // 回退：去掉音频轨 + 默认 mimeType 再试一次。
       // 部分机器上「H.264+AAC 组合配置」会让 muxer / 编码器初始化失败（甚至渲染进程崩溃），
@@ -2470,6 +2572,15 @@
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
     if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
     mgpHideToast();
+    // 编码器无输出而作废的一段：不下载、不占文件名、不通知批量失败（重录由 onSilentEncoderFailure 负责）
+    if (recSilentDiscard) {
+      recSilentDiscard = false;
+      disarmSilentWatchdog();
+      recChunks = [];
+      state.tcMode = 'live';
+      return;
+    }
+    disarmSilentWatchdog();
     if (recChunks.length === 0) { mgpToast('录制为空'); recChunks = []; state.tcMode = 'live'; notifyRecFinished(false); return; }
     // 批量任务取消：本段录制作废（不下载、不写剪贴板），仅收尾并通知批量流程
     if (recAbort) {
@@ -4544,7 +4655,20 @@
     batchCancel() { return cancelBatch(); },
     batchBusy() { return batchRunning; },
    // 批量进度（面板用于高亮 / 自动滚动）
-   batchState() { return { busy: batchState.busy, i: batchState.i, total: batchState.total, mode: batchState.mode }; }
+   batchState() { return { busy: batchState.busy, i: batchState.i, total: batchState.total, mode: batchState.mode }; },
+    // 录制编码器诊断：档位 / 实际 mime / 是否已降到 WebM
+    encoderInfo() {
+      const profile = recProfileSetting();
+      return {
+        profile: profile,
+        mime: recChosenMime || '',
+        actualProfile: recProfileOf(recChosenMime),
+        webmForced: !!recWebmForced,
+        webmCached: recWebmCached(profile),
+        safeMode: recSafeMode,
+        bytes: recChunkBytes
+      };
+    }
   };
 
 })();
