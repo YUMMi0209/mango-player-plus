@@ -297,7 +297,7 @@ const MPP = (() => {
       const inOut = Array.isArray(e.inOut) ? e.inOut.length : 0;
       if (marks + inOut === 0) { zeroKeys.push(k); continue; }
       const t = titles[k] || {};
-      out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut });
+      out.push({ key: k, title: String(t.title || '').trim(), url: t.url || '', marks, inOut, savedAt: Number(e.savedAt) || 0 });
     }
     for (const k of Object.keys(titles)) {
       if (!(k in map) && zeroKeys.indexOf(k) === -1) zeroKeys.push(k);
@@ -1630,7 +1630,8 @@ const MPP = (() => {
     mkIdx.forEach((i, n) => {
       const m = logs.marks[i];
       const hex = markColor(m);
-      mkRows.push([String(n + 1), m.tc, hex ? colorName(hex) : '无', m.note || '', linkFor(m.time, m.url), m.title || '']);
+      // 颜色列：没有颜色、或颜色值不在调色板里（旧数据 / 外部表格导入）统一写「无」，不留空
+      mkRows.push([String(n + 1), m.tc, colorName(hex) || '无', m.note || '', linkFor(m.time, m.url), m.title || '']);
     });
     downloadBlob(new Blob([XlsxWriter.build(mkRows, ioRows)], { type: XLSX_MIME }), fileName());
     panelToast('已导出记录');
@@ -1817,6 +1818,25 @@ const MPP = (() => {
         else keys.forEach(k => delete map[k]);
         return chrome.storage.local.set({ mpp_history: map });
       }).catch(() => { });
+      // 写删除墓碑：旧标签页 / 旧索引在重启后被重新上报时，只有比墓碑更新的记录才会被接受。
+      // 否则会出现「删了、重启 Edge 又回来、再删也没用」的现象
+      await chrome.storage.local.get(['mpp_hist_gone', 'mpp_history', 'mpp_imported']).then(({ mpp_hist_gone, mpp_history, mpp_imported }) => {
+        const gone = (mpp_hist_gone && typeof mpp_hist_gone === 'object') ? mpp_hist_gone : {};
+        const hist = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
+        const imp = (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {};
+        const now = Date.now();
+        const targets = new Set(keys);
+        if (all) {
+          Object.keys(hist).forEach(k => targets.add(k));
+          Object.keys(imp).forEach(k => targets.add(k));
+          Object.keys(gone).forEach(k => targets.add(k));
+        }
+        targets.forEach(k => { gone[k] = now; });
+        // 墓碑保留 60 天，避免无限增长
+        const cut = now - 60 * 24 * 3600 * 1000;
+        Object.keys(gone).forEach(k => { if (!(Number(gone[k]) > cut)) delete gone[k]; });
+        return chrome.storage.local.set({ mpp_hist_gone: gone });
+      }).catch(() => { });
       // 同步清除导入日志明细（与历史索引保持一致）
       await chrome.storage.local.get('mpp_imported').then(({ mpp_imported }) => {
         const imp = (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {};
@@ -1859,7 +1879,7 @@ const MPP = (() => {
     });
     marks.forEach((m, i) => {
       const hex = markColor(m);
-      mkRows.push([String(i + 1), tcOf(m.tc, m.time), hex ? colorName(hex) : '无', m.note || '',
+      mkRows.push([String(i + 1), tcOf(m.tc, m.time), colorName(hex) || '无', m.note || '',
         link(Number(m.time) || 0), title]);
     });
     return { mkRows, ioRows, count: marks.length + inOut.length };
@@ -2617,7 +2637,12 @@ const MPP = (() => {
     const importedP = chrome.storage.local.get('mpp_imported').then(({ mpp_imported }) =>
       (mpp_imported && typeof mpp_imported === 'object') ? mpp_imported : {}
     ).catch(() => ({}));
-    Promise.all([pageP, storeP, importedP]).then(([pageRes, storeMap, importedMap]) => {
+    const goneP = chrome.storage.local.get('mpp_hist_gone').then(({ mpp_hist_gone }) =>
+      (mpp_hist_gone && typeof mpp_hist_gone === 'object') ? mpp_hist_gone : {}
+    ).catch(() => ({}));
+    Promise.all([pageP, storeP, importedP, goneP]).then(([pageRes, storeMap, importedMap, goneMap]) => {
+      const gone = goneMap || {};
+      let goneChanged = false;
       const map = {};
       Object.keys(storeMap).forEach(k => {
         const e = storeMap[k] || {};
@@ -2627,20 +2652,29 @@ const MPP = (() => {
       if (pageRes && Array.isArray(pageRes.zeroKeys)) {
         pageRes.zeroKeys.forEach(k => delete map[k]);
       }
+      Object.keys(gone).forEach(k => { if (map[k]) delete map[k]; });
       const pageItems = pageRes && Array.isArray(pageRes.items) ? pageRes.items : [];
       pageItems.forEach(it => {
-        if ((it.marks || 0) + (it.inOut || 0) > 0) {
-          map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut };
+        if ((it.marks || 0) + (it.inOut || 0) <= 0) return;
+        const tGone = Number(gone[it.key] || 0);
+        if (tGone) {
+          // 记录时间晚于墓碑 = 删除之后又打过新记录 → 解除墓碑
+          if (Number(it.savedAt || 0) > tGone) { delete gone[it.key]; goneChanged = true; }
+          else return;   // 旧记录：当作已删除
         }
+        map[it.key] = { title: it.title || '', url: it.url || '', marks: it.marks, inOut: it.inOut, savedAt: Number(it.savedAt) || 0 };
       });
-      // 写回仅限本地索引（不包含导入计数，避免重复累积）
-      chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+      // 写回仅限本地索引（不包含导入计数，避免重复累积）；墓碑有变化时一起写回
+      const patch = { mpp_history: map };
+      if (goneChanged) patch.mpp_hist_gone = gone;
+      chrome.storage.local.set(patch).catch(() => { });
       // 显示层合并导入日志明细：与本地记录冲突时计数相加，标题 / 链接优先取已有
       Object.keys(importedMap).forEach(k => {
         const e = importedMap[k] || {};
         const mk = Array.isArray(e.marks) ? e.marks.length : 0;
         const io = Array.isArray(e.inOut) ? e.inOut.length : 0;
         if (mk + io === 0) return;
+        if (Number(gone[k] || 0)) return;   // 已删除（墓碑未解除）→ 不再显示
         if (map[k]) {
           map[k] = {
             title: map[k].title || e.title || '',

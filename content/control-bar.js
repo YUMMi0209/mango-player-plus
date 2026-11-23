@@ -142,6 +142,20 @@
   }
 
   let logsKey = '';   // 当前 logs 属于哪个视频 key（切换视频/换集时更新）
+  // savedAt：这份记录「内容最后一次变化」的时间。面板删除历史会记墓碑时间，
+  // 只有 savedAt 晚于墓碑的记录才会被重新接受 —— 否则被关不掉的旧标签页
+  // 在下次存档时会把已删除的记录再写回来（表现为「删了、重启又回来」）。
+  // 只在记录内容真的变化时推进，纯读档 / 切换视频不会动它
+  let logsSavedAt = 0;
+  let logsSig = '';
+  function logsSignature() {
+    try {
+      return JSON.stringify({
+        i: (logs.inOut || []).map(u => [u.inTC, u.outTC, u.note || '', u.title || '']),
+        m: (logs.marks || []).map(m => [m.tc, m.color || '', m.note || '', m.title || ''])
+      });
+    } catch (e) { return ''; }
+  }
   function loadLogs() {
     logsKey = videoKey();
     const e = readLogsMap()[logsKey];
@@ -150,6 +164,8 @@
     // 标记 / 片段按时间码先后排列（兼容历史乱序数据）
     logs.marks.sort((a, b) => (a.time != null ? a.time : 0) - (b.time != null ? b.time : 0));
     logs.inOut.sort((a, b) => (a.inTime != null ? a.inTime : 0) - (b.inTime != null ? b.inTime : 0));
+    logsSavedAt = Number(e && e.savedAt) || 0;
+    logsSig = logsSignature();
     window.__mgp_logs = logs;
   }
   // 按时间码有序插入（标记按 time，片段按 inTime），保持列表始终按时间先后排列
@@ -161,10 +177,16 @@
 
   function saveLogs() {
     window.__mgp_logs = logs;
+    // 记录内容有变化才推进 savedAt（纯存档不推进）
+    const sig = logsSignature();
+    if (sig !== logsSig) { logsSig = sig; logsSavedAt = Date.now(); }
+    const stamp = logsSavedAt || Date.now();
     try {
       const map = readLogsMap();
       // 存回「加载这份 logs 时的 key」：切换视频的瞬间也不会把 A 的记录写到 B 名下
-      map[logsKey || videoKey()] = { inOut: logs.inOut, marks: logs.marks };
+      // savedAt：这份记录最后被写过的时间。面板删除历史时会记「墓碑时间」，
+      // 只有比墓碑更新的记录才会被重新接受 —— 否则被关掉的旧标签页会在重新上报时把记录写回来
+      map[logsKey || videoKey()] = { inOut: logs.inOut, marks: logs.marks, savedAt: stamp };
       localStorage.setItem(LOGS_KEY, JSON.stringify(map));
     } catch (e) { }
     // 标题索引：供面板「历史」列出所有有标记记录的视频（标题 + 链接）
@@ -190,7 +212,8 @@
         title: titleTxt,
         url: location.href,
         marks: logs.marks.length,
-        inOut: logs.inOut.length
+        inOut: logs.inOut.length,
+        savedAt: stamp
       }, '*');
     } catch (e) { }
   }
@@ -1701,24 +1724,59 @@
   // 优先 AudioContext（MediaElementSource）：video.captureStream() 会让 video 进入
   // 捕获模式，在部分播放器（芒果TV）上渲染被接管，后续 drawImage(video) 画不出新帧，
   // 表现为录制画面冻结（首帧后定格）而声音正常。AudioContext 只路由音频，不影响渲染；
-  // 播放器已占用 MediaElementSource 等失败场景回退 video.captureStream() 取音频轨。
+  // AudioContext 不可用时（自动播放策略挂起 / 播放器已占用 MediaElementSource）才回退
+  // video.captureStream() 取音频轨；这条回退有副作用（video 被切进捕获模式，drawImage
+  // 可能取到冻结帧），所以取到音频后要**自检画面还在不在动**，冻结就立刻丢弃音频轨。
   let recAudioCtx = null;
   let recAudioDest = null;                // 上一次的 MediaStreamDestination（复用前先断开）
+  let recAudioNoFallback = false;         // 本页已确认回退会把画面冻住 → 以后不再尝试
   const recAudioSrcMap = new WeakMap();   // video 元素 → MediaElementSource（createMediaElementSource 每元素仅一次）
-  function getRecAudioTrack(v) {
+
+  // 画面是否还在动：取 2 次小尺寸快照（间隔 260ms）比像素；视频本身暂停时按「没冻住」处理
+  function videoStillMoving(v) {
+    return new Promise(resolve => {
+      try {
+        if (!v || v.paused) { resolve(true); return; }
+        const c = document.createElement('canvas');
+        c.width = 24; c.height = 24;
+        const x = c.getContext('2d', { willReadFrequently: true });
+        const snap = () => {
+          try {
+            x.drawImage(v, 0, 0, 24, 24);
+            return x.getImageData(0, 0, 24, 24).data;
+          } catch (e) { return null; }
+        };
+        const a = snap();
+        setTimeout(() => {
+          const b = snap();
+          if (!a || !b) { resolve(false); return; }
+          let diff = 0;
+          for (let i = 0; i < a.length; i += 4) { if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) diff++; }
+          resolve(diff >= 2);   // 24x24=576 像素里至少 2 个像素变了
+        }, 260);
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  async function getRecAudioTrack(v) {
     try {
       if (!recAudioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) throw new Error('no-audio-context');
         recAudioCtx = new AC();
       }
-      // Autoplay Policy：页面音频未被激活时 AudioContext 处于 suspended，
-      // MediaStreamDestination 不会产生音频数据 → 本次录制不取音频（录无声），
-      // 不再回退 video.captureStream()：那条路会把 video 切进捕获模式（画面冻结），
-      // 在已捕获过的元素上还容易触发 Chromium 断言（页面直接 STATUS_BREAKPOINT）
+      // Autoplay Policy：录制由用户手势触发，给 resume 一点时间（最多 500ms）
       if (recAudioCtx.state !== 'running') {
-        recAudioCtx.resume().catch(() => { });
-        return null;
+        try {
+          await Promise.race([
+            recAudioCtx.resume().catch(() => { }),
+            new Promise(r => setTimeout(r, 500))
+          ]);
+        } catch (e) { }
+      }
+      if (recAudioCtx.state !== 'running') {
+        // 仍被挂起：走下面的安全回退
+        throw new Error('ac-suspended');
       }
       let src = recAudioSrcMap.get(v);
       if (!src) {
@@ -1738,7 +1796,24 @@
       const t = recAudioDest.stream.getAudioTracks()[0];
       if (t) return { track: t, via: 'audiocontext' };
     } catch (e) { }
-    return null;
+    // ── 安全回退：只用 video.captureStream() 的音频轨，并确认画面没被冻住 ──
+    if (recAudioNoFallback) return null;
+    try {
+      const vs = v.captureStream();
+      const track = (vs.getAudioTracks && vs.getAudioTracks()[0]) || null;
+      // 立刻停掉它顺带捕获的视频轨，尽量减小「接管渲染」的副作用
+      try { (vs.getVideoTracks ? vs.getVideoTracks() : []).forEach(t => { try { t.stop(); } catch (e) { } }); } catch (e) { }
+      if (!track) return null;
+      const moving = await videoStillMoving(v);
+      if (!moving) {
+        try { track.stop(); } catch (e) { }
+        recAudioNoFallback = true;
+        console.info('[MGP-REC] captureStream 音频回退会让画面冻结，已改用无声录制');
+        return null;
+      }
+      console.info('[MGP-REC] 用 captureStream 回退取音频（AudioContext 不可用）');
+      return { track, via: 'capturestream' };
+    } catch (e) { recAudioNoFallback = true; return null; }
   }
 
 
@@ -2038,7 +2113,7 @@
       return;
     }
     // 音频：只用 AudioContext（不动 video 的捕获模式）；拿不到就录无声，不再回退 captureStream
-    const audioRes = mtHasAudio ? getRecAudioTrack(video) : null;
+    const audioRes = mtHasAudio ? await getRecAudioTrack(video) : null;
     let audioVia = audioRes ? audioRes.via : (mtHasAudio ? 'none' : 'no-aac');
     if (audioRes && audioRes.track) {
       try { recStream.addTrack(audioRes.track); } catch (e) { }
@@ -3894,6 +3969,19 @@
   });
 
   // 面板「刷新」：不关闭弹窗/侧边栏，仅重启页面端服务——重建控制栏并重载记录
+  // 面板删除历史后，桥会拒绝「删除之前写的」旧上报；这里把页面本地缓存里那份也清掉，
+  // 避免 mpp_logs 里一直留着已删除的记录
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (!d || d.__mgp !== 'histRejected' || !d.key) return;
+    try {
+      const map = readLogsMap();
+      if (d.key in map) { delete map[d.key]; localStorage.setItem(LOGS_KEY, JSON.stringify(map)); }
+      const titles = JSON.parse(localStorage.getItem('mpp_titles') || '{}') || {};
+      if (d.key in titles) { delete titles[d.key]; localStorage.setItem('mpp_titles', JSON.stringify(titles)); }
+      if (d.key === (logsKey || videoKey())) { loadLogs(); try { updateTC(); } catch (e) { } }
+    } catch (e) { }
+  });
   window.addEventListener('mgp-reload', () => {
     if (recordingInternal) stopRecording();
     if (wrapper) remove();

@@ -30,11 +30,24 @@
         const url = String(d.url || '').slice(0, 2000);
         const marks = Number.isFinite(d.marks) ? Math.max(0, Math.min(9999, Math.floor(d.marks))) : 0;
         const inOut = Number.isFinite(d.inOut) ? Math.max(0, Math.min(9999, Math.floor(d.inOut))) : 0;
-        chrome.storage.local.get('mpp_history').then(({ mpp_history }) => {
+        const savedAt = Number.isFinite(d.savedAt) ? Math.min(Date.now() + 1000, Math.max(0, d.savedAt)) : 0;
+        chrome.storage.local.get(['mpp_history', 'mpp_hist_gone']).then(({ mpp_history, mpp_hist_gone }) => {
           const map = (mpp_history && typeof mpp_history === 'object') ? mpp_history : {};
-          if (marks + inOut > 0) map[key] = { title, url, marks, inOut };
-          else delete map[key];
-          chrome.storage.local.set({ mpp_history: map }).catch(() => { });
+          const gone = (mpp_hist_gone && typeof mpp_hist_gone === 'object') ? mpp_hist_gone : {};
+          const tGone = Number(gone[key] || 0);
+          if (marks + inOut > 0) {
+            // 记录是「删除之前」写的：忽略这次上报，避免被关不掉的旧标签页写回
+            if (tGone && savedAt <= tGone) {
+              // 这条记录是删除之前写的：拒绝，并让页面把它从本地缓存里也清掉
+              try { window.postMessage({ __mgp: 'histRejected', key }, '*'); } catch (e) { }
+              return;
+            }
+            if (tGone && savedAt > tGone) delete gone[key];   // 删除之后又有新记录 → 解除墓碑
+            map[key] = { title, url, marks, inOut, savedAt };
+          } else {
+            delete map[key];
+          }
+          chrome.storage.local.set({ mpp_history: map, mpp_hist_gone: gone }).catch(() => { });
         }).catch(() => { });
       } else if (d.__mgp === 'lut') {
         // 颜色查找表：MAIN world 拿不到 chrome.runtime，这里按 id 取扩展内的 .cube 文本送回去

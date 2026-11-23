@@ -39,6 +39,13 @@ footer{margin-top:46px;padding-top:16px;border-top:1px solid var(--card-brd);col
 ul{padding-left:22px;margin:6px 0}
 li{margin:4px 0}
 </style>
+<style>
+  .faq-filter { display: flex; gap: 10px; align-items: center; margin: 6px 0 14px; }
+  .faq-filter input { flex: 1; min-width: 0; padding: 7px 10px; font: inherit; color: inherit;
+    background: rgba(127, 127, 127, .12); border: 1px solid rgba(127, 127, 127, .3); border-radius: 8px; }
+  .faq-filter input:focus { outline: 2px solid rgba(255, 122, 26, .55); outline-offset: 1px; }
+  .faq-filter span { font-size: 12px; opacity: .7; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -98,7 +105,7 @@ li{margin:4px 0}
 <li><b>正在处理的那条记录会高亮</b>（主题色底色 + 左侧竖条），列表还会<b>自动滚动</b>让高亮行始终可见；批量结束后高亮自动清除。</li>
 </ul>
 <h3>导出日志</h3>
-<p>勾选记录后点「导出日志」，生成 .xlsx，含「标记 | Mark」「片段 | Clip」两张工作表。</p>
+<p>勾选记录后点「导出日志」，生成 .xlsx，含「标记 | Mark」「片段 | Clip」两张工作表。记录没有颜色（或颜色不在调色板内）时，颜色列统一写「无」。</p>
 <h3>导入记录</h3>
 <ul>
 <li>入口：历史记录栏的「导入」按钮，或把 .xlsx 拖进面板。</li>
@@ -113,7 +120,7 @@ li{margin:4px 0}
 <p><span class="mono">011218</span> 这类 <b>6 位数字</b>既能读作「分:秒:帧」也能读作「时:分:秒」，两种都成立时会弹窗让你选一次，<b>默认「分:秒:帧」</b>；控制栏那个弹窗点一下读法就跳转（<span class="mono">↑</span> <span class="mono">↓</span> 选、<span class="mono">Enter</span> 跳、点弹窗外面取消）。导入时整批按同一种读法换算。</p>
 <p>导入进来的时间码一律<b>归一化成 <span class="mono">HH:MM:SS:FF</span></b> 显示；片段还会按入出点<b>自动算出间隔秒数</b>。导出的表格（含下载的空表）所有单元格都是<b>文本格式</b>，<span class="mono">011218</span> 这类数字串不会丢前导零。</p>
 <h3>历史记录</h3>
-<p>跨网站汇总所有打过点的视频，点击某行在新标签页打开；可多选后批量清除。</p>
+<p>跨网站汇总所有打过点的视频；点击某行在新标签页打开，可多选后批量清除。删除会同时清掉扩展索引与页面缓存，<b>重启浏览器后不会复现</b>。</p>
 <p><b>批量导出</b>：勾选多个视频后点「<b>导出选中</b>」—— 只选 1 个直接给一份日志表（同名 <span class="mono">标题_日志记录_导出时间</span>）；选多个则每个视频一份、<b>一起打包成 zip</b>。表格里的链接带定位，可以直接拖回插件再导入。只有条数、已拿不到明细的视频会跳过，导出提示里会写明。</p>
 <h3>设置</h3>
 <ul>
@@ -152,9 +159,10 @@ li{margin:4px 0}
 <h3>录制与编码</h3>
 <ul>
 <li><kbd>R</kbd> 开始 / 停止录制（含声音）；停止后自动下载 MP4，<b>不会动剪贴板</b>。<b>非直播模式下停止录制会自动暂停在最后一帧</b>。</li>
-<li>编码固定 <b>MP4 · H.264 + AAC</b>（无档位可选）：播放器、剪辑软件最通用，声音是 AAC。</li>
+<li>编码固定 <b>MP4 · H.264 + AAC</b>（无档位可选）。本机无法用 H.264 编码时，自动改录 <b>WebM / VP9</b>（后缀 <span class="mono">.webm</span>）并提示。</li>
+<li>声音经 AudioContext 取轨；AudioContext 不可用时回退 video.captureStream()，若回退会使画面冻结则自动放弃，改录无声。</li>
 <li>分辨率与帧率都跟随源视频，<b>一源帧画一次</b>（不做定时重绘），录制最顺、文件帧数≈源帧数。</li>
-<li>录制画面做了<b>色度补偿</b>（编码器会把色度按 limited 缩放却标成 full-range，导致饱和色发灰），黑白灰与原片一致；截图不做这项处理。</li>
+<li>颜色保持编码器原生处理：不做色度压缩、也不改写容器标签。</li>
 </ul>
 <h3>文件名规则</h3>
 <ul>
@@ -163,6 +171,7 @@ li{margin:4px 0}
 </ul>
 
 <h2><span class="num">5</span>常见问题</h2>
+<p class="faq-filter"><input id="faq-q" type="search" placeholder="筛选问题（如：声音 / 历史 / 导入）" autocomplete="off"><span id="faq-empty" hidden>没有匹配的问题</span></p>
 <details>
 <summary>面板提示「当前页面无法访问视频」？</summary>
 <div class="body">面板只在芒果TV、百度网盘或已开启「应用于当前网页」的站点可用。确认当前是视频播放页、插件已启用；其它网站请在设置里开「应用于当前网页」并点弹窗的「允许」。</div>
@@ -173,23 +182,19 @@ li{margin:4px 0}
 </details>
 <details>
 <summary>百度网盘换了视频，记录还是上一个视频的？</summary>
-<div class="body">v4.3 起已按视频区分：百度网盘播放器不换页也能换视频，插件用链接里「<span class="mono">s/</span> 与 <span class="mono">&amp;fpath</span> 之间的媒体地址」生成视频级标识（v4.5 起不再用页面标题 —— 标题改名不会影响），切换时自动重载该视频的记录。旧版本攒下的记录仍在原来那个（共用的）标识下，可在历史里手动删除。</div>
+<div class="body">已按视频区分：百度网盘播放器不换页也能换视频，插件用链接里「<span class="mono">s/</span> 与 <span class="mono">&amp;fpath</span> 之间的媒体地址」生成视频级标识，不用页面标题（标题改名不影响）。切换视频时自动重载该视频的记录。</div>
 </details>
 <details>
 <summary>芒果TV 自带的进度条 / 控制栏不见了？</summary>
-<div class="body">v4.3 已修：原来「禁用弹幕」的样式会把类名里带 danmu 的容器一起隐藏，可能连带整条控制栏。更新到 v4.3 后不会再发生；若仍出现，可在设置里临时关掉「禁用弹幕」确认并反馈版本号。</div>
+<div class="body">「禁用弹幕」只隐藏弹幕层，不隐藏播放器控制栏。若整条控制栏消失，先关掉「禁用弹幕」确认是否为样式冲突。</div>
 </details>
 <details>
 <summary>Mac 上按 <kbd>,</kbd> <kbd>.</kbd> 没反应？</summary>
-<div class="body">中文输入法会把这两个键发成全角「，」「。」。v4.3 起同时按<b>全角字符与物理键位</b>识别，输入法开着也能逐帧；若仍无反应，确认焦点不在输入框里、且当前页面适用本插件。</div>
+<div class="body">中文输入法会把这两个键发成全角「，」「。」，插件同时按<b>全角字符与物理键位</b>识别。若仍无反应，确认焦点不在输入框、且当前页面适用本插件。</div>
 </details>
 <details>
 <summary>录制的视频没有声音？</summary>
-<div class="body">多为浏览器权限问题：视频从没播放过、标签页被静音，或内容受保护不允许采集声音。先播放视频、取消静音，再录一次通常就正常了。<br>另外本机没有 MP4+AAC 编码器时（少见），插件会<b>自动改用无声录制</b>并提示，不会因为音频配置失败而录不出来。<br>如果本机<b>H.264 编码器不可用</b>（少数显卡驱动 / Windows 预览版），按录制可能让浏览器报 STATUS_BREAKPOINT 崩掉页面。插件会先<b>在隔离的扩展页面里、按真实录制尺寸实测一次</b>，不可用就<b>自动改录 WebM / VP9</b>（后缀 <span class="mono">.webm</span>），录制照常可用。<br><b>想录 MP4 的话</b>：Windows「设置 → 系统 → 显示 → 显卡」里把 <span class="mono">msedge.exe</span> 设为<b>高性能（独显）</b>，然后完全退出浏览器重开 —— Chromium 的 H.264 编码用的是「浏览器当前那块显卡」，核显的硬件编码在部分系统上会崩，独显（NVENC）通常正常。改完插件会自动回到 MP4。</div>
-</details>
-<details>
-<summary>录制画面发灰 / 和原片不一样？</summary>
-<div class="body">Chromium 的编码器会把色度按 limited 缩放却把文件标成 full-range，导致饱和色掉饱和度。插件已在录制时做了对应的色度补偿，黑白灰与饱和色都应与原片一致（实测最大偏差 3 级）。截图不受影响。</div>
+<div class="body">按顺序排查：视频是否播放过、标签页是否被静音、内容是否允许采集声音。<br>本机没有 MP4+AAC 编码器时，插件自动改录无声并提示。音频取轨失败时会回退 video.captureStream()，若该回退导致画面冻结，则自动放弃音频、只录画面。</div>
 </details>
 <details>
 <summary>录制帧率偏低？</summary>
@@ -210,6 +215,24 @@ li{margin:4px 0}
 chrome.storage.local.get('mpp_settings').then(({ mpp_settings }) => {
   if (mpp_settings && mpp_settings.theme === 'light') document.documentElement.dataset.theme = 'light';
 }).catch(() => {});
+</script>
+<script>
+(function () {
+  var q = document.getElementById("faq-q");
+  var empty = document.getElementById("faq-empty");
+  if (!q) return;
+  var items = [].slice.call(document.querySelectorAll("details"));
+  q.addEventListener("input", function () {
+    var k = q.value.trim().toLowerCase();
+    var shown = 0;
+    items.forEach(function (d) {
+      var hit = !k || (d.textContent || "").toLowerCase().indexOf(k) >= 0;
+      d.hidden = !hit;
+      if (hit) shown++; else d.open = false;
+    });
+    if (empty) empty.hidden = shown > 0;
+  });
+})();
 </script>
 </body>
 </html>
