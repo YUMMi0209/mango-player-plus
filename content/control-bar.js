@@ -1771,13 +1771,16 @@
     return recH264Ok;
   }
   // WebCodecs 速判：能编就说明有 H.264 编码器，直接用 MP4（省掉 iframe 探测）
-  async function webCodecsHasH264() {
+  async function webCodecsHasH264(w, h, fps) {
     try {
       if (typeof VideoEncoder === 'undefined' || typeof VideoEncoder.isConfigSupported !== 'function') return null;
+      const W = w || 1920, H = h || 1080, F = fps || 25;
+      // 关键：codec 电平必须和尺寸匹配（baseline 3.0 撑不住 1080p，问也只会得到 false）
+      const codec = h264LevelCodec(W, H, F);
       const cfgs = [
-        { codec: 'avc1.42E01E', width: 1280, height: 720, bitrate: 8000000, framerate: 25 },
-        { codec: 'avc1.42001E', width: 1280, height: 720, bitrate: 8000000, framerate: 25 },
-        { codec: 'avc1.42E01E', width: 1920, height: 1080, bitrate: 16000000, framerate: 25 }
+        { codec, width: W, height: H, bitrate: 8000000, framerate: F },
+        { codec: 'avc1.640028', width: Math.min(W, 1920), height: Math.min(H, 1080), bitrate: 8000000, framerate: Math.min(F, 30) },
+        { codec: 'avc1.4D401F', width: Math.min(W, 1280), height: Math.min(H, 720), bitrate: 4000000, framerate: Math.min(F, 30) }
       ];
       for (const c of cfgs) {
         try { const r = await VideoEncoder.isConfigSupported(c); if (r && r.supported) return true; } catch (e) { }
@@ -1834,13 +1837,13 @@
     });
   }
   // 能不能用 MediaRecorder 的 H.264：缓存 → WebCodecs 速判 → 隔离 iframe 实测
-  function probeH264() {
+  function probeH264(w, h, fps) {
     if (recH264Ok !== null) return Promise.resolve(recH264Ok);
     if (recEncoderProbe) return recEncoderProbe;
     recEncoderProbe = (async () => {
       const cached = recH264Cached();
       if (cached !== null) { recH264Ok = cached; return cached; }
-      const wc = await webCodecsHasH264();
+      const wc = await webCodecsHasH264(w, h, fps);
       if (wc === true) return recH264Remember(true);
       const res = await probeH264InFrame();
       if (res === 'ok') return recH264Remember(true);
@@ -1859,7 +1862,26 @@
   // 录制编码固定为 MP4 / H.264 + AAC：容器与编码最通用（所有播放器 / 剪辑软件都能直接用）。
   // 不提供 WebM 档：WebM 只能装 Opus 音频，部分播放器与剪辑软件打不开，且 AAC 是 MP4 唯一被
   // 广泛支持的音频编码 —— 这就是「有的播放器能放、有的不行」的主因之一。
-  function pickRecMime() {
+  // 按分辨率 / 帧率选**合法的 H.264 电平**：codec 串里的 level 必须撑得住当前尺寸，
+  // 否则 Chromium 会接受 mimeType（isTypeSupported=true）却在起录时初始化编码器失败，
+  // 直接把渲染进程 CHECK 崩溃（STATUS_BREAKPOINT）。这里按 H.264 电平表挑最贴近的一档。
+  //   baseline 3.0 (1E) → 720x480@30 / main 3.1 (1F) → 1280x720@30 / high 4.0 (28) → 1920x1080@30
+  //   high 4.2 (2A) → 1080p60 / high 5.1 (33) → 4K30 / high 5.2 (34) → 4K60
+  function h264LevelCodec(w, h, fps) {
+    const f = Math.max(1, Math.min(120, fps || 25));
+    const px = Math.max(1, w) * Math.max(1, h);
+    // 粗略按像素数 + 帧率选档（足够覆盖常见尺寸，留一档余量更安全）
+    const macropx = Math.ceil(w / 16) * Math.ceil(h / 16);
+    const perSec = macropx * f;
+    if (px <= 720 * 480 && perSec <= 108000) return 'avc1.42E01E';   // level 3.0
+    if (px <= 1280 * 720 && perSec <= 360000) return 'avc1.4D401F';  // level 3.1（main）
+    if (px <= 1920 * 1080 && f <= 30) return 'avc1.640028';          // level 4.0（high）
+    if (px <= 1920 * 1080 && f <= 60) return 'avc1.64002A';          // level 4.2
+    if (px <= 3840 * 2160 && f <= 30) return 'avc1.640033';          // level 5.1
+    return 'avc1.640034';                                            // level 5.2
+  }
+
+  function pickRecMime(w, h, fps) {
     const WEBM = [
       'video/webm;codecs=vp9,opus',
       'video/webm;codecs=vp8,opus',
@@ -1870,10 +1892,12 @@
     if (recH264Ok === false || recSafeMode) {
       for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
     }
+    const codec = h264LevelCodec(w || 1920, h || 1080, fps || 25);
     const candidates = [
-      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',   // H.264 基线 + AAC（最通用）
-      'video/mp4;codecs=avc1,mp4a.40.2',
-      'video/mp4;codecs=avc1.42E01E',             // 本机没有 AAC 编码器时的兜底（无音频）
+      'video/mp4;codecs=' + codec + ',mp4a.40.2',   // 合法电平的 H.264 + AAC（最通用）
+      'video/mp4;codecs=' + codec,                  // 本机没有 AAC 编码器时的兜底（无音频）
+      'video/mp4;codecs=avc1.4D4028,mp4a.40.2',     // main 4.0
+      'video/mp4;codecs=avc1.640028,mp4a.40.2',     // high 4.0
       'video/mp4'
     ];
     for (const t of candidates) if (MediaRecorder.isTypeSupported(t)) return t;
@@ -1885,7 +1909,7 @@
     if (recordingInternal) { stopRecording(); return; }
     if (!video || !video.videoWidth) { mgpToast('无画面'); return; }
     // 起录前先确认 H.264 能不能编（毫秒级；不能编就改用 WebM，避免编码器崩溃）
-    try { await probeH264(); } catch (e) { }
+    try { await probeH264(video.videoWidth, video.videoHeight, FPS > 0 ? FPS : 25); } catch (e) { }
     // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
     // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
     const recStartT = nowT();
@@ -1970,7 +1994,7 @@
     // （此前用 captureStream(定帧率) + MediaStreamTrackProcessor/Generator 重打时间戳做 CFR：
     //   多了一层读取与重写，网格与源节奏一有抖动就插重复帧或丢帧，反而发顿）
     const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
-    const mt = recSafeMode ? 'video/mp4' : pickRecMime();
+    const mt = recSafeMode ? 'video/mp4' : pickRecMime(recCanvas.width, recCanvas.height, FPS > 0 ? FPS : 25);
     // mimeType 是否真的能装音频（本机没有 AAC 编码器时会退回纯视频候选）。
     // ⚠️ 关键：不能在「mimeType 没有音频编码器」时把音频轨塞进 MediaRecorder ——
     // Chromium 的 MP4 muxer 会 CHECK 失败，整个渲染进程崩溃（页面报 STATUS_BREAKPOINT）
