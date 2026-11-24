@@ -3,14 +3,16 @@
 为芒果TV设计的视频辅助插件：快捷键打点、变速预览、截图录制，日志面板一键导出片段表。
 
 <p align="center">
-  <img src="media/panel.png" alt="日志面板" width="270">
-  <img src="media/history.png" alt="历史记录" width="270">
-  <img src="media/settings.png" alt="设置菜单" width="270">
+  <img src="media/hero.png" alt="芒着拉片 | MG Player+">
 </p>
 
-> 左：日志面板 · 中：历史记录（排序 / 批量导出在列表下方）· 右：设置菜单（高级录制编码/HiP）
->
-> 更多截图见 Edge 加载项商店：[芒着拉片 | MG Player+](https://microsoftedge.microsoft.com/addons/detail/%E8%8A%92%E7%9D%80%E6%8B%89%E7%89%87-mg-player/alikcmgpkiphhhnddpelidmilahokmbm)
+| | |
+| --- | --- |
+| <img src="media/shot-1.png" alt="快捷键打点"><br><sub>边看边记，一键成表</sub> | <img src="media/shot-2.png" alt="备注与颜色"><br><sub>备注、颜色随手加</sub> |
+| <img src="media/shot-3.png" alt="截图标注"><br><sub>截图标注，把问题圈出来</sub> | <img src="media/shot-4.png" alt="录制"><br><sub>录一段发给同事</sub> |
+| <img src="media/shot-5.png" alt="颜色查找表"><br><sub>看 Log 素材套 709 的效果</sub> | <img src="media/shot-6.png" alt="片段表导出"><br><sub>导出片段表，逐条核对</sub> |
+
+> 以上为 Edge 加载项商店的官方截图；商店页面：[芒着拉片 | MG Player+](https://microsoftedge.microsoft.com/addons/detail/%E8%8A%92%E7%9D%80%E6%8B%89%E7%89%87-mg-player/alikcmgpkiphhhnddpelidmilahokmbm)
 
 ---
 
