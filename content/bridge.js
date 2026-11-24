@@ -67,9 +67,9 @@
       } else if (d.__mgp === 'probeUrl') {
         // 页面端要一个「录制编码器安全探测页」的地址（隐藏 iframe 用，跨源 → 独立进程）
         try { window.postMessage({ __mgp: 'probeUrl', url: chrome.runtime.getURL('rec-probe.html') }, '*'); } catch (e) { }
-      } else if (d.__mgp === 'sidePanel') {
-        // 页面端「打开侧边栏」按钮：转给后台处理（sidePanel.open 需要用户手势，后台统一兜底）
-        chrome.runtime.sendMessage({ type: 'openSidePanel' }).catch(() => { });
+      } else if (d.__mgp === 'logWindow') {
+        // 页面端「打开日志记录」按钮：转给后台以独立窗口打开日志面板
+        chrome.runtime.sendMessage({ type: 'openLogWindow' }).catch(() => { });
       } else if (d.__mgp === 'settings' && d.patch && typeof d.patch === 'object') {
         // 页面端（标注截图嵌入时间码开关等）经桥保存设置：
         // 仅接受白名单字段并强制布尔化，防页面脚本伪造设置污染扩展存储
@@ -78,6 +78,8 @@
         ALLOWED.forEach(k => {
           if (k in d.patch) patch[k] = d.patch[k] === true;
         });
+        // 录制编码器无输出时页面端自动关闭「高级录制编码/HiP」：只允许关闭，不允许页面打开
+        if (d.patch.recHigh === false) patch.recHigh = false;
         if (!Object.keys(patch).length) return;
         const s = Object.assign({}, mpp_settings || {}, patch);
         chrome.storage.local.set({ mpp_settings: s }).catch(() => { });

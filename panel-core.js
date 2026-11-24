@@ -699,6 +699,7 @@ const MPP = (() => {
         sortHistItems();
         renderHistory();
       });
+      enhanceSelect(els.histSort);
     }
     if (els.histSortDir) {
       els.histSortDir.addEventListener('click', () => {
@@ -709,6 +710,99 @@ const MPP = (() => {
     }
     bindTitleEdit();
     bindBatchKeys();   // 面板内按 S / R 批量截图、录制
+    bindPanelKeys();   // Esc 关菜单、/ 搜索、Ctrl+A 全选
+  }
+
+  // ─── 自定义下拉框：替代原生 <select> 的外观（保留原 select 做数据与 change 事件）───
+  function enhanceSelect(sel) {
+    if (!sel || sel.dataset.enhanced) return;
+    sel.dataset.enhanced = '1';
+    sel.hidden = true;
+    const dd = document.createElement('div');
+    dd.className = 'dd';
+    dd.innerHTML =
+      '<button type="button" class="dd-btn" aria-haspopup="listbox" aria-expanded="false" title="' + esc(sel.title || '') + '">' +
+        '<span class="dd-label"></span>' +
+        '<svg class="dd-chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>' +
+      '</button>' +
+      '<div class="dd-menu" role="listbox" hidden>' +
+        [...sel.options].map(o => '<button type="button" class="dd-opt" role="option" data-v="' + esc(o.value) + '">' + esc(o.textContent) + '</button>').join('') +
+      '</div>';
+    sel.after(dd);
+    const btn = dd.querySelector('.dd-btn'), menu = dd.querySelector('.dd-menu');
+    const label = dd.querySelector('.dd-label');
+    const opts = [...dd.querySelectorAll('.dd-opt')];
+    const sync = () => {
+      const cur = sel.options[sel.selectedIndex];
+      label.textContent = cur ? cur.textContent : '';
+      opts.forEach(o => { const on = o.dataset.v === sel.value; o.classList.toggle('on', on); o.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    };
+    const open = show => {
+      menu.hidden = !show;
+      dd.classList.toggle('open', show);
+      btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+      if (show) (opts.find(o => o.classList.contains('on')) || opts[0]).focus();
+    };
+    dd.ddClose = () => { if (!menu.hidden) { open(false); btn.focus(); return true; } return false; };
+    btn.addEventListener('click', e => { e.stopPropagation(); open(menu.hidden); });
+    menu.addEventListener('click', e => {
+      const o = e.target.closest('.dd-opt');
+      if (!o) return;
+      e.stopPropagation();
+      if (sel.value !== o.dataset.v) {
+        sel.value = o.dataset.v;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      sync();
+      open(false);
+      btn.focus();
+    });
+    menu.addEventListener('keydown', e => {
+      const i = opts.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length].focus();
+      }
+    });
+    btn.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(true); }
+    });
+    document.addEventListener('click', e => { if (!menu.hidden && !dd.contains(e.target)) open(false); });
+    sel.addEventListener('change', sync);
+    sync();
+  }
+  // 关闭面板内的浮层（自定义下拉）：Esc 优先关最上层
+  function closeFloating() {
+    const dd = document.querySelector('.dd.open');
+    if (dd && dd.ddClose) return dd.ddClose();
+    return false;
+  }
+
+  // ─── 面板快捷键：提升键盘操作效率 ───────────
+  // Esc：关闭顶部弹出菜单（设置 / 历史 / 模式）；/ 或 Ctrl+F：打开备注搜索；Ctrl+A：全选 / 取消全选
+  function bindPanelKeys() {
+    const menus = () => [els.settingsMenu, els.historyMenu, els.modeMenu].filter(Boolean);
+    document.addEventListener('keydown', e => {
+      if (isDialogOpen()) return;
+      if (e.key === 'Escape' && closeFloating()) { e.preventDefault(); return; }
+      const open = menus().filter(m => !m.hidden);
+      if (e.key === 'Escape' && open.length) {
+        open.forEach(m => { m.hidden = true; });
+        e.preventDefault();
+        return;
+      }
+      if (isTextEntry(e.target) || open.length) return;
+      if (!pageValid || (els.wrap && els.wrap.hidden)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = String(e.key || '').toLowerCase();
+      if ((!mod && !e.altKey && e.key === '/') || (mod && !e.altKey && k === 'f')) {
+        e.preventDefault();
+        openSearch(true);
+      } else if (mod && !e.altKey && !e.shiftKey && k === 'a') {
+        e.preventDefault();
+        toggleAll();
+      }
+    });
   }
 
   // ─── 数据加载 ───────────────────────────────
@@ -930,9 +1024,9 @@ const MPP = (() => {
 
   function renderIO(list) {
     renderFp.io.clear();
-    if (!logs.inOut.length) { list.innerHTML = '<div class="empty">暂无入点到出点记录</div>'; return; }
+    if (!logs.inOut.length) { list.innerHTML = '<div class="empty io">暂无入点到出点记录</div>'; return; }
     const idxs = filteredIdx('io');
-    if (!idxs.length) { list.innerHTML = '<div class="empty">' + esc(noMatchText('片段')) + '</div>'; return; }
+    if (!idxs.length) { list.innerHTML = '<div class="empty io">' + esc(noMatchText('片段')) + '</div>'; return; }
     list.innerHTML = '';
     idxs.forEach(i => {
       const u = logs.inOut[i];
@@ -944,9 +1038,15 @@ const MPP = (() => {
         '<input type="checkbox" class="chk"' + (sel.io.has(i) ? ' checked' : '') + '>' +
         '<span class="idx">' + seqNo(i) + '</span>' +
         // esc() 转义：时间码字段来自页面 localStorage，防存储型 XSS
-        '<span class="tc in">' + esc(u.inTC) + '</span>' +
-        '<span class="sep">&rarr;</span>' +
-        '<span class="tc out">' + esc(u.outTC) + '</span>' +
+        // 入点 / 出点各自带一个「用当前播放时间码替换」按钮：悬停该时间码时出现在它右侧；
+        // 时间码区放在可裁切的容器里，挤不下时右侧淡出，时长固定在行尾
+        '<span class="io-main">' +
+          '<span class="tcw"><span class="tc in">' + esc(u.inTC) + '</span>' +
+            '<button type="button" class="tc-sync" data-field="in" title="用当前播放的时间码替换入点"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13.5 2.5v3.2h-3.2"/></svg></button></span>' +
+          '<span class="sep">&rarr;</span>' +
+          '<span class="tcw"><span class="tc out">' + esc(u.outTC) + '</span>' +
+            '<button type="button" class="tc-sync" data-field="out" title="用当前播放的时间码替换出点"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13.5 2.5v3.2h-3.2"/></svg></button></span>' +
+        '</span>' +
         '<span class="dur">' + fmtDur(durOf(u)) + 's</span>' +
         noteLineHTML(!!u.note);
       list.appendChild(row);
@@ -1445,6 +1545,27 @@ const MPP = (() => {
     list.addEventListener('click', e => {
       // 「用当前播放的时间码替换」小按钮：把该条标记的时间码改成当前画面时刻
       const syncBtn = e.target.closest('.tc-sync');
+      if (syncBtn && syncBtn.dataset.field) {
+        // 片段：入点 / 出点替换为当前播放时间码（入点必须早于出点）
+        const row = e.target.closest('.row');
+        if (!row || row.dataset.io === undefined) return;
+        const idx = parseInt(row.dataset.io, 10);
+        const u = logs.inOut[idx];
+        if (!u) return;
+        const field = syncBtn.dataset.field === 'out' ? 'out' : 'in';
+        const fp = fpOf('io', u);
+        execInPage(fnNowTime).then(n => {
+          if (!n || typeof n.sec !== 'number' || !isFinite(n.sec)) { panelToast('拿不到当前播放时间'); return; }
+          if (field === 'in' && u.outTime != null && n.sec >= u.outTime) { panelToast('入点需早于出点（' + (u.outTC || '') + '）'); return; }
+          if (field === 'out' && u.inTime != null && n.sec <= u.inTime) { panelToast('出点需晚于入点（' + (u.inTC || '') + '）'); return; }
+          execInPage(fnSetTime, ['io', idx, field, n.sec, fp]).then(ok => {
+            if (!ok) { panelToast('时间码更新失败，请刷新面板后重试'); return; }
+            panelToast(field === 'in' ? '入点已改为当前时间码' : '出点已改为当前时间码');
+            load(true);
+          }).catch(() => panelToast('时间码更新失败'));
+        }).catch(() => panelToast('拿不到当前播放时间'));
+        return;
+      }
       if (syncBtn) {
         const row = e.target.closest('.row');
         if (!row || row.dataset.mk === undefined) return;
@@ -1521,6 +1642,24 @@ const MPP = (() => {
           enterNoteEdit(editEl);
         }
       }
+    });
+    // 片段行：悬停出点时把时间码区滑到最右（让出点右侧的替换按钮完整可见），离开后滑回
+    list.addEventListener('mouseover', e => {
+      const w = e.target.closest('.tcw');
+      const m = w && w.parentElement;
+      if (!m || !m.classList.contains('io-main')) return;
+      requestAnimationFrame(() => {
+        const max = m.scrollWidth - m.clientWidth;
+        const toEnd = w === m.lastElementChild && max > 1;
+        m.classList.toggle('at-end', toEnd);
+        m.scrollTo({ left: toEnd ? max : 0, behavior: 'smooth' });
+      });
+    });
+    list.addEventListener('mouseout', e => {
+      const m = e.target.closest('.io-main');
+      if (!m || (e.relatedTarget && m.contains(e.relatedTarget))) return;
+      m.classList.remove('at-end');
+      m.scrollTo({ left: 0, behavior: 'smooth' });
     });
     // 右键点击时间码：单击复制紧凑时间码（如 00391214）；双击（同一条时间码
     // 400ms 内两次右键）进入时间码编辑，Enter 保存 / Esc 取消
@@ -2803,7 +2942,10 @@ const MPP = (() => {
   function histSortDirSet(dir) {
     try { localStorage.setItem(HIST_SORT_DIR_KEY, dir); } catch (e) { }
     if (els.histSortDir) {
-      els.histSortDir.textContent = dir === 'asc' ? '↑' : '↓';
+      if (!els.histSortDir.querySelector('svg')) {
+        els.histSortDir.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10"/><path d="M4.5 9.5L8 13l3.5-3.5"/></svg>';
+      }
+      els.histSortDir.classList.toggle('asc', dir === 'asc');
       els.histSortDir.title = dir === 'asc' ? '当前升序（点击改降序）' : '当前降序（点击改升序）';
     }
   }

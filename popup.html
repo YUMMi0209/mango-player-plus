@@ -53,7 +53,7 @@
         <label class="switch"><input type="checkbox" id="tog-bar"><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <span class="set-label" title="开启后时间码取系统时间（HHMMSSFF，按 25fps 折算帧号），日志记录 / 录制 / 截图的文件名也用这个时间码；同时停用所有按时间码跳转的功能，并关闭「时间码显示回避」。默认关闭，每次需手动开启；直播页默认开启">直播模式</span>
+        <span class="set-label">直播模式</span>
         <label class="switch"><input type="checkbox" id="tog-rt"><span class="track"></span></label>
       </div>
       <div class="set-row">
@@ -61,7 +61,7 @@
         <label class="switch"><input type="checkbox" id="tog-pip"><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <span class="set-label" title="悬浮画面时时间码自动下移，避开站点顶部遮挡。默认：芒果TV 开启、其他站点关闭；直播模式与百度网盘上固定关闭">时间码显示回避</span>
+        <span class="set-label">时间码显示回避</span>
         <label class="switch"><input type="checkbox" id="tog-avoid"><span class="track"></span></label>
       </div>
       <div class="set-row" id="set-row-all">
@@ -131,7 +131,7 @@
   <div class="search-bar" id="search-bar" hidden>
     <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L14 14"/></svg>
     <span class="search-field">
-      <input id="search-in" type="text" spellcheck="false" placeholder="搜索备注">
+      <input id="search-in" type="text" spellcheck="false" placeholder="搜索备注，Esc 关闭">
       <span class="search-colors" id="search-colors"></span>
     </span>
     <span id="search-hit"></span>
@@ -141,10 +141,10 @@
   </div>
 
   <footer>
-    <button id="btn-search" title="搜索备注">
+    <button id="btn-search" title="搜索备注（/）">
       <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L14 14"/></svg>
     </button>
-    <button id="btn-all" title="全选">
+    <button id="btn-all" title="全选（Ctrl+A）">
       <svg viewBox="0 0 16 16"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.6"/><path d="M5 8l2.2 2.2L11 5.8"/></svg>
     </button>
     <div class="footer-meta">

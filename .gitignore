@@ -3,3 +3,7 @@ Material/
 
 # 会话配置不上传
 .claude/
+
+# 设计稿与商店素材（不进包、不进仓库）
+.figma/
+store/

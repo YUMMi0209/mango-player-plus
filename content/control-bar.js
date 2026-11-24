@@ -304,109 +304,143 @@
 .mgp-side-col.right{right:1%}
 .mgp-side-btn{
   position:relative;   /* 供 hover 气泡定位 */
-  background:rgba(0,0,0,.55);
-  border:1px solid rgba(255,255,255,.1);color:#ccc;cursor:pointer;
-  border-radius:6px;font-size:12px;font-family:inherit;
-  transition:opacity .3s,background .15s,color .15s,border-color .15s;
+  background:rgba(17,17,20,.66);
+  -webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);
+  border:1px solid rgba(255,255,255,.12);color:#e8e8ec;cursor:pointer;
+  box-shadow:0 4px 14px rgba(0,0,0,.3);
+  width:40px;height:40px;border-radius:50%;font-size:12px;font-family:inherit;
+  transition:opacity .25s ease,transform .3s cubic-bezier(.2,.7,.2,1),background .15s,color .15s,border-color .15s;
   display:inline-flex;align-items:center;justify-content:center;
-  flex-shrink:0;padding:8px;opacity:0;pointer-events:none;
+  flex-shrink:0;padding:0;opacity:0;pointer-events:none;
 }
+.mgp-side-col.left .mgp-side-btn{transform:translateX(-6px)}
+.mgp-side-col.right .mgp-side-btn{transform:translateX(6px)}
+.mgp-side-col .mgp-side-btn:nth-child(2){transition-delay:0s,.03s,0s,0s,0s}
+.mgp-side-btn:active{transform:scale(.92)!important}
 /* hover 显隐：靠近按钮区域时显示，其余时间隐藏；录制中常显 */
 #mgp-bar.show-btns ~ .mgp-side-col .mgp-side-btn,
-#mgp-bar.recording ~ .mgp-side-col .mgp-side-btn{opacity:1;pointer-events:auto}
-.mgp-side-btn:hover{background:rgba(255,95,0,.35);color:#fff;border-color:rgba(255,95,0,.5)}
-.mgp-side-btn.active{background:rgba(255,95,0,.45);color:#fff;border-color:#ff5f00}
+#mgp-bar.recording ~ .mgp-side-col .mgp-side-btn{opacity:1;pointer-events:auto;transform:none}
+/* 网页全屏：侧栏按钮常显直接可点（否则要先把指针停在热区里才「亮」，中途经过控制栏就会被打断），
+   闲置时随控制条一起淡出；任意鼠标移动会唤醒 */
+:host(.fs-on) .mgp-side-btn{opacity:1;pointer-events:auto;transform:none}
+:host(.fs-on.fs-idle) .mgp-side-btn{opacity:0;pointer-events:none}
+.mgp-side-btn:hover{background:#ff5f00;color:#fff;border-color:#ff5f00}
+.mgp-side-btn.active{background:#e5484d;color:#fff;border-color:#e5484d;box-shadow:0 0 0 4px rgba(229,72,77,.25);animation:mgpRecRing 1.6s ease-in-out infinite}
+@keyframes mgpRecRing{50%{box-shadow:0 0 0 7px rgba(229,72,77,.12)}}
 /* hover 提示：视觉样式与时间码气泡一致；截图在左向右弹、录制在右向左弹 */
 .mgp-side-btn::after{
   content:attr(data-tip);position:absolute;top:50%;transform:translateY(-50%);
-  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
-  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
-  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
-  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
+  background:rgba(17,17,20,.92);color:#fff;padding:7px 10px;border-radius:999px;
+  font-size:11.5px;font-weight:500;line-height:1;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .18s,margin .18s;
+  border:1px solid rgba(255,255,255,.1);letter-spacing:0;margin:0 -4px;
 }
-.mgp-side-btn:hover::after{opacity:1}
+.mgp-side-btn:hover::after{opacity:1;margin:0}
 .mgp-side-col.left .mgp-side-btn::after{left:calc(100% + 8px)}
 .mgp-side-col.right .mgp-side-btn::after{right:calc(100% + 8px)}
-.mgp-icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.mgp-side-btn .mgp-icon{display:block;margin:0}
+.mgp-icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 #mgp-tc{
   display:flex;align-items:center;gap:5px;
-  background:rgba(0,0,0,.55);
-  border:1px solid rgba(255,255,255,.08);
-  padding:6px 8px;border-radius:6px;cursor:pointer;
+  background:rgba(17,17,20,.6);
+  -webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);
+  border:1px solid rgba(255,255,255,.1);
+  padding:6px 10px 6px 8px;border-radius:10px;cursor:pointer;
   font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
   font-size:18px;color:#fff;letter-spacing:1px;line-height:1;
   flex-shrink:0;pointer-events:auto;white-space:nowrap;
   /* 悬浮画面时右移动画：位移由 JS 计算写入 transform；全屏无操作 5s 淡出 */
-  transition:transform .2s ease,opacity .3s ease;
+  transition:transform .25s cubic-bezier(.2,.7,.2,1),opacity .3s ease,background .15s,border-color .15s;
 }
 #mgp-tc.tc-hidden{opacity:0;pointer-events:none}
-#mgp-tc:hover{background:rgba(255,95,0,.3);color:#fff;border-color:rgba(255,95,0,.4)}
+#mgp-tc:hover{background:rgba(17,17,20,.78);color:#fff;border-color:rgba(255,95,0,.65)}
 #mgp-tc-frames{color:#ff5f00;font-size:14px;opacity:.85}
-/* 网页全屏悬浮进度条：仅全屏时显示，底部居中，可拖动调整播放位置 */
-/* 进度条容器：定位与拉长动画在容器上；input 占满容器，轨道视觉仅 4px。
-   长度左右各缩短 8px（背景槽与进度条等宽，间距通过缩短进度条实现） */
+/* ─── 网页全屏控制条：底部居中的浮动胶囊（播放 / 时间 / 进度 / LUT / 退出）──
+   闲置 2.5 秒自动淡出并隐藏鼠标；移动鼠标、暂停、悬停或拖动时保持显示 */
 #mgp-fs-wrap{
-  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
-  width:calc(min(78vw,780px) - 16px);height:16px;z-index:2147483647;
-  display:none;pointer-events:none;align-items:center;gap:12px;
-  transition:width .25s ease;
+  position:absolute;bottom:22px;left:50%;transform:translateX(-50%);
+  width:min(88vw,940px);height:48px;box-sizing:border-box;z-index:2147483647;
+  display:none;pointer-events:auto;align-items:center;gap:10px;padding:0 8px 0 6px;
+  background:rgba(20,20,24,.8);
+  -webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);
+  border:1px solid rgba(255,255,255,.1);border-radius:999px;
+  box-shadow:0 12px 36px rgba(0,0,0,.4);
+  font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  transition:opacity .3s ease,transform .35s cubic-bezier(.2,.7,.2,1);
 }
-:host(.fs-on) #mgp-fs-wrap{display:flex}
-/* 左右时长：HH:MM:SS，等宽数字，与进度条同一行 */
+:host(.fs-on) #mgp-fs-wrap{display:flex;animation:mgpFsIn .32s cubic-bezier(.2,.7,.2,1)}
+:host(.fs-on.fs-idle) #mgp-fs-wrap{opacity:0;transform:translateX(-50%) translateY(14px);pointer-events:none}
+@keyframes mgpFsIn{from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%)}}
+.mgp-fs-btn{
+  width:36px;height:36px;flex-shrink:0;padding:0;border:none;border-radius:50%;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;color:#f2f2f3;
+  background:rgba(255,255,255,.08);
+  transition:background .15s,color .15s,transform .1s;
+}
+.mgp-fs-btn .mgp-icon{display:block;width:16px;height:16px}
+.mgp-fs-btn:hover{background:rgba(255,255,255,.16)}
+.mgp-fs-btn:active{transform:scale(.92)}
+#mgp-fs-play{width:38px;height:38px;color:#fff;background:#ff5f00}
+#mgp-fs-play:hover{background:#ff7424}
+.mgp-fs-chip{
+  height:28px;padding:0 12px;flex-shrink:0;border:none;border-radius:999px;cursor:pointer;
+  font:700 11px/1 "JetBrains Mono","Cascadia Code","Consolas",monospace;letter-spacing:.4px;color:#d8d8de;
+  background:rgba(255,255,255,.08);
+  transition:color .15s,background .15s,transform .1s;
+}
+.mgp-fs-chip:hover{color:#fff;background:rgba(255,255,255,.16)}
+.mgp-fs-chip:active{transform:scale(.95)}
+.mgp-fs-chip.on{color:#ffb070;background:rgba(255,95,0,.18)}
+.mgp-fs-div{width:1px;height:20px;background:rgba(255,255,255,.12);flex-shrink:0}
+.mgp-fs-btn:focus-visible,.mgp-fs-chip:focus-visible{outline:2px solid #ff5f00;outline-offset:2px}
 #mgp-fs-cur,#mgp-fs-dur{
   position:relative;z-index:1;flex-shrink:0;
-  font-size:12px;line-height:1;color:#e9e9ee;letter-spacing:.5px;
+  font-size:12px;line-height:1;color:#f2f2f3;letter-spacing:.3px;
   font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
-  font-variant-numeric:tabular-nums;text-shadow:0 1px 2px rgba(0,0,0,.6);
-  padding:0 6px;
+  font-variant-numeric:tabular-nums;
 }
-#mgp-fs-bar{position:relative;flex:1;min-width:0;height:16px}
-/* 深色背景槽：让进度条在明亮画面中也清晰可见（置于最底层，轨道显示在槽上方） */
-#mgp-fs-wrap::before{
-  content:'';position:absolute;top:50%;left:0;right:0;height:32px;transform:translateY(-50%);
-  background:rgba(0,0,0,.55);border-radius:16px;border:1px solid rgba(255,255,255,.12);
-  z-index:0;
-}
-/* 自绘轨道：绝对定位垂直居中（不受浏览器 input track 布局差异影响），左右与 input 对齐（各 16px 空隙） */
+#mgp-fs-dur{color:#9a9aa2}
+#mgp-fs-bar{position:relative;flex:1;min-width:0;height:28px;cursor:pointer}
 #mgp-fs-track{
   position:absolute;top:50%;left:8px;right:8px;height:4px;transform:translateY(-50%);
-  border-radius:2px;z-index:0;pointer-events:none;
-  background:linear-gradient(to right, #ff5f00 0%, #ff5f00 var(--fill), rgba(255,255,255,.22) var(--fill));
+  border-radius:999px;z-index:0;pointer-events:none;
+  background:linear-gradient(to right, #ff5f00 var(--fill), rgba(255,255,255,.2) var(--fill));
+  transition:height .18s cubic-bezier(.2,.7,.2,1);
 }
+#mgp-fs-bar:hover #mgp-fs-track,#mgp-fs-bar.dragging #mgp-fs-track{height:7px}
+#mgp-fs-hover{position:absolute;top:50%;left:8px;width:2px;height:14px;margin-left:-1px;transform:translateY(-50%);border-radius:1px;background:rgba(255,255,255,.75);pointer-events:none;opacity:0;transition:opacity .12s;z-index:1}
+#mgp-fs-bar.hovering:not(.dragging) #mgp-fs-hover{opacity:1}
 #mgp-fs-progress{
-  position:relative;z-index:1;display:block;width:calc(100% - 16px);height:16px;pointer-events:auto;
+  position:relative;z-index:2;display:block;width:calc(100% - 16px);height:28px;pointer-events:auto;
   -webkit-appearance:none;appearance:none;cursor:pointer;
   background:transparent;outline:none;margin:0 auto;padding:0;--fill:0%;
 }
-/* 拖动时播放点上方的时间码气泡 */
 #mgp-fs-tip{
-  position:absolute;bottom:calc(100% + 8px);left:0;transform:translateX(-50%);
-  background:rgba(0,0,0,.85);color:#fff;padding:3px 8px;border-radius:4px;
-  font-size:12px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
-  letter-spacing:.5px;border:1px solid rgba(255,255,255,.15);white-space:nowrap;
+  position:absolute;bottom:calc(100% + 10px);left:0;transform:translateX(-50%);
+  background:rgba(17,17,20,.94);color:#fff;padding:5px 9px;border-radius:8px;
+  font-size:12px;font-weight:600;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+  letter-spacing:.3px;border:1px solid rgba(255,255,255,.12);white-space:nowrap;
+  box-shadow:0 6px 18px rgba(0,0,0,.4);
   display:none;pointer-events:none;z-index:2147483647;
 }
-/* input 自带轨道透明化：轨道视觉由 #mgp-fs-track 绘制 */
-#mgp-fs-progress::-webkit-slider-runnable-track{
-  height:4px;border-radius:2px;background:transparent;
-}
+#mgp-fs-tip::after{content:"";position:absolute;left:50%;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:rgba(17,17,20,.94)}
+#mgp-fs-progress::-webkit-slider-runnable-track{height:28px;background:transparent}
 #mgp-fs-progress::-webkit-slider-thumb{
   -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
-  background:#ff5f00;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);
-  margin-top:-5px;
+  background:#fff;
+  border:none;box-shadow:0 0 0 3px #ff5f00,0 1px 4px rgba(0,0,0,.4);
+  margin-top:7px;transform:scale(0);transition:transform .18s cubic-bezier(.2,.7,.2,1);
 }
-#mgp-fs-progress::-moz-range-track{
-  height:4px;border-radius:2px;background:transparent;
-}
-#mgp-fs-progress::-moz-range-progress{
-  height:4px;border-radius:2px;background:transparent;
-}
+#mgp-fs-bar:hover #mgp-fs-progress::-webkit-slider-thumb,#mgp-fs-bar.dragging #mgp-fs-progress::-webkit-slider-thumb{transform:scale(1)}
+#mgp-fs-progress::-moz-range-track{height:4px;background:transparent}
+#mgp-fs-progress::-moz-range-progress{height:4px;background:transparent}
 #mgp-fs-progress::-moz-range-thumb{
-  width:14px;height:14px;border-radius:50%;background:#ff5f00;border:2px solid #fff;cursor:pointer;
+  width:14px;height:14px;border-radius:50%;background:#fff;border:none;box-shadow:0 0 0 3px #ff5f00;cursor:pointer;
 }
 #mgp-tc-badge{
-  font-size:11px;font-weight:700;padding:2px 6px;border-radius:2px;
-  letter-spacing:.5px;
+  font-size:10.5px;font-weight:700;padding:3px 7px;border-radius:5px;
+  letter-spacing:.6px;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  transition:background .2s,color .2s;
 }
 .b-pl{background:#ff5f00;color:#fff}
 /* 直播模式：播放中显示 LIVE（与 PLAY 同色，仅文案不同） */
@@ -416,14 +450,13 @@
 .b-in{background:#3498db;color:#fff}
 .b-ot{background:#2ecc71;color:#fff}
 .b-mk{background:#f39c12;color:#000}
-#mgp-rec-dot{display:none;width:5px;height:5px;background:#e74c3c;border-radius:50%;animation:pulse 1s infinite;position:absolute;top:3px;right:3px}
 	/* Timecode custom tooltip */
 	#mgp-tc{position:relative}
 	#mgp-tc::after{
 	  content:'复制当前时间码';position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
-	  background:rgba(0,0,0,.88);color:#fff;padding:8px;border-radius:4px;
-	  font-size:11px;line-height:1;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
-	  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s;
+	  background:rgba(17,17,20,.92);color:#fff;padding:7px 10px;border-radius:999px;
+	  font-size:11.5px;font-weight:500;line-height:1;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+	  white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .18s;
 	  border:1px solid rgba(255,255,255,.12);letter-spacing:0;
 	}
 	#mgp-tc:hover::after{opacity:1}
@@ -432,45 +465,56 @@
 	#mgp-seek{
 	  position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
 	  z-index:2147483647;display:flex;flex-direction:column;align-items:stretch;gap:6px;
-	  background:rgba(20,20,26,.96);
-	  border:1px solid rgba(255,255,255,.15);border-radius:6px;
-	  padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+	  background:rgba(22,22,26,.96);
+	  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+	  border:1px solid rgba(255,255,255,.12);border-radius:14px;
+	  padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.5);
+	  animation:mgpPop .16s cubic-bezier(.2,.7,.2,1);
 	  pointer-events:auto;white-space:nowrap;
 	}
+	#mgp-seek{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;font-size:12px;letter-spacing:0;line-height:1;cursor:default}
 	#mgp-seek .mgp-seek-row{display:flex;align-items:center;gap:6px}
 	#mgp-seek-in{
-	  width:168px;height:24px;padding:0 8px;
-	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:4px;
-	  color:#fff;font-size:11px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
+	  width:176px;height:30px;padding:0 12px;
+	  background:#0e0e11;border:1.5px solid rgba(255,255,255,.16);border-radius:999px;
+	  color:#fff;font-size:13px;font-weight:500;letter-spacing:.5px;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace;
 	  outline:none;
 	}
-	#mgp-seek-in:focus{border-color:#ff5f00}
-	#mgp-seek-in::placeholder{color:#777;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+	#mgp-seek-in:focus{border-color:#ff5f00;box-shadow:0 0 0 3px rgba(255,95,0,.2)}
+	#mgp-seek-in::placeholder{color:#76767e;font-size:12px;font-weight:400;letter-spacing:0;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif}
 	#mgp-seek-go{
-	  height:24px;padding:0 10px;
-	  background:#ff5f00;border:none;border-radius:4px;color:#fff;
-	  font-size:12px;font-family:inherit;cursor:pointer;
+	  height:30px;padding:0 14px;
+	  background:#ff5f00;border:none;border-radius:999px;color:#fff;
+	  font-size:12.5px;font-weight:700;letter-spacing:1px;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;
+	  transition:background .15s,transform .1s;
 	}
-	#mgp-seek-go:hover{background:#ff6a1a}
+	#mgp-seek-go:active{transform:scale(.95)}
+	#mgp-seek-go:hover{background:#ff7424}
 	/* 6 位数字两种读法：居中弹窗，只有两个选项（默认分:秒:帧，点一下即跳转） */
-	#mgp-tc-modal{position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:auto}
+	#mgp-tc-modal{letter-spacing:0;position:absolute;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:auto}
 	#mgp-tc-modal .mgp-tc-card{
 	  min-width:200px;max-width:min(320px,90%);box-sizing:border-box;
-	  background:rgba(20,20,26,.98);border:1px solid rgba(255,255,255,.15);border-radius:8px;
-	  padding:10px;box-shadow:0 12px 32px rgba(0,0,0,.6);
+	  background:rgba(22,22,26,.98);border:1px solid rgba(255,255,255,.12);border-radius:16px;
+	  padding:12px;box-shadow:0 12px 32px rgba(0,0,0,.6);
+	  animation:mgpPop .2s cubic-bezier(.2,.7,.2,1);
 	  font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#fff;
 	}
 	#mgp-tc-modal .mgp-tc-opts{display:flex;flex-direction:column;gap:6px}
 	#mgp-tc-modal .mgp-tc-opt{
 	  display:flex;align-items:center;justify-content:space-between;gap:12px;
-	  padding:7px 9px;cursor:pointer;
-	  background:#14141a;border:1px solid rgba(255,255,255,.2);border-radius:5px;
+	  padding:9px 12px;cursor:pointer;
+	  background:#0e0e11;border:1.5px solid rgba(255,255,255,.14);border-radius:10px;
+	  transition:border-color .15s,background .15s;
 	}
 	#mgp-tc-modal .mgp-tc-opt:hover{border-color:#ff5f00}
 	#mgp-tc-modal .mgp-tc-opt.on{border-color:#ff5f00;background:rgba(255,95,0,.14)}
 	#mgp-tc-modal .mgp-tc-opt em{font-style:normal;font-size:11px;color:#cfcfd6}
 	#mgp-tc-modal .mgp-tc-opt b{font-weight:600;font-size:11px;color:#ff9d5c;font-family:"JetBrains Mono","Cascadia Code","Consolas",monospace}
 @keyframes pulse{50%{opacity:.25;transform:scale(.85)}}
+@keyframes mgpPop{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+#mgp-seek{animation-name:mgpPopX}
+@keyframes mgpPopX{from{opacity:0;transform:translateX(-50%) translateY(-4px)}to{opacity:1;transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 `;
 
   // 屏蔽弹幕：只隐藏「弹幕层」本身。
@@ -498,17 +542,26 @@
   </span>
 </div>
 <div id="mgp-fs-wrap">
+  <button id="mgp-fs-play" class="mgp-fs-btn" type="button" title="播放 / 暂停">
+    <svg class="mgp-icon" viewBox="0 0 16 16"><path d="M5 3.2v9.6L12.6 8z" fill="currentColor" stroke="none"/></svg>
+  </button>
   <span id="mgp-fs-cur">00:00:00</span>
   <div id="mgp-fs-bar">
     <div id="mgp-fs-track"></div>
+    <div id="mgp-fs-hover"></div>
     <input id="mgp-fs-progress" type="range" min="0" max="0" value="0" step="0.01">
     <span id="mgp-fs-tip"></span>
   </div>
   <span id="mgp-fs-dur">00:00:00</span>
+  <span class="mgp-fs-div"></span>
+  <button id="mgp-fs-lut" class="mgp-fs-chip" type="button" title="切换颜色查找表（Q）">REC.709</button>
+  <button id="mgp-fs-exit" class="mgp-fs-btn" type="button" title="退出网页全屏（Esc）">
+    <svg class="mgp-icon" viewBox="0 0 16 16"><path d="M2.5 6H6V2.5"/><path d="M13.5 6H10V2.5"/><path d="M2.5 10H6v3.5"/><path d="M13.5 10H10v3.5"/></svg>
+  </button>
 </div>
 <div class="mgp-side-col left">
   <button id="mgp-btn-ss" class="mgp-side-btn" data-tip="截图 (S)">
-    <svg class="mgp-icon"><rect x="1" y="4" width="14" height="10" rx="2"/><circle cx="8" cy="9" r="2.5"/></svg>
+    <svg class="mgp-icon" viewBox="0 0 16 16"><path d="M1.5 5.5a1.5 1.5 0 0 1 1.5-1.5h1.8l1.2-1.5h4l1.2 1.5H13a1.5 1.5 0 0 1 1.5 1.5v6.5A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/><circle cx="8" cy="8.6" r="2.6"/></svg>
   </button>
   <button id="mgp-btn-fs" class="mgp-side-btn" data-tip="网页全屏 (P)">
     <svg class="mgp-icon" viewBox="0 0 16 16"><path d="M6 2.5H2.5V6"/><path d="M10 2.5h3.5V6"/><path d="M6 13.5H2.5V10"/><path d="M10 13.5h3.5V10"/></svg>
@@ -516,11 +569,10 @@
 </div>
 <div class="mgp-side-col right">
   <button id="mgp-btn-rec" class="mgp-side-btn" data-tip="录制 (R)">
-    <svg class="mgp-icon" id="mgp-rec-icon"><circle cx="8" cy="8" r="6"/></svg>
-    <span id="mgp-rec-dot"></span>
+    <svg class="mgp-icon" id="mgp-rec-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="currentColor" stroke="none"/></svg>
   </button>
-  <button id="mgp-btn-side" class="mgp-side-btn" data-tip="打开侧边栏">
-    <svg class="mgp-icon" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="2"/><path d="M10 3v10"/></svg>
+  <button id="mgp-btn-side" class="mgp-side-btn" data-tip="打开日志记录">
+    <svg class="mgp-icon" viewBox="0 0 16 16"><rect x="2.5" y="1.8" width="11" height="12.4" rx="2"/><path d="M5.3 5.5h5.4M5.3 8h5.4M5.3 10.5h3.2"/></svg>
   </button>
 </div>
 `;
@@ -560,17 +612,18 @@
   let recSafeMode = false;
   // ── 编码档位（默认 Baseline）与「零字节静默失败」处理 ─────────
   // 默认 Baseline：兼容性最广（Windows MF 实时路径、部分 AMD 驱动、无硬编环境都只保证它）。
-  // 面板设置可改 Baseline / Main / High；若起录成功但编码器一帧不出，本段改用 WebM 重录一次，
-  // 并在这台机器上记住「该档位不可用」，之后再录直接走 WebM（换档位会重新给 H.264 机会）。
-  const REC_WEBM_KEY = 'mpp_rec_webm';
+  // 起录成功但编码器一帧不出时按顺序降级重录这一段：
+  //   High（高级录制编码/HiP）→ 自动关闭 HiP（写入设置，记住）并用 Baseline 重录 → 仍无输出再用 WebM 重录。
+  // WebM 只用于当前这一段，不做记忆：下次录制仍先用 H.264。
   const REC_SILENT_MS = 1500;        // 看门狗第一段：1.5s 无数据 → 先 requestData 逼一次 flush
   const REC_SILENT_GRACE = 1200;     // 再等 1.2s 仍无数据 → 判静默失败
   let recWatchdog = null;
   let recSilentDiscard = false;      // 本段作废：不下载、不占文件名、不通知批量失败
-  let recWebmForced = false;         // 本机该档位已失败 → 直接 WebM
+  let recWebmForced = false;         // 仅本段：Baseline 也无输出 → 这一段用 WebM 重录（不持久化）
+  let recRetrying = false;           // 正在为静默失败重录（toggleRecording 据此保留重录状态）
+  let recRetryStage = 0;             // 本段已做过的降级：0 无 / 1 已改 Baseline / 2 已改 WebM
   let recChosenMime = '';            // 本段实际 mime（诊断用）
   let recTakeStartT = null;          // 本段起点（WebM 重录时回到这里）
-  let recWebmRetried = false;        // 本次录制是否已为静默失败重录过（只一次）
   function recSafeRead() {
     try { return localStorage.getItem(REC_SAFE_KEY) === '1'; } catch (e) { return false; }
   }
@@ -1188,7 +1241,7 @@
     const fsBtn = qs('#mgp-btn-fs');
     if (fsBtn) fsBtn.addEventListener('click', () => toggleWebFsKey());
     const sideBtn = qs('#mgp-btn-side');
-    if (sideBtn) sideBtn.addEventListener('click', () => requestSidePanel());
+    if (sideBtn) sideBtn.addEventListener('click', () => requestLogWindow());
     // 网页全屏进度条：普通进度条 —— 按下定位、拖动跟随、松开回落到实际播放位置。
     // （已取消原来「按住不动 1 秒拉长进度条、进入 ±30s 精细调整」的功能）
     // 鼠标拖动为手动实现（Chromium 自定义 appearance 的 range 鼠标原生拖动失效，触屏正常）
@@ -1280,8 +1333,10 @@
       window.addEventListener('mouseup', endDrag);
       window.addEventListener('blur', endDrag);
     }
+    bindFsControls();
     // 侧边按钮 hover 显隐：靠近左右两侧按钮区域时显示，离开后隐藏
     videoContainer.addEventListener('mousemove', onBarHover);
+    bindSideCols();
     videoContainer.addEventListener('mouseleave', onBarMouseLeave);
   }
 
@@ -1340,28 +1395,166 @@
     if (webFsActive) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
     return videoContainer.getBoundingClientRect();
   }
+  // ─── 网页全屏控制条：播放 / LUT / 退出按钮、悬停预览、滚轮快进、闲置自动隐藏 ──
+  function bindFsControls() {
+    const play = qs('#mgp-fs-play'), lut = qs('#mgp-fs-lut'), exit = qs('#mgp-fs-exit');
+    const bar = qs('#mgp-fs-bar'), wrap = qs('#mgp-fs-wrap');
+    const tip = qs('#mgp-fs-tip'), hover = qs('#mgp-fs-hover'), fp = qs('#mgp-fs-progress');
+    [play, lut, exit].forEach(b => { if (b) b.addEventListener('mousedown', e => e.preventDefault()); });
+    if (play) play.addEventListener('click', () => {
+      if (!video) return;
+      if (video.paused) video.play().catch(() => { }); else video.pause();
+      fsWake();
+    });
+    if (lut) lut.addEventListener('click', () => { toggleLut(); fsWake(); });
+    if (exit) exit.addEventListener('click', () => exitWebFs());
+    if (bar && fp) {
+      const timeAt = clientX => {
+        const rect = (qs('#mgp-fs-track') || fp).getBoundingClientRect();
+        if (rect.width <= 0) return null;
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const mn = parseFloat(fp.min), mx = parseFloat(fp.max);
+        if (!(mx > mn)) return null;
+        return { ratio: ratio, t: mn + ratio * (mx - mn) };
+      };
+      bar.addEventListener('pointermove', e => {
+        bar.classList.add('hovering');
+        bar.classList.toggle('dragging', !!fsDragState);
+        if (fsDragState || !tip) return;
+        const h = timeAt(e.clientX);
+        if (!h) return;
+        tip.style.left = (h.ratio * 100) + '%';
+        tip.textContent = fmtTC(h.t, false);
+        tip.style.display = 'block';
+        if (hover) hover.style.left = 'calc(8px + (100% - 16px) * ' + h.ratio + ')';
+      });
+      bar.addEventListener('pointerleave', () => {
+        bar.classList.remove('hovering');
+        if (!fsDragState && tip) tip.style.display = 'none';
+      });
+      bar.addEventListener('pointerdown', () => bar.classList.add('dragging'));
+      window.addEventListener('pointerup', () => { if (bar) bar.classList.remove('dragging'); });
+    }
+    // 滚轮：在控制条上滚动 = 后退 / 前进 5 秒
+    if (wrap) wrap.addEventListener('wheel', e => {
+      if (!video || !webFsActive) return;
+      e.preventDefault();
+      const d = (e.deltaY || e.deltaX) > 0 ? 5 : -5;
+      const r = seekableRange();
+      let t = video.currentTime + d;
+      if (r) t = Math.max(r.start, Math.min(r.end, t));
+      video.currentTime = t;
+      fsWake();
+    }, { passive: false });
+    if (wrap) {
+      wrap.addEventListener('pointerenter', () => { fsHover = true; fsWake(); });
+      wrap.addEventListener('pointerleave', () => { fsHover = false; fsWake(); });
+    }
+  }
+  // 闲置隐藏：2.5 秒无鼠标移动时淡出控制条并隐藏鼠标（暂停 / 悬停 / 拖动时保持显示）
+  let fsIdleT = null, fsHover = false, fsPlayState = null, fsLutLabel = null;
+  function fsSetIdle(idle) {
+    if (wrapper) wrapper.classList.toggle('fs-idle', idle);
+    const v = webFsSaved && webFsSaved.v;
+    if (v) { if (idle) v.style.setProperty('cursor', 'none', 'important'); else v.style.removeProperty('cursor'); }
+  }
+  function fsWake() {
+    if (!webFsActive) return;
+    fsSetIdle(false);
+    clearTimeout(fsIdleT);
+    fsIdleT = setTimeout(() => {
+      if (!webFsActive) return;
+      if (fsHover || fsDragState || (video && video.paused)) { fsWake(); return; }
+      fsSetIdle(true);
+    }, 2500);
+  }
+  function onFsMouseMove() { fsWake(); }
+  // 控制条状态同步（随时间码循环调用，只在变化时改 DOM）
+  function syncFsControls() {
+    const playing = !!(video && !video.paused);
+    if (playing !== fsPlayState) {
+      fsPlayState = playing;
+      const b = qs('#mgp-fs-play');
+      if (b) {
+        b.innerHTML = playing
+          ? '<svg class="mgp-icon" viewBox="0 0 16 16"><rect x="4" y="3.2" width="2.8" height="9.6" rx="1" fill="currentColor" stroke="none"/><rect x="9.2" y="3.2" width="2.8" height="9.6" rx="1" fill="currentColor" stroke="none"/></svg>'
+          : '<svg class="mgp-icon" viewBox="0 0 16 16"><path d="M5 3.2v9.6L12.6 8z" fill="currentColor" stroke="none"/></svg>';
+        b.title = playing ? '暂停' : '播放';
+      }
+      if (!playing) fsWake();
+    }
+    const lbl = lutModeLabel();
+    if (lbl !== fsLutLabel) {
+      fsLutLabel = lbl;
+      const c = qs('#mgp-fs-lut');
+      if (c) { c.textContent = lbl; c.classList.toggle('on', lutMode !== 'rec709'); }
+    }
+  }
+
+  // 侧栏悬停粘住：鼠标停在按钮列上时不收回按钮（否则按钮会在指针移过去的中途变回
+  // pointer-events:none，点上去毫无反应 —— 网页全屏下尤其明显）
+  let sideHover = false;
+  function revealBarAt(clientX, clientY, r) {
+    const bar = qs('#mgp-bar');
+    if (!bar) return;
+    const x = clientX - r.left, y = clientY - r.top;
+    // 热区：距左/右边缘 80px 内，且位于垂直中间 ±160px 带（比原来略宽，靠近时不至于「刚碰到就消失」）
+    const nearSide = Math.min(x, r.width - x) < 80;
+    const nearMid = Math.abs(y - r.height / 2) < 160;
+    if (nearSide && nearMid) {
+      bar.classList.add('show-btns');
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+      return;
+    }
+    if (sideHover) return;   // 指针在按钮列上：保持显示，交给 pointerleave 收起
+    if (!hoverTimer) {
+      hoverTimer = setTimeout(() => {
+        hoverTimer = null;
+        if (bar && !recordingInternal && !sideHover) bar.classList.remove('show-btns');
+      }, 500);
+    }
+  }
   function onBarHover(e) {
     if (!videoContainer) return;
     const r = rectForUI();
     if (r.width <= 0 || r.height <= 0) return;
-    const x = e.clientX - r.left, y = e.clientY - r.top;
-    const bar = qs('#mgp-bar');
     moveTCDown();
     showTC();
     scheduleFsHide();
-    // 热区：距左/右边缘 70px 内，且位于垂直中间 ±130px 带
-    const nearSide = Math.min(x, r.width - x) < 70;
-    const nearMid = Math.abs(y - r.height / 2) < 130;
-    if (bar && nearSide && nearMid) {
-      bar.classList.add('show-btns');
-      clearTimeout(hoverTimer);
-      hoverTimer = null;
-    } else if (!hoverTimer) {
-      hoverTimer = setTimeout(() => {
+    revealBarAt(e.clientX, e.clientY, r);
+  }
+  // 网页全屏里鼠标可能落在控制栏 / 进度条 / LUT 画布上（都不在 videoContainer 里），
+  // 只靠 videoContainer 的 mousemove 会收不到事件 → 侧栏按钮永远不显示。这里补一层文档级判断。
+  function onFsHoverAnywhere(e) {
+    if (!webFsActive) return;
+    const r = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    revealBarAt(e.clientX, e.clientY, r);
+  }
+  // 侧栏自身：进入时粘住显示，离开时按常规收起
+  function bindSideCols() {
+    ['.mgp-side-col.left', '.mgp-side-col.right'].forEach(sel => {
+      const col = qs(sel);
+      if (!col) return;
+      col.addEventListener('pointerenter', () => {
+        sideHover = true;
+        const bar = qs('#mgp-bar');
+        if (bar) bar.classList.add('show-btns');
+        clearTimeout(hoverTimer);
         hoverTimer = null;
-        if (bar && !recordingInternal) bar.classList.remove('show-btns');
-      }, 500);
-    }
+      });
+      col.addEventListener('pointerleave', () => {
+        sideHover = false;
+        const bar = qs('#mgp-bar');
+        if (bar && !recordingInternal) {
+          clearTimeout(hoverTimer);
+          hoverTimer = setTimeout(() => {
+            hoverTimer = null;
+            if (bar && !recordingInternal && !sideHover) bar.classList.remove('show-btns');
+          }, 300);
+        }
+      });
+    });
   }
 
   function onTC() {
@@ -2014,16 +2207,6 @@
     const v = parseInt(hex, 16);
     return v >= 0x64 ? 'high' : v >= 0x4d ? 'main' : 'baseline';
   }
-  function recWebmRemember(profile) {
-    recWebmForced = true;
-    try { localStorage.setItem(REC_WEBM_KEY, JSON.stringify({ profile: profile, at: Date.now() })); } catch (e) { }
-  }
-  function recWebmCached(profile) {
-    try {
-      const v = JSON.parse(localStorage.getItem(REC_WEBM_KEY) || 'null');
-      return !!(v && v.profile === profile);   // 换档位后重新给 H.264 一次机会
-    } catch (e) { return false; }
-  }
   // H.264 codec 串：只换 profile 位（42 / 4D / 64），constraint 与 level 由尺寸/帧率决定
   function h264CodecFor(w, h, fps, profile) {
     const base = h264LevelCodec(w || 1920, h || 1080, fps || 25);
@@ -2040,8 +2223,8 @@
       'video/webm'
     ];
     const profile = recProfileSetting();
-    // 保守模式 / 本机没有 H.264 编码器 / 该档位已失败过 → 直接 WebM
-    if (recSafeMode || recH264Ok === false || recWebmForced || recWebmCached(profile)) {
+    // 保守模式 / 本机没有 H.264 编码器 / 本段 Baseline 也无输出 → WebM
+    if (recSafeMode || recH264Ok === false || recWebmForced) {
       for (const t of WEBM) if (MediaRecorder.isTypeSupported(t)) return t;
     }
     const codec = h264CodecFor(w, h, fps, profile);
@@ -2080,27 +2263,42 @@
   function disarmSilentWatchdog() {
     if (recWatchdog) { clearTimeout(recWatchdog); recWatchdog = null; }
   }
-  // 起录成功但编码器不出数据：本段作废，记住该档位不可用，然后用 WebM 重录这一段（只重录一次）
+  // 起录成功但编码器不出数据：本段作废，按 High → Baseline → WebM 的顺序降级重录这一段
   function onSilentEncoderFailure() {
     const profile = recProfileSetting();
     const bad = (recMediaRecorder && recMediaRecorder.mimeType) || '';
-    console.info('[MGP-REC] 编码器无输出（静默失败）：' + bad + '（档位 ' + profile + '）');
-    recWebmRemember(profile);
-    const canRetry = !recWebmRetried && !(recMediaRecorder && /webm/i.test(recMediaRecorder.mimeType || ''));
+    const wasWebm = /webm/i.test(bad);
+    console.info('[MGP-REC] 编码器无输出（静默失败）：' + bad + '（档位 ' + profile + '，降级阶段 ' + recRetryStage + '）');
     recSilentDiscard = true;   // 这一段作废：不下载、不占文件名
     try { stopRecording(); } catch (e) { }
-    if (!canRetry) {
+    let msg = '';
+    if (!wasWebm && profile === 'high') {
+      // 第一步：关闭「高级录制编码/HiP」并记住（写入设置），用 Baseline 重录
+      const st = window.__mgpSettings || (window.__mgpSettings = {});
+      st.recHigh = false;
+      try { window.postMessage({ __mgp: 'settings', patch: { recHigh: false } }, '*'); } catch (e) { }
+      recRetryStage = 1;
+      msg = '高级录制编码/HiP 没有输出，已自动关闭，改用 Baseline 重录这一段';
+    } else if (!wasWebm && recRetryStage < 2) {
+      // 第二步：Baseline 也无输出 → 仅这一段改用 WebM（不记忆）
+      recWebmForced = true;
+      recRetryStage = 2;
+      msg = '编码器没有输出，已改用 WebM 重录这一段';
+    } else {
+      recRetryStage = 0;
+      recWebmForced = false;
       try { mgpToast('本机编码器没有输出，录制已停止（可尝试更新显卡驱动）', true); } catch (e) { }
       return;
     }
-    recWebmRetried = true;
-    try { mgpToast('该档位编码器没有输出，已改用 WebM 重录这一段', true); } catch (e) { }
+    try { mgpToast(msg, true); } catch (e) { }
     const startT = (recTakeStartT != null) ? recTakeStartT : (state.recordingStart || 0);
     setTimeout(async () => {
       recSilentDiscard = false;
-      if (!video) return;
+      if (!video) { recRetryStage = 0; recWebmForced = false; return; }
       try { await jumpAligned(startT); } catch (e) { }
+      recRetrying = true;
       try { await toggleRecording(); } catch (e) { }
+      recRetrying = false;
       if (batchRunning && state.outPoint != null) { recStopTarget = state.outPoint; recAutoStop = true; }
     }, 300);
   }
@@ -2113,7 +2311,8 @@
     // 当前画面时刻（与时间码显示同源）：录制起点、入点命中判断均以此为准，
     // 避免用 video.currentTime（媒体时钟领先渲染帧）导致文件名时间码比画面多几帧
     const recStartT = nowT();
-    recWebmRetried = false;
+    // 用户新开始的一段（非静默失败重录）：降级状态全部复位，WebM 不沿用到下一段
+    if (!recRetrying) { recRetryStage = 0; recWebmForced = false; }
     recSilentDiscard = false;
     // 录制始终从当前位置开始，不改变已打好的入点/出点；
     // 仅当“正好从入点开始”且存在有效出点时，播放到出点自动停止
@@ -2139,7 +2338,7 @@
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.add('active');
     if (dot) dot.style.display = 'block';
-    if (icon) icon.innerHTML = '<rect x="5" y="5" width="6" height="6" rx="1.5" fill="currentColor" stroke="none"/>';
+    if (icon) icon.innerHTML = '<rect x="4.5" y="4.5" width="7" height="7" rx="1.6" fill="currentColor" stroke="none"/>';
     // Show buttons during recording
     const bar = qs('#mgp-bar'); if (bar) bar.classList.add('recording');
     // Add red border around video
@@ -2198,7 +2397,7 @@
     const capFps = normRecFps(FPS);   // 仅用于诊断与硬件编码探测（不再用来限制采集帧率）
     const mt = pickRecMime(recCanvas.width, recCanvas.height, FPS > 0 ? FPS : 25);
     // WebM 重录时沿用最初的起点，文件名/时间码不随后退的 2 秒漂移
-    if (!recWebmRetried) recTakeStartT = recStartT;
+    if (!recRetrying) recTakeStartT = recStartT;
     // mimeType 是否真的能装音频（本机没有 AAC 编码器时会退回纯视频候选）。
     // ⚠️ 关键：不能在「mimeType 没有音频编码器」时把音频轨塞进 MediaRecorder ——
     // Chromium 的 MP4 muxer 会 CHECK 失败，整个渲染进程崩溃（页面报 STATUS_BREAKPOINT）
@@ -2256,7 +2455,7 @@
       recCanvas = null; recCtx = null;
       recMediaRecorder = null;
       if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
-      if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
+      if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="5" fill="currentColor" stroke="none"/>';
       if (bar) bar.classList.remove('recording');
       try { mgpToast(msg, true); } catch (e) { }
     };
@@ -2576,7 +2775,7 @@
     } catch (e) { }
     const btn = qs('#mgp-btn-rec'), dot = qs('#mgp-rec-dot'), icon = qs('#mgp-rec-icon');
     if (btn) btn.classList.remove('active'); if (dot) dot.style.display = 'none';
-    if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="6"/>';
+    if (icon) icon.innerHTML = '<circle cx="8" cy="8" r="5" fill="currentColor" stroke="none"/>';
     mgpHideToast();
     // 编码器无输出而作废的一段：不下载、不占文件名、不通知批量失败（重录由 onSilentEncoderFailure 负责）
     if (recSilentDiscard) {
@@ -2702,7 +2901,7 @@
       // 居中方式用 left/right:0 + margin:auto + width:fit-content：
       // 旧的 left:50% + translateX(-50%) 会让「自动宽度」的可分配空间只剩半屏，
       // 稍长的提示（批量进度等）提前折行、看起来显示不全
-      toastEl.style.cssText = 'position:fixed;bottom:80px;left:0;right:0;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;z-index:2147483647;padding:8px 20px;background:rgba(0,0,0,.85);color:#fff;border:1px solid #ff5f00;border-radius:4px;font-size:13px;line-height:1.5;pointer-events:none;opacity:0;transition:opacity .3s;font-family:"PingFang SC","Microsoft YaHei",sans-serif;';
+      toastEl.style.cssText = 'position:fixed;bottom:80px;left:0;right:0;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;z-index:2147483647;padding:9px 20px;background:rgba(17,17,20,.9);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#fff;border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 28px rgba(0,0,0,.4);border-radius:999px;font-size:13px;font-weight:500;line-height:1.5;pointer-events:none;opacity:0;transition:opacity .25s;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;';
       document.body.appendChild(toastEl);
     } else if (toastEl.parentElement) {
       // 重新挂到 body 末尾：标注窗口等后插入的 fixed 元素 z-index 与 toast 相同（2147483647）
@@ -2742,6 +2941,9 @@
     webFsSaved = {
       v: v, vStyle: v.getAttribute('style') || '',
       w: wrapper, wStyle: wrapper ? wrapper.getAttribute('style') : '',
+      // 控制栏原位置：网页全屏期间把它挪到 <body> 末尾。站点视频容器常自带层叠上下文，
+      // 控制栏留在里面时，挂在 <body> 上的颜色查找表画布会把时间码 / 进度条 / 侧边按钮整块盖住
+      wParent: wrapper ? wrapper.parentNode : null, wNext: wrapper ? wrapper.nextSibling : null,
       hidden: []
     };
     // 隐藏除视频与扩展控制栏外的所有页面元素：遍历整棵 DOM 树，
@@ -2773,8 +2975,16 @@
       // 控制栏 wrapper 仍是 2147483647（最上层）
       'background:#000!important;z-index:2147483000!important;margin:0!important;' +
       'max-width:none!important;max-height:none!important;';
-    if (wrapper) { wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;'; wrapper.classList.add('fs-on'); }
+    if (wrapper) {
+      wrapper.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;';
+      wrapper.classList.add('fs-on');
+      try { document.body.appendChild(wrapper); } catch (e) { }
+    }
     webFsActive = true;
+    fsPlayState = null; fsLutLabel = null;
+    document.addEventListener('mousemove', onFsMouseMove, true);
+    document.addEventListener('mousemove', onFsHoverAnywhere, true);
+    fsWake();
     moveTCDown();
     syncFsProgress();
     mgpToast('网页全屏（ESC 退出）', true);
@@ -2792,13 +3002,30 @@
     lutMode = 'rec709';
     if (webFsSaved) {
       if (webFsSaved.v) webFsSaved.v.setAttribute('style', webFsSaved.vStyle);
-      if (webFsSaved.w) { webFsSaved.w.setAttribute('style', webFsSaved.wStyle); webFsSaved.w.classList.remove('fs-on'); }
+      if (webFsSaved.w) {
+        webFsSaved.w.setAttribute('style', webFsSaved.wStyle);
+        webFsSaved.w.classList.remove('fs-on');
+        // 放回原容器（原容器已不在页面上时保持现状，由换集重建逻辑接管）
+        const par = webFsSaved.wParent;
+        if (par && par.isConnected) {
+          try {
+            const nx = webFsSaved.wNext;
+            par.insertBefore(webFsSaved.w, nx && nx.parentNode === par ? nx : null);
+          } catch (e) { }
+        }
+      }
       (webFsSaved.hidden || []).forEach(h => { if (h.t) h.t.style.display = h.orig; });
       // 断开隐藏兜底 observer（防泄漏与退出后误隐藏）
       if (webFsSaved.observer) { try { webFsSaved.observer.disconnect(); } catch (e) { } }
     }
     webFsActive = false;
     webFsSaved = null;
+    sideHover = false;
+    clearTimeout(fsIdleT); fsHover = false;
+    if (wrapper) { const b = qs('#mgp-bar'); if (b && !recordingInternal) b.classList.remove('show-btns'); }
+    document.removeEventListener('mousemove', onFsMouseMove, true);
+    document.removeEventListener('mousemove', onFsHoverAnywhere, true);
+    if (wrapper) wrapper.classList.remove('fs-idle');
     if (fsDragState) { clearTimeout(fsDragState.timer); fsDragState = null; }
     const tc = qs('#mgp-tc');
     if (tc) tc.style.transform = '';
@@ -2834,6 +3061,7 @@
       if (Math.abs(p.value - ct) > 0.001) p.value = ct;
     }
     setFill(((ct - r.start) / (r.end - r.start)) * 100);
+    syncFsControls();
     // 左：当前播放时间；右：总时长（优先 video.duration，拿不到时用可回退范围末端）
     const total = (video && isFinite(video.duration) && video.duration > 0) ? video.duration : r.end;
     setFsTimes(ct, total);
@@ -3084,11 +3312,11 @@
     if (window.MPGLut.apply(d.name, d.text, video)) mgpToast('已应用LUT：' + (window.MPGLut.name(d.name) || d.name), true);
   });
 
-  // 打开侧边栏：MAIN world 拿不到 chrome API，经桥转给后台（后台先试 sidePanel.open，
-  // 失败则退回独立窗口版侧边栏，两者同一套 UI）
-  function requestSidePanel() {
-    try { window.postMessage({ __mgp: 'sidePanel' }, '*'); } catch (e) { }
-    try { mgpToast('正在打开侧边栏…', true); } catch (e) { }
+  // 打开日志记录：浏览器侧边栏无法由插件主动打开，统一以独立窗口打开日志面板。
+  // MAIN world 拿不到 chrome API，经桥转给后台（已有窗口时直接切到前台）
+  function requestLogWindow() {
+    try { window.postMessage({ __mgp: 'logWindow' }, '*'); } catch (e) { }
+    try { mgpToast('正在打开日志记录…', true); } catch (e) { }
   }
 
   // ─── Shift+S 标注截图：截图 → 弹窗标注（主题色矩形 / 白边主题色文本）→ Enter 保存 / Esc 取消 ──
@@ -3658,58 +3886,72 @@
     const style = document.createElement('style');
     // 亮/暗色主题由 CSS 变量驱动：annApplyTheme 按设置「亮色模式」切换 :host(.light)
     style.textContent = `
-:host{all:initial;--ann-bg:rgba(24,24,30,.97);--ann-brd:rgba(255,255,255,.14);--ann-line:rgba(255,255,255,.1);--ann-text:#eee;--ann-muted:#9aa0a6;--ann-ghost:rgba(255,255,255,.25);--ann-ghost-hover:rgba(255,255,255,.08)}
-:host(.light){--ann-bg:rgba(250,250,252,.98);--ann-brd:rgba(0,0,0,.18);--ann-line:rgba(0,0,0,.08);--ann-text:#1a1a20;--ann-muted:#6a6a72;--ann-ghost:rgba(0,0,0,.28);--ann-ghost-hover:rgba(0,0,0,.06)}
-.ann-win{display:flex;flex-direction:column;background:var(--ann-bg);border:1px solid var(--ann-brd);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);max-width:96vw;max-height:96vh;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ann-text);font-size:13px}
-.ann-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ann-line);flex-shrink:0;min-width:0}
-.ann-title{font-weight:700;font-size:14px}
-.ann-tip{color:var(--ann-muted);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 与日志面板同一套视觉：同色板、同样的胶囊按钮 / 分段控件 / 开关 / 弹窗圆角 */
+:host{all:initial;
+  --bg:#111214;--card:#1a1b1e;--line:#2c2d32;--row:#232428;--text:#f2f2f3;--muted:#a6a7ae;--faint:#6f7077;
+  --btn:#28292e;--btn-h:#303136;--bevel:inset 0 1px 0 rgba(255,255,255,.04),0 1px 2px rgba(0,0,0,.25);
+  --well:inset 0 1px 2px rgba(0,0,0,.3);--orange:#ff5f00;--orange-hi:#ff7424;--orange-dk:rgba(255,95,0,.14);
+  --primary-bevel:inset 0 1px 0 rgba(255,255,255,.18),0 1px 3px rgba(255,95,0,.25);
+  --shadow:0 12px 32px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.3)}
+:host(.light){
+  --bg:#f5f5f5;--card:#ffffff;--line:#dfdfdf;--row:#f0f0f0;--text:#111;--muted:#484848;--faint:#767676;
+  --btn:#ffffff;--btn-h:#f4f4f4;--bevel:0 1px 2px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.08);
+  --well:inset 0 1px 2px rgba(0,0,0,.06);--orange:#e65400;--orange-hi:#f25e08;--orange-dk:rgba(255,95,0,.10);
+  --primary-bevel:0 1px 3px rgba(230,84,0,.25);
+  --shadow:0 12px 32px rgba(0,0,0,.14),0 2px 6px rgba(0,0,0,.06)}
+@keyframes annIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.ann-win{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);max-width:96vw;max-height:96vh;overflow:hidden;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--text);font-size:12.5px;-webkit-font-smoothing:antialiased;animation:annIn .22s cubic-bezier(.2,.7,.2,1)}
+.ann-win button{font-family:inherit;-webkit-tap-highlight-color:transparent}
+.ann-win button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.ann-win button:not(:disabled):active{transform:scale(.96)}
+/* 头部：与面板标题同样的圆点 + 粗体标题 */
+.ann-head{position:relative;display:flex;align-items:center;gap:8px;padding:14px 16px 12px;flex-shrink:0;min-width:0}
+.ann-head::after{content:"";position:absolute;left:16px;right:16px;bottom:0;height:1px;background:var(--line)}
+.ann-title{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:15px;white-space:nowrap}
+.ann-title::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--orange);box-shadow:0 0 0 3px var(--orange-dk)}
+.ann-tip{color:var(--faint);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:6px}
 @media (max-width: 760px){ .ann-tip{display:none} }
 .ann-grow{flex:1}
-.ann-btn{background:#ff5f00;border:none;color:#fff;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit}
-.ann-btn:hover{background:#ff6a1a}
-.ann-btn.ghost{background:transparent;border:1px solid var(--ann-ghost);color:var(--ann-text)}
-.ann-btn.ghost:hover{background:var(--ann-ghost-hover)}
-.ann-body{position:relative;padding:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
-#ann-canvas{cursor:crosshair;border-radius:4px;box-shadow:0 0 0 1px var(--ann-brd);max-width:none}
-.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:4px;padding:4px 8px;font-weight:700;outline:none;min-width:150px;max-width:calc(100% - 8px);box-sizing:border-box;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)}
-/* 底部工具条：颜色 / 画笔 / 笔宽 / 撤销 */
-.ann-foot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--ann-line);flex-wrap:wrap;row-gap:6px;flex-shrink:0;min-width:0}
-.ann-colors{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
-.ann-dot{width:18px;height:18px;padding:0;border-radius:50%;cursor:pointer;border:none;flex-shrink:0;
-  background:var(--c,#ff5f00);box-shadow:inset 0 0 0 1px rgba(0,0,0,.28);
-  transition:transform 120ms cubic-bezier(.34,1.32,.64,1),box-shadow 120ms cubic-bezier(.2,0,0,1)}
-.ann-dot:hover{transform:scale(1.15)}
-.ann-dot.on{box-shadow:0 0 0 2px var(--ann-bg),0 0 0 4px var(--c,#ff5f00);transform:scale(1.08)}
-.ann-foot-sep{width:1px;height:18px;background:var(--ann-line);flex-shrink:0;margin:0 2px}
+/* 按钮：与面板底部按钮一致 */
+.ann-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border:0;border-radius:999px;background:var(--btn);box-shadow:var(--bevel);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s,transform .1s}
+.ann-btn:hover{background:var(--btn-h)}
+.ann-btn:not(.ghost){background:var(--orange);color:#fff;font-weight:700;box-shadow:var(--primary-bevel)}
+.ann-btn:not(.ghost):hover{background:var(--orange-hi)}
+.ann-btn kbd,.ann-tool kbd{font:500 10.5px/1 "JetBrains Mono","Cascadia Code","Consolas",monospace;color:var(--faint);background:none;padding:0}
+.ann-btn:not(.ghost) kbd{color:rgba(255,255,255,.75)}
+/* 画布区 */
+.ann-body{position:relative;padding:12px 16px 0;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+#ann-canvas{cursor:crosshair;border-radius:10px;box-shadow:0 0 0 1px var(--line);max-width:none}
+.ann-text{position:absolute;z-index:2;background:#fff;color:#e65400;border:2px solid #ff5f00;border-radius:8px;padding:5px 10px;font-weight:700;outline:none;min-width:150px;max-width:calc(100% - 8px);box-sizing:border-box;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+/* 工具条 */
+.ann-foot{display:flex;align-items:center;gap:8px;padding:12px 16px 16px;flex-wrap:wrap;row-gap:8px;flex-shrink:0;min-width:0}
+.ann-foot-sep{display:none}
 .ann-foot-grow{flex:1;min-width:0}
-.ann-tool{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;border-radius:999px;
-  border:1px solid var(--ann-ghost);background:transparent;color:var(--ann-text);font-size:12px;font-family:inherit;
-  cursor:pointer;flex-shrink:0;transition:background 120ms cubic-bezier(.2,0,0,1),color 120ms,border-color 120ms}
+/* 分段控件：与面板「标记 / 片段」页签一致（凹槽底 + 选中项浮起） */
+.ann-colors,.ann-tools,.ann-sizes{display:inline-flex;align-items:center;gap:2px;height:34px;padding:3px;border-radius:999px;background:var(--bg);box-shadow:var(--well);flex-shrink:0}
+.ann-colors{gap:8px;padding:0 11px}
+.ann-dot{width:14px;height:14px;padding:0;border-radius:50%;cursor:pointer;border:none;flex-shrink:0;background:var(--c,#ff5f00);box-shadow:inset 0 0 0 1px rgba(0,0,0,.2);transition:transform .15s cubic-bezier(.2,.7,.2,1),box-shadow .15s}
+.ann-dot:hover{transform:scale(1.2)}
+.ann-dot.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--c,#ff5f00)}
+.ann-tool,.ann-size{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 11px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;flex-shrink:0;transition:background .18s,color .15s,box-shadow .18s}
+.ann-size{min-width:32px;padding:0 8px}
 .ann-tool svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.ann-tool:hover{background:var(--ann-ghost-hover)}
-.ann-tool.on{background:var(--ann-primary);border-color:var(--ann-primary);color:var(--ann-on-primary)}
-.ann-tool.ghost{color:var(--ann-muted);border-color:transparent}
-.ann-tools{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--ann-ghost-hover);flex-shrink:0}
-.ann-glabel{font-size:10px;color:var(--ann-muted);padding:0 4px 0 6px;white-space:nowrap}
-.ann-tools .ann-tool{border-color:transparent;height:26px;padding:0 10px}
-.ann-tools .ann-tool.on{border-color:var(--ann-primary)}
-/* 头部：保存左侧的复制按钮与保存同高 */
-.ann-head #ann-copy{margin-left:2px}
-.ann-sizes{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;
-  background:var(--ann-ghost-hover);flex-shrink:0}
-.ann-size{height:24px;min-width:30px;padding:0 6px;border:none;border-radius:999px;background:transparent;
-  color:var(--ann-muted);font-size:11px;font-family:inherit;cursor:pointer;transition:background 120ms,color 120ms}
-.ann-size:hover{color:var(--ann-text)}
-.ann-size.on{background:var(--ann-primary);color:var(--ann-on-primary)}
-.ann-switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-right:2px}
-.ann-sw-label{font-size:12px;color:var(--ann-muted);white-space:nowrap}
+.ann-tool:hover,.ann-size:hover{color:var(--text)}
+.ann-tool.on,.ann-size.on{background:var(--btn);color:var(--text);font-weight:700;box-shadow:var(--bevel)}
+.ann-tools .ann-tool.on svg{color:var(--orange)}
+.ann-glabel{font-size:11px;color:var(--faint);padding:0 3px 0 8px;white-space:nowrap}
+/* 撤销：独立按钮 */
+.ann-tool.ghost{height:34px;padding:0 14px;background:var(--btn);color:var(--text);font-weight:600;box-shadow:var(--bevel)}
+.ann-tool.ghost:hover{background:var(--btn-h)}
+/* 开关：与面板设置开关一致 */
+.ann-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;height:34px;padding:0 4px}
+.ann-sw-label{font-size:12px;color:var(--text);white-space:nowrap}
 .ann-switch input{display:none}
-.ann-sw-track{width:28px;height:16px;border-radius:8px;background:rgba(255,255,255,.18);position:relative;transition:background .15s;flex-shrink:0}
-:host(.light) .ann-sw-track{background:rgba(0,0,0,.16)}
-.ann-sw-track::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.4)}
-.ann-switch input:checked + .ann-sw-track{background:#ff5f00}
-.ann-switch input:checked + .ann-sw-track::after{transform:translateX(12px)}
+.ann-sw-track{width:34px;height:20px;border-radius:999px;background:var(--row);border:1px solid var(--line);box-sizing:border-box;position:relative;transition:background .2s,border-color .2s;flex-shrink:0}
+.ann-sw-track::after{content:'';position:absolute;top:50%;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transform:translateY(-50%);box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.2,.7,.2,1)}
+.ann-switch input:checked + .ann-sw-track{background:var(--orange);border-color:var(--orange)}
+.ann-switch input:checked + .ann-sw-track::after{transform:translateX(14px) translateY(-50%)}
 `;
     sr.appendChild(style);
     const win = document.createElement('div');
@@ -3717,11 +3959,11 @@
     win.innerHTML =
       '<div class="ann-head">' +
         '<span class="ann-title">标注截图</span>' +
-        '<span class="ann-tip">拖拽标注 · 点击加字 · 点选可删除（Backspace）</span>' +
+        '<span class="ann-tip">拖拽标注 · 点击加字 · 点选后 Backspace 删除 · B 切换工具</span>' +
         '<span class="ann-grow"></span>' +
-        '<button type="button" class="ann-btn ghost" id="ann-cancel" title="取消（Esc）">取消 (Esc)</button>' +
-        '<button type="button" class="ann-btn ghost" id="ann-copy" title="复制到剪贴板（C）">复制 (C)</button>' +
-        '<button type="button" class="ann-btn" id="ann-save">保存 (Enter)</button>' +
+        '<button type="button" class="ann-btn ghost" id="ann-cancel" title="取消（Esc）">取消<kbd>Esc</kbd></button>' +
+        '<button type="button" class="ann-btn ghost" id="ann-copy" title="复制到剪贴板（C）">复制<kbd>C</kbd></button>' +
+        '<button type="button" class="ann-btn" id="ann-save" title="保存 PNG（Enter）">保存<kbd>Enter</kbd></button>' +
       '</div>' +
       '<div class="ann-body">' +
         '<canvas id="ann-canvas"></canvas>' +
@@ -3765,7 +4007,9 @@
           '<input type="checkbox" id="ann-tc">' +
           '<span class="ann-sw-track"></span>' +
         '</label>' +
-        '<button type="button" class="ann-tool ghost" id="ann-undo" title="撤销（Z）">撤销</button>' +
+        '<button type="button" class="ann-tool ghost" id="ann-undo" title="撤销（Z）">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5L2.5 6.5l3 3"/><path d="M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7"/></svg>' +
+          '撤销<kbd>Z</kbd></button>' +
       '</div>';
     sr.appendChild(win);
     // 亮/暗色主题：初始应用 + 设置「亮色模式」切换时实时生效
@@ -4027,7 +4271,7 @@
     const light = s.theme === 'light';
     if (annHost) {
       annHost.classList.toggle('light', light);
-      annHost.style.background = light ? 'rgba(30,30,40,.35)' : 'rgba(0,0,0,.6)';
+      annHost.style.background = light ? 'rgba(17,17,17,.32)' : 'rgba(10,10,12,.6)';
     }
   }
   window.addEventListener('mgp-settings', () => {
@@ -4670,7 +4914,7 @@
         mime: recChosenMime || '',
         actualProfile: recProfileOf(recChosenMime),
         webmForced: !!recWebmForced,
-        webmCached: recWebmCached(profile),
+        retryStage: recRetryStage,
         safeMode: recSafeMode,
         bytes: recChunkBytes
       };

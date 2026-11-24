@@ -61,6 +61,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg && msg.type === 'openLogWindow') {
+    // 页面「打开日志记录」按钮：以独立窗口打开日志面板，并关联发起按钮的视频标签页；
+    // 已经开着独立窗口时直接切到前台，避免重复开窗
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId != null) chrome.storage.session.set({ mpp_src_tab: tabId }).catch(() => { });
+    const winUrl = chrome.runtime.getURL('sidebar.html?win=1');
+    const create = () => chrome.windows.create({
+      url: 'sidebar.html?win=1', type: 'popup', width: 430, height: 680, focused: true
+    }).catch(() => { });
+    const find = chrome.runtime.getContexts
+      ? chrome.runtime.getContexts({ contextTypes: ['TAB'], documentUrls: [winUrl] }).catch(() => [])
+      : Promise.resolve([]);
+    find.then(ctx => {
+      const w = ctx && ctx[0] && ctx[0].windowId;
+      if (w != null && w >= 0) return chrome.windows.update(w, { focused: true }).catch(create);
+      return create();
+    }).then(() => sendResponse({ ok: true, mode: 'window' }));
+    return true;
+  }
   if (msg && msg.type === 'openSidePanel') {
     // 页面按钮触发：先试浏览器原生侧边栏（需用户手势，失败就退回独立窗口版，UI 相同）
     const tabId = sender && sender.tab && sender.tab.id;
